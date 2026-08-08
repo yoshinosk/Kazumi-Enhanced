@@ -1,0 +1,623 @@
+import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/modules/search/image_search_module.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:kazumi/request/apis/trace_api.dart';
+import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
+import 'package:kazumi/services/media/video_frame_extractor.dart';
+import 'package:kazumi/services/storage/storage.dart';
+import 'package:path/path.dart' as p;
+
+/// 单个文件夹的搜刮结果。
+class FolderScrapeResult {
+  const FolderScrapeResult({
+    required this.folderPath,
+    required this.keyword,
+    required this.status,
+    this.info,
+    this.confidence = 0,
+    this.error,
+  });
+
+  final String folderPath;
+
+  /// 实际用于搜索的关键词。
+  final String keyword;
+
+  final ScrapeStatus status;
+
+  /// 匹配到的番剧信息，未命中时为 null。
+  final MediaScrapeInfo? info;
+
+  /// 0~1 之间的匹配置信度。
+  final double confidence;
+
+  /// 出错时的错误信息。
+  final String? error;
+}
+
+/// 一个文件夹的搜刮状态。
+enum ScrapeStatus {
+  /// 搜刮成功，已匹配。
+  matched,
+
+  /// 搜索完成但没有找到符合的结果。
+  notFound,
+
+  /// 网络或解析出错。
+  error,
+}
+
+/// 单次批量搜刮的进度回调。
+class ScrapeProgress {
+  const ScrapeProgress({
+    required this.done,
+    required this.total,
+    required this.matched,
+    required this.failed,
+    this.currentFolder,
+    this.currentKeyword,
+  });
+
+  final int done;
+  final int total;
+
+  /// 已匹配的文件夹数。
+  final int matched;
+
+  /// 匹配失败（含未找到或出错）的文件夹数。
+  final int failed;
+
+  /// 当前正在搜刮的文件夹名。
+  final String? currentFolder;
+
+  /// 当前正在使用的搜索关键词。
+  final String? currentKeyword;
+}
+
+/// 媒体搜刮器：将文件夹/文件名清洗为番剧关键词，再查询 Bangumi 获取元数据。
+///
+/// 参考弹弹 play 媒体库的做法：
+/// 1. 解析文件名得到「标题 + 季数」信息；
+/// 2. 使用多个候选关键词搜索（清洗后的标题 → 原文件夹名 → 内部文件名）；
+/// 3. 对候选结果进行置信度打分，命中率过低时宁可判定为未匹配，也不强行塞一个错误结果。
+class MediaScraper {
+  MediaScraper();
+
+  /// 取出「basename」，仅在末尾是真正的视频扩展名时去掉扩展名。
+  ///
+  /// 不能用 `p.basenameWithoutExtension`：文件夹名里如果自带点号
+  /// （如 `[Sakurato.sub]...` / `Tomb.Raider.King...`）会被拦腰截断。
+  String _baseName(String raw) {
+    var base = p.basename(raw);
+    final lower = base.toLowerCase();
+    for (final ext in kLocalMediaExtensions) {
+      if (lower.endsWith(ext)) {
+        base = base.substring(0, base.length - ext.length);
+        break;
+      }
+    }
+    return base;
+  }
+
+  /// 清洗文件夹或文件名，提取可能的番剧标题。
+  ///
+  /// 移除常见的发布组标签、分辨率、编码、集数等噪音。
+  /// 会尽可能保留「季数」「年份」信息，供后续匹配使用（见 [parseSeason]）。
+  String cleanName(String raw) {
+    var name = _process(name: _baseName(raw));
+    // 方括号里藏着番剧名的情况（如 `[Sakurato.sub][Lonely...`）：
+    // 兜底取「最长的、清洗后可读」的那个括号内容当作标题。
+    if (name.isEmpty) {
+      name = _longestBracketTitle(raw);
+    }
+    return name;
+  }
+
+  /// 从方括号里挑出一个最可能是番剧标题的内容。
+  String _longestBracketTitle(String raw) {
+    final matches = RegExp(r'\[([^\]]+)\]').allMatches(raw).toList();
+    String best = '';
+    for (final m in matches) {
+      final cleaned = _process(name: m.group(1)!);
+      if (cleaned.length > best.length) {
+        best = cleaned;
+      }
+    }
+    return best;
+  }
+
+  /// 核心清洗流程。
+  String _process({required String name}) {
+
+    // 移除方括号内容 [xxx] —— 通常是发布组/分辨率
+    name = name.replaceAll(RegExp(r'\[[^\]]*\]'), ' ');
+    // 移除圆括号内容 (xxx)
+    name = name.replaceAll(RegExp(r'\([^)]*\)'), ' ');
+    // 移除【xxx】
+    name = name.replaceAll(RegExp(r'【[^】]*】'), ' ');
+    // 移除花括号 {xxx}
+    name = name.replaceAll(RegExp(r'\{[^}]*\}'), ' ');
+
+    // 移除分辨率/编码标签
+    name = name.replaceAll(
+      RegExp(
+        r'\b(1080[pi]|720p|480p|2160p|4k|8k|av1|h\.?26[45]|x\.?26[45]|hevc|aac|flac|mp3|10bit|hi10)\b',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+
+    // 移除集数标记：EP01, 第01话, 第01集, - 01, _01, [01], 01v2, S01E01(-E02)
+    name = name.replaceAll(RegExp(r'\bEP?\s*\d+\b', caseSensitive: false), ' ');
+    name = name.replaceAll(RegExp(r'第\s*\d+\s*[话話集]'), ' ');
+    name = name.replaceAll(RegExp(r'\bS\d+E\d+(?:\s*-\s*E\s*\d+)?\b', caseSensitive: false), ' ');
+    name = name.replaceAll(RegExp(r'[-_]\s*\d{1,3}\s*(v\d+)?\s*$'), '');
+    name = name.replaceAll(RegExp(r'\b\d{1,3}\s*v\d+\b'), ' ');
+
+    // 移除 BD/DVD/WEB/Remux 等来源标记
+    name = name.replaceAll(
+      RegExp(r'(?<![A-Za-z0-9])(bd|dvd|web|remux|rip|cam|ts)(?![A-Za-z0-9])',
+          caseSensitive: false),
+      ' ',
+    );
+
+    // 移除地区/语言/版本标记（JPN、CHS、GB、Pre-release 等）
+    name = name.replaceAll(
+      RegExp(r'(?<![A-Za-z0-9])(ja|jpn|jp|chs|sc|gb|cht|tc|pre[-\s]?release|release|v\d+)(?![A-Za-z0-9])',
+          caseSensitive: false),
+      ' ',
+    );
+
+    // 点号分隔转空格
+    name = name.replaceAll('.', ' ');
+
+    // 合并多余空白
+    name = name.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    // 移除首尾的连字符/下划线/点
+    name = name.replaceAll(RegExp(r'^[-_.\s]+|[-_.\s]+$'), '');
+
+    return name;
+  }
+
+  /// 从文件夹名/文件名解析季数（S02、Season 2、第二季、二期……）。
+  ///
+  /// 返回 null 表示未检测到季数。
+  int? parseSeason(String raw) {
+    final base = _baseName(raw);
+    final lower = base.toLowerCase();
+
+    // S2 / Season 2
+    final en = RegExp(r'(?:^|[^a-z])(?:s|season)\s*(\d{1,2})(?:[^a-z0-9]|$)',
+        caseSensitive: false).firstMatch(lower);
+    if (en != null) {
+      return _clampSeason(en.group(1));
+    }
+
+    // 第二季 / 第二期 / 第二部 / 【2季】
+    final cnMatch =
+        RegExp(r'第\s*([一二三四五六七八九十1-9１-９0-9]+)\s*[季期部]').firstMatch(base);
+    if (cnMatch != null) {
+      return _toArabicSeason(cnMatch.group(1)!);
+    }
+
+    // 2期 / 1st Season 英文季数兜底
+    final suffix = RegExp(r'\b(?:[1-9１-９])(?:期)\b').firstMatch(base);
+    if (suffix != null) {
+      final n = _toArabicSeason(suffix.group(0)!.replaceAll('期', ''));
+      if (n != null && n > 1) return n;
+    }
+    return null;
+  }
+
+  /// 从文件夹/视频名中提取「年」标记，如 (2021)/[2021]。
+  int? parseYear(String raw) {
+    final m = RegExp(r'((?:19|20)\d{2})').firstMatch(raw);
+    if (m == null) return null;
+    final year = int.tryParse(m.group(1)!);
+    if (year == null) return null;
+    final now = DateTime.now().year;
+    return (year >= 1990 && year <= now + 1) ? year : null;
+  }
+
+  int? _clampSeason(dynamic raw) {
+    final season = int.tryParse(raw.toString());
+    if (season == null || season < 1 || season > 99) return null;
+    return season;
+  }
+
+  int? _toArabicSeason(String value) {
+    const map = {
+      '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+      '六': 6, '七': 7, '八': 8, '九': 9, '1': 1, '2': 2,
+      '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+    };
+    final v = value.trim();
+    if (v == '十') return 10;
+    if (v.length >= 2 && v.startsWith('十')) {
+      return 10 + map[v.substring(1)]!;
+    }
+    return map[v];
+  }
+
+  String _normalize(String s) {
+    return s.toLowerCase().replaceAll(
+        RegExp(r'[\s\-_·・.。:：（）()\[\]【】{}「」『』"''~～+×x*]'), '');
+  }
+
+  /// 搜索单个文件夹，返回结果（可能未命中）。
+  ///
+  /// [keyword] 非空时使用指定关键词；否则自动尝试多个候选关键词。
+  /// 全部失败时，若开启了图片识别兜底，会用视频抽帧走 trace.moe 以图搜番。
+  Future<FolderScrapeResult> scrapeFolder({
+    required LocalMediaFolder folder,
+    String? keyword,
+  }) async {
+    try {
+      final candidates = _buildCandidates(
+        folder,
+        keyword: keyword,
+      );
+
+      for (final candidate in candidates) {
+        if (candidate.keyword.isEmpty) continue;
+        final page = await BangumiApi.bangumiSearch(
+          candidate.keyword,
+          limit: 20,
+        );
+        final items = page?.items ?? const <BangumiItem>[];
+        if (items.isEmpty) continue;
+
+        final best = _bestMatch(
+          candidate.keyword,
+          items,
+          season: candidate.season,
+          year: candidate.year,
+        );
+        if (best != null) {
+          return FolderScrapeResult(
+            folderPath: folder.path,
+            keyword: candidate.keyword,
+            status: ScrapeStatus.matched,
+            info: best.info,
+            confidence: best.confidence,
+          );
+        }
+      }
+
+      // 文件名文本匹配全部失败 → 图片识别兜底，尽快中止后续无谓请求
+      final imageResult = await _scrapeByImageTrace(folder);
+      if (imageResult != null) {
+        return imageResult;
+      }
+
+      return FolderScrapeResult(
+        folderPath: folder.path,
+        keyword: keyword ?? cleanName(folder.name),
+        status: ScrapeStatus.notFound,
+      );
+    } catch (e) {
+      KazumiLogger().w('MediaScraper: search failed for "${folder.name}"',
+          error: e);
+      return FolderScrapeResult(
+        folderPath: folder.path,
+        keyword: keyword ?? cleanName(folder.name),
+        status: ScrapeStatus.error,
+        error: '$e',
+      );
+    }
+  }
+
+  /// 图片识别兜底：取文件夹内首个视频抽帧 → trace.moe 识别番剧 → Bangumi 标题匹配。
+  ///
+  /// 成功时返回匹配结果；不可用 / 识别失败 / 相似度过低时返回 null。
+  Future<FolderScrapeResult?> _scrapeByImageTrace(
+    LocalMediaFolder folder,
+  ) async {
+    bool enabled;
+    try {
+      enabled =
+          GStorage.getSetting(SettingsKeys.localMediaTraceFallback);
+    } catch (_) {
+      enabled = false;
+    }
+    if (!enabled) return null;
+
+    // 测试环境无 ffmpeg 时也应快速跳过。
+    if (!VideoFrameExtractor.instance.isAvailable) {
+      KazumiLogger().d(
+          'MediaScraper: trace fallback skipped, ffmpeg unavailable');
+      return null;
+    }
+
+    // 优先用体积最大的视频文件（通常为正片本体而非片头预告/特典）
+    LocalMediaFile? pick;
+    for (final f in folder.files) {
+      if (pick == null || f.size > pick.size) {
+        pick = f;
+      }
+    }
+    if (pick == null) return null;
+
+    final frame = await VideoFrameExtractor.instance.extractFrame(pick.path);
+    if (frame == null) return null;
+
+    try {
+      final search = await TraceApi.searchAnimeByImageFile(
+        frame,
+        anilistInfo: 2,
+      );
+      final results = (search.result ?? const <ResultItem>[])
+        ..sort((a, b) => (b.similarity ?? 0).compareTo(a.similarity ?? 0));
+      if (results.isEmpty) return null;
+      final best = results.first;
+      final similarity = best.similarity ?? 0;
+      final anilist = best.anilist;
+      if (anilist == null || anilist.title == null) return null;
+      // trace.moe 官方建议：>0.87 视为强匹配，除了给一个下限兜底
+      if (similarity < 0.8) return null;
+
+      final title = anilist.title!;
+      final candidateTitles = <String>{
+        if (title.chinese != null && title.chinese!.trim().isNotEmpty)
+          title.chinese!.trim(),
+        if (title.romaji != null && title.romaji!.trim().isNotEmpty)
+          title.romaji!.trim(),
+        if (title.english != null && title.english!.trim().isNotEmpty)
+          title.english!.trim(),
+        if (title.native != null && title.native!.trim().isNotEmpty)
+          title.native!.trim(),
+        ...?anilist.synonyms,
+        ...?anilist.synonymsChinese,
+      };
+      candidateTitles.removeWhere((s) => s.trim().isEmpty);
+
+      final season = parseSeason(folder.name);
+      final year = parseYear(folder.name);
+
+      for (final candidate in candidateTitles) {
+        final page = await BangumiApi.bangumiSearch(candidate, limit: 20);
+        final items = page?.items ?? const <BangumiItem>[];
+        if (items.isEmpty) continue;
+        final bestMatch = _bestMatch(
+          candidate,
+          items,
+          season: season,
+          year: year,
+        );
+        if (bestMatch != null) {
+          return FolderScrapeResult(
+            folderPath: folder.path,
+            keyword: candidate,
+            status: ScrapeStatus.matched,
+            info: bestMatch.info,
+            confidence: bestMatch.confidence,
+          );
+        }
+      }
+
+      // Bangumi 未命中时，退而用 AniList 信息直接展示（置信度=图片相似度）。
+      final displayName = title.chinese ?? title.romaji ?? title.english ?? title.native ?? '';
+      return FolderScrapeResult(
+        folderPath: folder.path,
+        keyword: displayName,
+        status: ScrapeStatus.matched,
+        info: MediaScrapeInfo.fromAniList(anilist),
+        confidence: similarity,
+      );
+    } catch (e) {
+      KazumiLogger().w(
+          'MediaScraper: image trace failed for "${folder.name}"',
+          error: e);
+      return null;
+    } finally {
+      try {
+        if (await frame.exists()) {
+          await frame.delete();
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// 生成多个候选关键词（清洗名 → 原文 → 首个文件名），每个附带季数/年份提示。
+  List<_KeywordCandidate> _buildCandidates(
+    LocalMediaFolder folder, {
+    String? keyword,
+  }) {
+    if (keyword != null && keyword.trim().isNotEmpty) {
+      return [
+        _KeywordCandidate(keyword.trim(), season: parseSeason(keyword), year: null),
+      ];
+    }
+
+    final base = folder.name;
+    final cleaned = cleanName(base);
+    final trimmed = cleaned.isNotEmpty ? cleaned : base.trim();
+
+    final season = parseSeason(base);
+    final year = parseYear(base);
+
+    final candidates = <_KeywordCandidate>[
+      _KeywordCandidate(trimmed, season: season, year: year),
+    ];
+
+    // 清洗后信息太短时，尝试内部视频文件的首个文件名与去发布组前缀的原始名
+    if (trimmed.length <= 4) {
+      LocalMediaFile? firstFile;
+      for (final f in folder.files) {
+        if (f.name.isNotEmpty) {
+          firstFile = f;
+          break;
+        }
+      }
+      if (firstFile != null) {
+        final fileClean = cleanName(firstFile.name);
+        if (fileClean.isNotEmpty && fileClean != trimmed) {
+          candidates.add(_KeywordCandidate(
+            fileClean,
+            season: parseSeason(firstFile.name),
+            year: parseYear(firstFile.name),
+          ));
+        }
+      }
+      final noBrackets =
+          base.replaceAll(RegExp(r'\[[^\]]*\]'), ' ').trim();
+      if (noBrackets.isNotEmpty &&
+          noBrackets != base &&
+          noBrackets != trimmed) {
+        candidates.add(_KeywordCandidate(noBrackets, year: year));
+      }
+    }
+    return candidates;
+  }
+
+  /// 从搜索结果中挑选最匹配的条目，返回置信度，过低返回 null（视为未命中）。
+  _Match? _bestMatch(
+    String keyword,
+    List<BangumiItem> items, {
+    int? season,
+    int? year,
+  }) {
+    if (items.isEmpty) return null;
+    final normalizedKeyword = _normalize(keyword);
+
+    _Match? best;
+    for (final item in items) {
+      final score = _scoreItem(
+        item,
+        normalizedKeyword,
+        season: season,
+        year: year,
+      );
+      if (score > 0 && (best == null || score > best.confidence)) {
+        best = _Match(
+          MediaScrapeInfo.fromBangumiItem(item),
+          score,
+        );
+      }
+    }
+    // 置信度阈值：避免「只搜到一部无关动画也标记为已匹配」。
+    if (best == null || best.confidence < 0.4) return null;
+    return best;
+  }
+
+  /// 对单个条目打分。
+  double _scoreItem(
+    BangumiItem item,
+    String normalizedKeyword, {
+    int? season,
+    int? year,
+  }) {
+    final names = <String>[
+      if (item.nameCn.isNotEmpty) _normalize(item.nameCn),
+      if (item.name.isNotEmpty) _normalize(item.name),
+      ...item.alias.map(_normalize),
+    ];
+
+    double bestNameScore = 0;
+    for (final name in names) {
+      if (name.isEmpty) continue;
+      final score = _nameSimilarity(normalizedKeyword, name);
+      if (score > bestNameScore) bestNameScore = score;
+    }
+    if (bestNameScore <= 0) return 0;
+
+    double bonus = 0;
+    if (season != null && season > 1) {
+      final s = parseSeason(item.nameCn.isNotEmpty ? item.nameCn : item.name);
+      if (s == season) bonus += 0.1;
+    }
+    if (year != null) {
+      final y = item.airDate.length >= 4
+          ? int.tryParse(item.airDate.substring(0, 4))
+          : null;
+      if (y == year) bonus += 0.08;
+    }
+    return bestNameScore + bonus;
+  }
+
+  /// 关键词与条目名称的相似度（0~1）。
+  double _nameSimilarity(String keyword, String name) {
+    if (keyword == name) return 1.0;
+    if (name.contains(keyword) || keyword.contains(name)) {
+      // 长名包含短名：更偏向「更完整」的条目。
+      return keyword.length <= name.length ? 0.9 : 0.75;
+    }
+    // 最长公共子串占比兜底。
+    final lcs = _longestCommonSubstring(keyword, name);
+    if (lcs.isEmpty) return 0;
+    final ratio = lcs.length / name.length;
+    return ratio >= 0.6 ? ratio * 0.8 : 0;
+  }
+
+  String _longestCommonSubstring(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return '';
+    final n = a.length;
+    final m = b.length;
+    final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+    var maxLen = 0;
+    var endIndex = 0;
+    for (var i = 1; i <= n; i++) {
+      for (var j = 1; j <= m; j++) {
+        if (a[i - 1] == b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+          if (dp[i][j] > maxLen) {
+            maxLen = dp[i][j];
+            endIndex = i;
+          }
+        }
+      }
+    }
+    return maxLen == 0 ? '' : a.substring(endIndex - maxLen, endIndex);
+  }
+
+  /// 批量搜刮文件夹列表。
+  ///
+  /// [onProgress] 每处理完一个文件夹回调一次；
+  /// [isCancelled] 返回 true 时立即停止后续搜刮。
+  Future<List<FolderScrapeResult>> scrapeAll(
+    List<LocalMediaFolder> folders, {
+    void Function(ScrapeProgress progress)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final results = <FolderScrapeResult>[];
+    var matched = 0;
+    var failed = 0;
+    for (var i = 0; i < folders.length; i++) {
+      if (isCancelled != null && isCancelled()) break;
+      final folder = folders[i];
+      final result = await scrapeFolder(folder: folder);
+      results.add(result);
+      if (result.status == ScrapeStatus.matched) {
+        matched++;
+      } else {
+        failed++;
+      }
+      onProgress?.call(ScrapeProgress(
+        done: i + 1,
+        total: folders.length,
+        matched: matched,
+        failed: failed,
+        currentFolder: p.basename(folder.path),
+        currentKeyword: result.keyword,
+      ));
+    }
+    return results;
+  }
+}
+
+class _Match {
+  const _Match(this.info, this.confidence);
+
+  final MediaScrapeInfo info;
+  final double confidence;
+}
+
+class _KeywordCandidate {
+  _KeywordCandidate(this.keyword, {this.season, this.year});
+
+  final String keyword;
+  final int? season;
+  final int? year;
+}
