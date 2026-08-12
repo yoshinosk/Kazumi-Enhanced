@@ -100,7 +100,7 @@ class _MagnetPageState extends State<MagnetPage>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _SearchTab(
+          MagnetSearchTab(
             controller: controller,
             searchController: _searchController,
           ),
@@ -112,8 +112,9 @@ class _MagnetPageState extends State<MagnetPage>
   }
 }
 
-class _SearchTab extends StatefulWidget {
-  const _SearchTab({
+class MagnetSearchTab extends StatefulWidget {
+  const MagnetSearchTab({
+    super.key,
     required this.controller,
     required this.searchController,
   });
@@ -122,10 +123,10 @@ class _SearchTab extends StatefulWidget {
   final TextEditingController searchController;
 
   @override
-  State<_SearchTab> createState() => _SearchTabState();
+  State<MagnetSearchTab> createState() => _MagnetSearchTabState();
 }
 
-class _SearchTabState extends State<_SearchTab> {
+class _MagnetSearchTabState extends State<MagnetSearchTab> {
   MagnetController get controller => widget.controller;
   List<AnimesGardenTeam> _teams = const [];
   bool _loadingTeams = false;
@@ -796,47 +797,112 @@ String _subscriptionSummary(MagnetSubscription sub) {
   return parts.join('  ');
 }
 
+enum _DownloadsFilter { all, active, completed }
+
 /// 磁力下载任务列表 Tab，可在磁力搜索页和下载中心复用。
-class MagnetDownloadsTab extends StatelessWidget {
+///
+/// 支持按「全部 / 进行中 / 已完成」筛选：
+/// - 进行中 = 下载中（等待 / 获取元数据 / 校验 / 下载）+ 做种中；
+/// - 已完成 = 下载完成且做种达标（做种率 ≥ 1）。
+class MagnetDownloadsTab extends StatefulWidget {
   const MagnetDownloadsTab({super.key, required this.controller});
 
   final MagnetController controller;
 
   @override
+  State<MagnetDownloadsTab> createState() => _MagnetDownloadsTabState();
+}
+
+class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
+  _DownloadsFilter _filter = _DownloadsFilter.all;
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     return Observer(builder: (_) {
-      if (!controller.aria2Enabled) {
+      if (!controller.engineEnabled) {
         return const Center(
           child: GeneralEmptyState(
             icon: Icons.cloud_off_rounded,
-            title: '未启用 Aria2，请前往 设置 → 磁力搜索 开启',
+            title: '未启用磁力下载引擎，请前往 设置 → 磁力搜索 开启',
           ),
         );
       }
-      if (controller.downloadTasks.isEmpty) {
-        return const Center(
-          child: GeneralEmptyState(
-            icon: Icons.download_done_rounded,
-            title: '暂无下载任务',
+      final tasks = switch (_filter) {
+        _DownloadsFilter.all => controller.downloadTasks,
+        _DownloadsFilter.active => controller.downloadTasks
+            .where((t) => t.isDownloading || t.isSeeding)
+            .toList(),
+        _DownloadsFilter.completed =>
+          controller.downloadTasks.where((t) => t.isCompleted).toList(),
+      };
+      final (icon, emptyTitle) = switch (_filter) {
+        _DownloadsFilter.all => (
+            Icons.download_done_rounded,
+            '暂无下载任务'
           ),
-        );
-      }
-      return RefreshIndicator(
-        onRefresh: () => controller.refreshDownloads(),
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemCount: controller.downloadTasks.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final task = controller.downloadTasks[index];
-            return _DownloadTaskTile(
-              task: task,
-              onPause: () => controller.pauseDownload(task.gid),
-              onResume: () => controller.resumeDownload(task.gid),
-              onRemove: () => controller.removeDownload(task.gid),
-            );
-          },
-        ),
+        _DownloadsFilter.active => (
+            Icons.downloading_rounded,
+            '没有进行中的任务'
+          ),
+        _DownloadsFilter.completed => (
+            Icons.done_all_rounded,
+            '还没有已完成的任务'
+          ),
+      };
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<_DownloadsFilter>(
+                segments: const [
+                  ButtonSegment(
+                    value: _DownloadsFilter.all,
+                    label: Text('全部'),
+                  ),
+                  ButtonSegment(
+                    value: _DownloadsFilter.active,
+                    label: Text('进行中'),
+                  ),
+                  ButtonSegment(
+                    value: _DownloadsFilter.completed,
+                    label: Text('已完成'),
+                  ),
+                ],
+                selected: {_filter},
+                onSelectionChanged: (selection) =>
+                    setState(() => _filter = selection.first),
+                showSelectedIcon: false,
+              ),
+            ),
+          ),
+          Expanded(
+            child: tasks.isEmpty
+                ? Center(
+                    child: GeneralEmptyState(icon: icon, title: emptyTitle),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () => controller.refreshDownloads(),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      itemCount: tasks.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+                        return _DownloadTaskTile(
+                          task: task,
+                          onPause: () => controller.pauseDownload(task.gid),
+                          onResume: () => controller.resumeDownload(task.gid),
+                          onRemove: () => controller.removeDownload(task.gid),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
       );
     });
   }
@@ -878,21 +944,75 @@ class _DownloadTaskTile extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _StatusChip(status: task.status),
-              const SizedBox(width: 8),
-              if (task.totalLength > 0)
-                Text(
-                  '${_formatBytes(task.completedLength)} / ${_formatBytes(task.totalLength)}',
-                  style: theme.textTheme.bodySmall,
+              Expanded(
+                child: Wrap(
+                  spacing: 14,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _StatusChip(status: task.status),
+                    if (task.totalLength > 0)
+                      Text(
+                        '${_formatBytes(task.completedLength)} / ${_formatBytes(task.totalLength)}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (task.downloadSpeed > 0)
+                      _TaskMeta(
+                        icon: Icons.south_rounded,
+                        color: theme.colorScheme.primary,
+                        text: '${_formatBytes(task.downloadSpeed)}/s',
+                      ),
+                    if (task.uploadSpeed > 0 && !task.isCompleted)
+                      _TaskMeta(
+                        icon: Icons.north_rounded,
+                        color: theme.colorScheme.secondary,
+                        text: '${_formatBytes(task.uploadSpeed)}/s',
+                      ),
+                    if (task.numSeeds + task.numPeers > 0 && !task.isCompleted)
+                      _TaskMeta(
+                        icon: Icons.groups_2_outlined,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        text: '做种 ${task.numSeeds} · 连接 ${task.numPeers}',
+                      ),
+                    if (task.seedRatio > 0)
+                      _TaskMeta(
+                        icon: Icons.sync_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        text: '做种率 ${_formatRatio(task.seedRatio)}',
+                      ),
+                    if (task.isActive && task.etaSeconds >= 0)
+                      _TaskMeta(
+                        icon: Icons.timer_outlined,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        text: '剩余 ${_formatEta(task.etaSeconds)}',
+                      ),
+                    if (task.status == 'checking')
+                      _TaskMeta(
+                        icon: Icons.verified_outlined,
+                        color: theme.colorScheme.tertiary,
+                        text: '正在校验已下载文件',
+                      ),
+                    if (task.status == 'metadata')
+                      _TaskMeta(
+                        icon: Icons.hub_outlined,
+                        color: theme.colorScheme.tertiary,
+                        text: '正在获取种子元数据',
+                      ),
+                  ],
                 ),
-              const Spacer(),
-              if (task.isActive && task.downloadSpeed > 0)
+              ),
+              if (task.totalLength > 0) ...[
+                const SizedBox(width: 10),
                 Text(
-                  '${_formatBytes(task.downloadSpeed)}/s',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.primary),
+                  '${(progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1)}%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+              ],
             ],
           ),
         ],
@@ -935,6 +1055,9 @@ class _StatusChip extends StatelessWidget {
     final (label, color) = switch (status) {
       'active' => ('下载中', theme.colorScheme.primary),
       'waiting' => ('等待中', theme.colorScheme.tertiary),
+      'metadata' => ('获取元数据中', theme.colorScheme.tertiary),
+      'checking' => ('校验进度中', theme.colorScheme.tertiary),
+      'seeding' => ('做种中', theme.colorScheme.tertiary),
       'paused' => ('已暂停', theme.colorScheme.secondary),
       'complete' => ('已完成', Colors.green),
       'error' => ('错误', theme.colorScheme.error),
@@ -955,6 +1078,34 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+class _TaskMeta extends StatelessWidget {
+  const _TaskMeta({
+    required this.icon,
+    required this.text,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 3),
+        Text(
+          text,
+          style: theme.textTheme.bodySmall?.copyWith(color: color),
+        ),
+      ],
+    );
+  }
+}
+
 String _formatBytes(int bytes) {
   if (bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -965,6 +1116,23 @@ String _formatBytes(int bytes) {
     unit++;
   }
   return '${size.toStringAsFixed(size >= 100 ? 0 : 1)} ${units[unit]}';
+}
+
+String _formatRatio(double ratio) {
+  if (ratio <= 0) return '0.00';
+  if (ratio >= 100) return ratio.toStringAsFixed(0);
+  return ratio.toStringAsFixed(2);
+}
+
+String _formatEta(int seconds) {
+  if (seconds <= 0) return '0s';
+  if (seconds < 60) return '${seconds}s';
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  final s = seconds % 60;
+  if (h > 0) return '${h}h ${m}m';
+  if (m > 0) return '${m}m ${s}s';
+  return '${s}s';
 }
 
 /// 添加 / 编辑订阅页面。

@@ -87,8 +87,8 @@ final List<_SettingsGroup> _settingsGroups = [
       ),
       _SettingsCategory(
         id: 'magnet',
-        label: '磁力搜索',
-        description: 'Mikan 搜索与 Aria2 下载',
+        label: '磁力下载',
+        description: 'Mikan 搜索与磁力下载',
         icon: Icons.search_rounded,
         builder: (_) => const MagnetSettingsPage(),
       ),

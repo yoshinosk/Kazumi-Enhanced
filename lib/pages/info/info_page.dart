@@ -20,6 +20,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/utils/device.dart';
 
 class InfoPage extends StatefulWidget {
@@ -453,8 +454,10 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                           icon: const Icon(Icons.open_in_browser_rounded),
                         ),
                       ),
-                      if (!showWindowButton && isDesktop())
+                      if (!showWindowButton && isDesktop()) ...[
+                        const WindowMaximizeButton(),
                         CloseButton(onPressed: () => windowManager.close()),
+                      ],
                       SizedBox(width: 8),
                     ],
                     toolbarHeight: (Platform.isMacOS && showWindowButton)

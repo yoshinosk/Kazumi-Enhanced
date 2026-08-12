@@ -185,6 +185,23 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
+  late final _$setSortModeAsyncAction =
+      AsyncAction('_MediaController.setSortMode', context: context);
+
+  @override
+  Future<void> setSortMode(String mode) {
+    return _$setSortModeAsyncAction.run(() => super.setSortMode(mode));
+  }
+
+  late final _$setSortDescendingAsyncAction =
+      AsyncAction('_MediaController.setSortDescending', context: context);
+
+  @override
+  Future<void> setSortDescending(bool value) {
+    return _$setSortDescendingAsyncAction
+        .run(() => super.setSortDescending(value));
+  }
+
   late final _$addFolderAsyncAction =
       AsyncAction('_MediaController.addFolder', context: context);
 
@@ -230,8 +247,9 @@ mixin _$MediaController on _MediaController, Store {
       AsyncAction('_MediaController.scrapeAll', context: context);
 
   @override
-  Future<void> scrapeAll() {
-    return _$scrapeAllAsyncAction.run(() => super.scrapeAll());
+  Future<void> scrapeAll({bool? onlyUnmatched}) {
+    return _$scrapeAllAsyncAction
+        .run(() => super.scrapeAll(onlyUnmatched: onlyUnmatched));
   }
 
   late final _$setFolderMatchAsyncAction =

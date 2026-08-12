@@ -6,8 +6,8 @@ import 'package:kazumi/services/storage/storage.dart';
 /// Tracker 列表自动更新服务。
 ///
 /// 从一组源（默认 ngosang / XIU2 / newtrackon 的公开 tracker 列表）抓取
-/// announce URL，解析去重后缓存到设置中；内置引擎启动时把它们写进
-/// `--bt-tracker`，运行中还可通过 `aria2.changeGlobalOption` 下发。
+/// announce URL，解析去重后缓存到设置中，供磁力引擎 / 其它消费方参考。
+/// libtorrent 引擎自带公共 tracker 抓取能力，缓存列表保留用于展示与回退。
 class TrackerUpdater {
   TrackerUpdater._();
 
@@ -34,7 +34,7 @@ static const int _maxTrackers = 400;
 
   /// 当前缓存的 tracker 列表（去重后）。
   List<String> cachedTrackers() {
-    final raw = GStorage.getSetting(SettingsKeys.aria2TrackersCache);
+    final raw = GStorage.getSetting(SettingsKeys.magnetTrackersCache);
     if (raw.isEmpty) return const [];
     return raw
         .split(RegExp(r'[\r\n]+'))
@@ -46,14 +46,14 @@ static const int _maxTrackers = 400;
 
   /// 最近一次成功更新时间（epoch 毫秒），未更新过返回 null。
   DateTime? lastUpdated() {
-    final millis = GStorage.getSetting(SettingsKeys.aria2TrackerLastUpdated);
+    final millis = GStorage.getSetting(SettingsKeys.magnetTrackerLastUpdated);
     if (millis <= 0) return null;
     return DateTime.fromMillisecondsSinceEpoch(millis);
   }
 
   /// 配置的 tracker 源 URL 列表。
   List<String> get sources => GStorage
-      .getSetting(SettingsKeys.aria2TrackerSources)
+      .getSetting(SettingsKeys.magnetTrackerSources)
       .split(RegExp(r'[\r\n,]+'))
       .map((s) => s.trim())
       .where((s) => s.isNotEmpty)
@@ -61,7 +61,7 @@ static const int _maxTrackers = 400;
 
   Future<void> saveSources(List<String> sources) async {
     await GStorage.putSetting(
-      SettingsKeys.aria2TrackerSources,
+      SettingsKeys.magnetTrackerSources,
       sources.join('\n'),
     );
   }
@@ -115,11 +115,11 @@ static const int _maxTrackers = 400;
 
     final trackers = collected.take(_maxTrackers).toList();
     await GStorage.putSetting(
-      SettingsKeys.aria2TrackersCache,
+      SettingsKeys.magnetTrackersCache,
       trackers.join('\n'),
     );
     await GStorage.putSetting(
-      SettingsKeys.aria2TrackerLastUpdated,
+      SettingsKeys.magnetTrackerLastUpdated,
       DateTime.now().millisecondsSinceEpoch,
     );
     KazumiLogger().i('TrackerUpdater: updated ${trackers.length} trackers');

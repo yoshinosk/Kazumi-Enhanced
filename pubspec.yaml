@@ -117,6 +117,7 @@ dependencies:
   media_kit_libs_video:
     path: ../kazumi-win/libs_cache/media_kit/libs/universal/media_kit_libs_video
   macos_secure_bookmarks: ^0.2.1
+  libtorrent_flutter: ^1.9.2
 
 dependency_overrides:
   media_kit_libs_linux:
@@ -129,6 +130,11 @@ dependency_overrides:
     path: ../kazumi-win/libs_cache/media_kit/libs/windows/media_kit_libs_windows_video
   media_kit_libs_macos_video:
     path: ../kazumi-win/libs_cache/media_kit/libs/macos/media_kit_libs_macos_video
+  # Kazumi 本地 vendor：续做种修复（原生层 no_recheck_incomplete_resume 翻转，
+  # 见 third_party/libtorrent_flutter/README 与「重启续做种实施方案」）。
+  # 使用 prebuilt DLL 时行为与上游一致；重建原生库后翻转 resumeAware。
+  libtorrent_flutter:
+    path: third_party/libtorrent_flutter
   media_kit_libs_ohos:
     path: ../kazumi-win/libs_cache/media_kit/libs/ohos/media_kit_libs_ohos
 

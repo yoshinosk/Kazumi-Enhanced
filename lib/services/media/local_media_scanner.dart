@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
+import 'package:kazumi/utils/chinese_convert.dart';
 import 'package:path/path.dart' as p;
 
 /// 本地媒体库扫描器：递归遍历文件夹，收集视频文件。
@@ -105,9 +106,12 @@ class LocalMediaScanner {
     ];
   }
 
-  /// 归一化标题：小写并去除空格点号等装饰符号（与 MediaScraper 匹配逻辑一致）。
+  /// 归一化标题：繁转简 + 小写 + 去除装饰符号（与 MediaScraper 匹配逻辑一致）。
+  ///
+  /// 繁简归一让同一部番的繁体版（`[ANi] 杖與劍的魔劍譚`）与简体版
+  /// （`[某组] 杖与剑的魔剑谭`）落进同一个分组，而不是被拆成两部番。
   String _normalize(String title) {
-    return title.toLowerCase().replaceAll(
+    return toSimplifiedChinese(title).toLowerCase().replaceAll(
         RegExp(r'[\s\-_·・.。:：（）()\[\]【】{}「」『』"''~～+×x*]'), '');
   }
 

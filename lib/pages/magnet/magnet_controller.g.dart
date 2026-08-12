@@ -192,13 +192,13 @@ mixin _$MagnetController on _MagnetController, Store {
       Atom(name: '_MagnetController.engineState', context: context);
 
   @override
-  Aria2EngineState get engineState {
+  LibtorrentEngineState get engineState {
     _$engineStateAtom.reportRead();
     return super.engineState;
   }
 
   @override
-  set engineState(Aria2EngineState value) {
+  set engineState(LibtorrentEngineState value) {
     _$engineStateAtom.reportWrite(value, super.engineState, () {
       super.engineState = value;
     });
@@ -268,22 +268,6 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$bannedPeersAtom =
-      Atom(name: '_MagnetController.bannedPeers', context: context);
-
-  @override
-  ObservableList<BannedPeer> get bannedPeers {
-    _$bannedPeersAtom.reportRead();
-    return super.bannedPeers;
-  }
-
-  @override
-  set bannedPeers(ObservableList<BannedPeer> value) {
-    _$bannedPeersAtom.reportWrite(value, super.bannedPeers, () {
-      super.bannedPeers = value;
-    });
-  }
-
   late final _$setSearchSourceAsyncAction =
       AsyncAction('_MagnetController.setSearchSource', context: context);
 
@@ -316,22 +300,6 @@ mixin _$MagnetController on _MagnetController, Store {
   @override
   Future<void> updateTrackers() {
     return _$updateTrackersAsyncAction.run(() => super.updateTrackers());
-  }
-
-  late final _$unbanPeersAsyncAction =
-      AsyncAction('_MagnetController.unbanPeers', context: context);
-
-  @override
-  Future<void> unbanPeers(String ip) {
-    return _$unbanPeersAsyncAction.run(() => super.unbanPeers(ip));
-  }
-
-  late final _$clearPeerBansAsyncAction =
-      AsyncAction('_MagnetController.clearPeerBans', context: context);
-
-  @override
-  Future<void> clearPeerBans() {
-    return _$clearPeerBansAsyncAction.run(() => super.clearPeerBans());
   }
 
   late final _$searchAsyncAction =
@@ -437,14 +405,14 @@ mixin _$MagnetController on _MagnetController, Store {
     return _$removeDownloadAsyncAction.run(() => super.removeDownload(gid));
   }
 
-  late final _$applyAria2SettingsChangedAsyncAction = AsyncAction(
-      '_MagnetController.applyAria2SettingsChanged',
+  late final _$applyMagnetSettingsChangedAsyncAction = AsyncAction(
+      '_MagnetController.applyMagnetSettingsChanged',
       context: context);
 
   @override
-  Future<void> applyAria2SettingsChanged() {
-    return _$applyAria2SettingsChangedAsyncAction
-        .run(() => super.applyAria2SettingsChanged());
+  Future<void> applyMagnetSettingsChanged() {
+    return _$applyMagnetSettingsChangedAsyncAction
+        .run(() => super.applyMagnetSettingsChanged());
   }
 
   late final _$_MagnetControllerActionController =
@@ -501,8 +469,7 @@ engineState: ${engineState},
 engineError: ${engineError},
 trackerCount: ${trackerCount},
 trackerUpdatedAt: ${trackerUpdatedAt},
-trackerUpdating: ${trackerUpdating},
-bannedPeers: ${bannedPeers}
+trackerUpdating: ${trackerUpdating}
     ''';
   }
 }

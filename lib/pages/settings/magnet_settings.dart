@@ -6,7 +6,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
-import 'package:kazumi/services/magnet/aria2_engine.dart';
+import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
@@ -21,33 +21,22 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late String mikanBaseUrl;
   late String defaultSourceId;
   late String animesGardenFansub;
-  late String animesGardenType;
-  late bool aria2Enable;
-  late String aria2RpcUrl;
-  late String aria2Secret;
-  late String engineMode;
-  late String aria2ExecutablePath;
-  late int aria2RpcPort;
-  late String aria2DownloadDir;
-  late int aria2MaxConcurrentDownloads;
-  late int aria2ListenPort;
-  late int aria2MaxPeers;
-  late int aria2MaxUploadLimitKb;
-  late bool aria2EnableDht;
-  late bool aria2EnableDht6;
-  late bool aria2EnableUpnp;
-  late bool aria2EnableNatPmp;
-  late int aria2SeedTime;
-  late double aria2SeedRatio;
-  late bool aria2AutoTrackerUpdate;
-  late int aria2TrackerUpdateHours;
-  late String aria2TrackerSources;
-  late bool aria2BanLeecher;
-  late bool aria2BanAbnormalIp;
-  late int aria2BanScanInterval;
-  late int aria2BanThreshold;
-  late int aria2BanObserveSeconds;
-  late int aria2BanUploadThresholdKb;
+  late bool engineEnabled;
+  late String downloadDir;
+  late int listenPort;
+  late int maxPeers;
+  late int maxUploadLimitKb;
+  late int maxDownloadLimitKb;
+  late String seedingStopMode;
+  late int seedingStopHours;
+  late double seedingStopRatio;
+  late bool enableDht;
+  late bool enableUpnp;
+  late bool forceEncrypt;
+  late bool enableIpv6;
+  late bool trackerAutoUpdate;
+  late int trackerUpdateHours;
+  late String trackerSources;
   bool isPickingDir = false;
 
   MagnetController get _controller => inject<MagnetController>();
@@ -61,61 +50,40 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
       defaultSourceId = MagnetSearchSources.mikan.id;
     }
     animesGardenFansub = GStorage.getSetting(SettingsKeys.animesGardenFansub);
-    animesGardenType = GStorage.getSetting(SettingsKeys.animesGardenType);
-    aria2Enable = GStorage.getSetting(SettingsKeys.magnetAria2Enable);
-    aria2RpcUrl = GStorage.getSetting(SettingsKeys.magnetAria2RpcUrl);
-    aria2Secret = GStorage.getSetting(SettingsKeys.magnetAria2Secret);
     _loadFromSettings();
   }
 
   void _loadFromSettings() {
-    engineMode = GStorage.getSetting(SettingsKeys.magnetEngineMode);
-    aria2ExecutablePath =
-        GStorage.getSetting(SettingsKeys.aria2ExecutablePath);
-    aria2RpcPort = GStorage.getSetting(SettingsKeys.aria2RpcPort);
-    aria2DownloadDir = GStorage.getSetting(SettingsKeys.aria2DownloadDir);
-    aria2MaxConcurrentDownloads =
-        GStorage.getSetting(SettingsKeys.aria2MaxConcurrentDownloads);
-    aria2ListenPort = GStorage.getSetting(SettingsKeys.aria2ListenPort);
-    aria2MaxPeers = GStorage.getSetting(SettingsKeys.aria2MaxPeers);
-    aria2MaxUploadLimitKb =
-        GStorage.getSetting(SettingsKeys.aria2MaxUploadLimitKb);
-    aria2EnableDht = GStorage.getSetting(SettingsKeys.aria2EnableDht);
-    aria2EnableDht6 = GStorage.getSetting(SettingsKeys.aria2EnableDht6);
-    aria2EnableUpnp = GStorage.getSetting(SettingsKeys.aria2EnableUpnp);
-    aria2EnableNatPmp = GStorage.getSetting(SettingsKeys.aria2EnableNatPmp);
-    aria2SeedTime = GStorage.getSetting(SettingsKeys.aria2SeedTime);
-    aria2SeedRatio = GStorage.getSetting(SettingsKeys.aria2SeedRatio);
-    aria2AutoTrackerUpdate =
-        GStorage.getSetting(SettingsKeys.aria2TrackerAutoUpdate);
-    aria2TrackerUpdateHours =
-        GStorage.getSetting(SettingsKeys.aria2TrackerUpdateHours);
-    aria2TrackerSources = GStorage.getSetting(SettingsKeys.aria2TrackerSources);
-    aria2BanLeecher = GStorage.getSetting(SettingsKeys.aria2BanLeecher);
-    aria2BanAbnormalIp = GStorage.getSetting(SettingsKeys.aria2BanAbnormalIp);
-    aria2BanScanInterval = GStorage.getSetting(SettingsKeys.aria2BanScanInterval);
-    aria2BanThreshold = GStorage.getSetting(SettingsKeys.aria2BanThreshold);
-    aria2BanObserveSeconds =
-        GStorage.getSetting(SettingsKeys.aria2BanObserveSeconds);
-    aria2BanUploadThresholdKb =
-        GStorage.getSetting(SettingsKeys.aria2BanUploadThresholdKb);
+    engineEnabled = GStorage.getSetting(SettingsKeys.magnetEngineEnabled);
+    downloadDir = GStorage.getSetting(SettingsKeys.magnetDownloadDir);
+    listenPort = GStorage.getSetting(SettingsKeys.magnetListenPort);
+    maxPeers = GStorage.getSetting(SettingsKeys.magnetMaxPeers);
+    maxUploadLimitKb = GStorage.getSetting(SettingsKeys.magnetMaxUploadLimitKb);
+    maxDownloadLimitKb =
+        GStorage.getSetting(SettingsKeys.magnetMaxDownloadLimitKb);
+    seedingStopMode = GStorage.getSetting(SettingsKeys.magnetSeedingStopMode);
+    seedingStopHours = GStorage.getSetting(SettingsKeys.magnetSeedingStopHours);
+    seedingStopRatio = GStorage.getSetting(SettingsKeys.magnetSeedingStopRatio);
+    enableDht = GStorage.getSetting(SettingsKeys.magnetEnableDht);
+    enableUpnp = GStorage.getSetting(SettingsKeys.magnetEnableUpnp);
+    forceEncrypt = GStorage.getSetting(SettingsKeys.magnetForceEncrypt);
+    enableIpv6 = GStorage.getSetting(SettingsKeys.magnetEnableIpv6);
+    trackerAutoUpdate = GStorage.getSetting(SettingsKeys.magnetTrackerAutoUpdate);
+    trackerUpdateHours = GStorage.getSetting(SettingsKeys.magnetTrackerUpdateHours);
+    trackerSources = GStorage.getSetting(SettingsKeys.magnetTrackerSources);
   }
-
-  bool get _useBuiltIn => engineMode != 'remote';
 
   @override
   Widget build(BuildContext context) {
     return SettingsDetailScaffold(
-      title: const Text('磁力搜索'),
+      title: const Text('磁力下载'),
       body: SettingsList(
         sections: [
           _searchSourceSections(),
           _engineSection(),
-          if (_useBuiltIn) ...[
-            _networkSection(),
-            _seedSection(),
+          if (engineEnabled) ...[
+            _connectionSection(),
             _trackerSection(),
-            _peerBanSection(),
           ],
           _infoSection(),
         ],
@@ -169,25 +137,19 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     return SettingsSection(
       title: const Text('下载引擎'),
       tiles: [
-        SettingsRadioSection<String>(
-          groupValue: engineMode,
-          onChanged: (value) => _setEngineMode(value!),
-          tiles: [
-            const SettingsTile<String>.radioTile(
-              radioValue: 'builtin',
-              leading: Icons.memory_rounded,
-              title: Text('内置引擎'),
-              description: Text('随 Kazumi 启动/停止、自动管理 RPC 与设置'),
-            ),
-            const SettingsTile<String>.radioTile(
-              radioValue: 'remote',
-              leading: Icons.dns_outlined,
-              title: Text('远程 Aria2'),
-              description: Text('连接自建的 Aria2 RPC 服务'),
-            ),
-          ],
+        SettingsTile.switchTile(
+          leading: Icons.bolt_rounded,
+          title: const Text('启用磁力下载引擎'),
+          description: const Text('基于 libtorrent 的进程内引擎，随 Kazumi 启动/停止'),
+          initialValue: engineEnabled,
+          onToggle: (value) async {
+            final v = value ?? !engineEnabled;
+            setState(() => engineEnabled = v);
+            await GStorage.putSetting(SettingsKeys.magnetEngineEnabled, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
         ),
-        if (_useBuiltIn) ...[
+        if (engineEnabled)
           Observer(builder: (_) {
             final running = _controller.engineRunning;
             final state = _controller.engineState;
@@ -206,82 +168,31 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
                     ),
             );
           }),
-        ],
       ],
     );
   }
 
-  String _engineStateText(bool running, Aria2EngineState state) {
-    if (running) {
-      final url = _controller.engineRpcUrl ?? '';
-      return url.isNotEmpty ? '引擎运行中 · $url' : '引擎运行中';
-    }
+  String _engineStateText(bool running, LibtorrentEngineState state) {
+    if (running) return '引擎运行中 · libtorrent 2.x';
     return switch (state) {
-      Aria2EngineState.starting => '正在启动…',
-      Aria2EngineState.stopping => '正在停止…',
-      Aria2EngineState.error => _controller.engineError ?? '引擎出错',
+      LibtorrentEngineState.starting => '正在启动…',
+      LibtorrentEngineState.stopping => '正在停止…',
+      LibtorrentEngineState.error => _controller.engineError ?? '引擎出错',
       _ => '未运行（点击“启动”或进入磁力搜索页自动启动）',
     };
   }
 
-  Future<void> _setEngineMode(String mode) async {
-    if (mode == engineMode) return;
-    setState(() => engineMode = mode);
-    await GStorage.putSetting(SettingsKeys.magnetEngineMode, mode);
-    await _controller.applyAria2SettingsChanged();
-  }
-
-  // ---------------- 网络 / 端口 ----------------
-  Widget _networkSection() {
+  // ---------------- 连接与下载 ----------------
+  Widget _connectionSection() {
     return SettingsSection(
-      title: const Text('连接与端口'),
+      title: const Text('连接与限速'),
       tiles: [
         SettingsTile(
-          leading: Icons.inbox_outlined,
-          title: const Text('RPC 端口'),
-          description: Text(aria2RpcPort == 0
-              ? '自动选择（推荐）'
-              : 'http://127.0.0.1:${aria2RpcPort}/jsonrpc'),
-          value: DropdownButton<int>(
-            value: aria2RpcPort == 0 ? 0 : aria2RpcPort,
-            underline: const SizedBox.shrink(),
-            isDense: true,
-            items: const [
-              DropdownMenuItem(value: 0, child: Text('自动')),
-              DropdownMenuItem(value: 6800, child: Text('6800')),
-              DropdownMenuItem(value: 6801, child: Text('6801')),
-              DropdownMenuItem(value: 6802, child: Text('6802')),
-            ],
-            onChanged: (value) async {
-              if (value == null) return;
-              setState(() => aria2RpcPort = value);
-              await GStorage.putSetting(SettingsKeys.aria2RpcPort, value);
-              await _controller.applyAria2SettingsChanged();
-            },
-          ),
-        ),
-        SettingsTile(
           leading: Icons.storage_rounded,
-          title: const Text('BT / DHT 监听端口'),
-          description: Text(aria2ListenPort <= 0
-              ? '自动（6881 起）'
-              : 'TCP+UDP ${aria2ListenPort}'),
-          onPressed: (_) => _promptNumber(
-            'BT / DHT 监听端口',
-            aria2ListenPort <= 0 ? 6881 : aria2ListenPort,
-            (v) async {
-              setState(() => aria2ListenPort = v);
-              await GStorage.putSetting(SettingsKeys.aria2ListenPort, v);
-              await _controller.applyAria2SettingsChanged();
-            },
-          ),
-        ),
-        SettingsTile(
-          leading: Icons.download_for_offline_outlined,
           title: const Text('下载目录'),
-          description: Text(aria2DownloadDir.isEmpty
+          description: Text(downloadDir.isEmpty
               ? '未设置，使用系统下载目录'
-              : aria2DownloadDir),
+              : downloadDir),
           onPressed: (_) => _pickDownloadDir(),
           trailing: isPickingDir
               ? const SizedBox(
@@ -292,96 +203,203 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
               : null,
         ),
         SettingsTile(
-          leading: Icons.horizontal_split_outlined,
-          title: const Text('最大并发任务数'),
+          leading: Icons.hub_outlined,
+          title: const Text('监听端口'),
+          description: Text(listenPort <= 0
+              ? '自动选择（推荐）'
+              : 'TCP+UDP $listenPort'),
+          onPressed: (_) => _promptNumber(
+            '监听端口',
+            listenPort <= 0 ? 0 : listenPort,
+            (v) async {
+              setState(() => listenPort = v);
+              await GStorage.putSetting(SettingsKeys.magnetListenPort, v);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        ),
+        SettingsTile(
+          leading: Icons.groups_rounded,
+          title: const Text('最大对等连接数'),
+          description: Text('$maxPeers'),
           value: DropdownButton<int>(
-            value: aria2MaxConcurrentDownloads,
+            value: maxPeers,
             underline: const SizedBox.shrink(),
             isDense: true,
-            items: [
-              for (var i = 1; i <= 10; i++)
-                DropdownMenuItem(value: i, child: Text('$i')),
+            items: const [
+              DropdownMenuItem(value: 25, child: Text('25')),
+              DropdownMenuItem(value: 50, child: Text('50')),
+              DropdownMenuItem(value: 100, child: Text('100')),
+              DropdownMenuItem(value: 200, child: Text('200')),
+              DropdownMenuItem(value: 400, child: Text('400')),
             ],
             onChanged: (value) async {
               if (value == null) return;
-              setState(() => aria2MaxConcurrentDownloads = value);
-              await GStorage.putSetting(
-                  SettingsKeys.aria2MaxConcurrentDownloads, value);
-              await _controller.applyAria2SettingsChanged();
+              setState(() => maxPeers = value);
+              await GStorage.putSetting(SettingsKeys.magnetMaxPeers, value);
+              await _controller.applyMagnetSettingsChanged();
             },
           ),
+        ),
+        SettingsSliderTile(
+          title: const Text('全局上传限速'),
+          description: const Text('0 表示不限制上传速度'),
+          value: maxUploadLimitKb.toDouble(),
+          valueLabel: maxUploadLimitKb == 0
+              ? '不限'
+              : '$maxUploadLimitKb KiB/s',
+          min: 0,
+          max: 8192,
+          divisions: 64,
+          onChanged: (v) async {
+            final rounded = v.round();
+            setState(() => maxUploadLimitKb = rounded);
+            await GStorage.putSetting(
+                SettingsKeys.magnetMaxUploadLimitKb, rounded);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsSliderTile(
+          title: const Text('全局下载限速'),
+          description: const Text('0 表示不限制下载速度'),
+          value: maxDownloadLimitKb.toDouble(),
+          valueLabel: maxDownloadLimitKb == 0
+              ? '不限'
+              : '$maxDownloadLimitKb KiB/s',
+          min: 0,
+          max: 8192,
+          divisions: 64,
+          onChanged: (v) async {
+            final rounded = v.round();
+            setState(() => maxDownloadLimitKb = rounded);
+            await GStorage.putSetting(
+                SettingsKeys.magnetMaxDownloadLimitKb, rounded);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsTile(
+          leading: Icons.hourglass_bottom_rounded,
+          title: const Text('做种停止条件'),
+          description: Text(_seedingStopDescription()),
+          value: DropdownButton<String>(
+            value: seedingStopMode,
+            underline: const SizedBox.shrink(),
+            isDense: true,
+            items: const [
+              DropdownMenuItem(
+                  value: 'ratio', child: Text('分享率达到阈值')),
+              DropdownMenuItem(value: 'time', child: Text('做种指定时长')),
+              DropdownMenuItem(value: 'none', child: Text('不自动停止')),
+            ],
+            onChanged: (value) async {
+              if (value == null || value == seedingStopMode) return;
+              setState(() => seedingStopMode = value);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetSeedingStopMode, value);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        ),
+        if (seedingStopMode == 'time')
+          SettingsTile(
+            leading: Icons.timer_rounded,
+            title: const Text('做种时长'),
+            value: DropdownButton<int>(
+              value: seedingStopHours,
+              underline: const SizedBox.shrink(),
+              isDense: true,
+              items: const [
+                DropdownMenuItem(value: 6, child: Text('6 小时')),
+                DropdownMenuItem(value: 12, child: Text('12 小时')),
+                DropdownMenuItem(value: 24, child: Text('1 天')),
+                DropdownMenuItem(value: 48, child: Text('2 天')),
+                DropdownMenuItem(value: 168, child: Text('1 周')),
+                DropdownMenuItem(value: 720, child: Text('1 个月')),
+              ],
+              onChanged: (value) async {
+                if (value == null) return;
+                setState(() => seedingStopHours = value);
+                await GStorage.putSetting(
+                    SettingsKeys.magnetSeedingStopHours, value);
+                await _controller.applyMagnetSettingsChanged();
+              },
+            ),
+          ),
+        if (seedingStopMode == 'ratio')
+          SettingsSliderTile(
+            title: const Text('分享率阈值'),
+            description: const Text('做种率达到该值后停止上传并标记完成'),
+            value: seedingStopRatio,
+            valueLabel: seedingStopRatio.toStringAsFixed(1),
+            min: 0.1,
+            max: 10.0,
+            divisions: 99,
+            onChanged: (v) async {
+              final rounded = (v * 10).round() / 10.0;
+              setState(() => seedingStopRatio = rounded);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetSeedingStopRatio, rounded);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        SettingsTile.switchTile(
+          leading: Icons.radar_rounded,
+          title: const Text('启用 DHT'),
+          description: const Text('无 tracker 时也能发现对等节点'),
+          initialValue: enableDht,
+          onToggle: (value) async {
+            final v = value ?? enableDht;
+            setState(() => enableDht = v);
+            await GStorage.putSetting(SettingsKeys.magnetEnableDht, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.network_ping_rounded,
+          title: const Text('UPnP / NAT-PMP'),
+          description: const Text('自动映射端口，提升内网连通性'),
+          initialValue: enableUpnp,
+          onToggle: (value) async {
+            final v = value ?? enableUpnp;
+            setState(() => enableUpnp = v);
+            await GStorage.putSetting(SettingsKeys.magnetEnableUpnp, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.enhanced_encryption_rounded,
+          title: const Text('强制加密连接'),
+          description: const Text('仅接受加密对等连接'),
+          initialValue: forceEncrypt,
+          onToggle: (value) async {
+            final v = value ?? forceEncrypt;
+            setState(() => forceEncrypt = v);
+            await GStorage.putSetting(SettingsKeys.magnetForceEncrypt, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.language_rounded,
+          title: const Text('IPv6 监听'),
+          description: const Text('开启 IPv6 地址的监听'),
+          initialValue: enableIpv6,
+          onToggle: (value) async {
+            final v = value ?? enableIpv6;
+            setState(() => enableIpv6 = v);
+            await GStorage.putSetting(SettingsKeys.magnetEnableIpv6, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
         ),
       ],
     );
   }
 
-  // ---------------- 做种 ----------------
-  Widget _seedSection() {
-    return SettingsSection(
-      title: const Text('做种'),
-      tiles: [
-        SettingsRadioSection<int>(
-          groupValue: aria2SeedTime,
-          onChanged: (v) async {
-            if (v == null) return;
-            setState(() => aria2SeedTime = v);
-            await GStorage.putSetting(SettingsKeys.aria2SeedTime, v);
-            await _controller.applyAria2SettingsChanged();
-          },
-          title: const Text('做种时间'),
-          tiles: const [
-            SettingsTile<int>.radioTile(
-              radioValue: 0,
-              title: Text('下载完成后立即停止'),
-              description: Text('不做种'),
-            ),
-            SettingsTile<int>.radioTile(
-              radioValue: 60,
-              title: Text('做种 1 小时'),
-            ),
-            SettingsTile<int>.radioTile(
-              radioValue: 720,
-              title: Text('做种 12 小时'),
-            ),
-            SettingsTile<int>.radioTile(
-              radioValue: -1,
-              title: Text('不限时做种'),
-              description: Text('直到手动停止或达到分享率'),
-            ),
-          ],
-        ),
-        SettingsSliderTile(
-          title: const Text('分享率（达到后停止做种）'),
-          description: const Text('0 表示不限分享率'),
-          value: aria2SeedRatio,
-          valueLabel: aria2SeedRatio == 0 ? '不限' : aria2SeedRatio.toStringAsFixed(2),
-          min: 0,
-          max: 5,
-          divisions: 100,
-          onChanged: (v) async {
-            setState(() => aria2SeedRatio = v);
-            await GStorage.putSetting(SettingsKeys.aria2SeedRatio, v);
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsSliderTile(
-          title: const Text('全局上传限速'),
-          description: const Text('0 表示不限制上传速度'),
-          value: aria2MaxUploadLimitKb.toDouble(),
-          valueLabel: aria2MaxUploadLimitKb == 0
-              ? '不限'
-              : '${aria2MaxUploadLimitKb} KiB/s',
-          min: 0,
-          max: 8192,
-          divisions: 64,
-          onChanged: (v) async {
-            setState(() => aria2MaxUploadLimitKb = v.round());
-            await GStorage.putSetting(SettingsKeys.aria2MaxUploadLimitKb, v.round());
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-      ],
-    );
+  String _seedingStopDescription() {
+    return switch (seedingStopMode) {
+      'time' => '做种满 $seedingStopHours 小时后停止上传并标记完成',
+      'none' => '下载完成后持续做种，不自动停止',
+      _ => '做种率达到 ${seedingStopRatio.toStringAsFixed(1)} 后停止上传并标记完成',
+    };
   }
 
   // ---------------- Tracker ----------------
@@ -393,19 +411,19 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
           leading: Icons.sync_rounded,
           title: const Text('自动更新 tracker'),
           description: const Text('定期从公开列表抓取可用 tracker 节点'),
-          initialValue: aria2AutoTrackerUpdate,
+          initialValue: trackerAutoUpdate,
           onToggle: (value) async {
-            setState(() => aria2AutoTrackerUpdate = value ?? aria2AutoTrackerUpdate);
-            await GStorage.putSetting(SettingsKeys.aria2TrackerAutoUpdate,
-                aria2AutoTrackerUpdate);
-            await _controller.applyAria2SettingsChanged();
+            final v = value ?? trackerAutoUpdate;
+            setState(() => trackerAutoUpdate = v);
+            await GStorage.putSetting(SettingsKeys.magnetTrackerAutoUpdate, v);
+            await _controller.applyMagnetSettingsChanged();
           },
         ),
         SettingsTile(
           leading: Icons.schedule_rounded,
           title: const Text('更新间隔'),
           value: DropdownButton<int>(
-            value: aria2TrackerUpdateHours,
+            value: trackerUpdateHours,
             underline: const SizedBox.shrink(),
             isDense: true,
             items: const [
@@ -417,9 +435,10 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             ],
             onChanged: (value) async {
               if (value == null) return;
-              setState(() => aria2TrackerUpdateHours = value);
-              await GStorage.putSetting(SettingsKeys.aria2TrackerUpdateHours, value);
-              await _controller.applyAria2SettingsChanged();
+              setState(() => trackerUpdateHours = value);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetTrackerUpdateHours, value);
+              await _controller.applyMagnetSettingsChanged();
             },
           ),
         ),
@@ -454,108 +473,6 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     );
   }
 
-  // ---------------- 节点安全 ----------------
-  Widget _peerBanSection() {
-    return SettingsSection(
-      title: const Text('节点安全'),
-      tiles: [
-        SettingsTile.switchTile(
-          leading: Icons.shield_outlined,
-          title: const Text('自动封禁吸血节点'),
-          description: const Text('持续大量上传而对端几乎不回传数据的节点'),
-          initialValue: aria2BanLeecher,
-          onToggle: (value) async {
-            setState(() => aria2BanLeecher = value ?? aria2BanLeecher);
-            await GStorage.putSetting(SettingsKeys.aria2BanLeecher, aria2BanLeecher);
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsTile.switchTile(
-          leading: Icons.security_rounded,
-          title: const Text('自动封禁行为异常 IP'),
-          description: const Text('peerId 频繁变化、同时扩散到多个任务等'),
-          initialValue: aria2BanAbnormalIp,
-          onToggle: (value) async {
-            setState(() => aria2BanAbnormalIp = value ?? aria2BanAbnormalIp);
-            await GStorage.putSetting(
-                SettingsKeys.aria2BanAbnormalIp, aria2BanAbnormalIp);
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsSliderTile(
-          title: const Text('扫描间隔'),
-          valueLabel: '$aria2BanScanInterval 秒',
-          value: aria2BanScanInterval.toDouble(),
-          min: 10,
-          max: 300,
-          divisions: 29,
-          onChanged: (v) async {
-            setState(() => aria2BanScanInterval = v.round());
-            await GStorage.putSetting(SettingsKeys.aria2BanScanInterval, v.round());
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsSliderTile(
-          title: const Text('吸血观察时长'),
-          description: const Text('持续上传多久后才判定为吸血'),
-          valueLabel: '$aria2BanObserveSeconds 秒',
-          value: aria2BanObserveSeconds.toDouble(),
-          min: 30,
-          max: 3600,
-          divisions: 118,
-          onChanged: (v) async {
-            setState(() => aria2BanObserveSeconds = v.round());
-            await GStorage.putSetting(SettingsKeys.aria2BanObserveSeconds, v.round());
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsSliderTile(
-          title: const Text('吸血判定上传量'),
-          description: const Text('持续上传超过该量且对方回传不足 5% 才算吸血'),
-          valueLabel: _banSize(aria2BanUploadThresholdKb),
-          value: aria2BanUploadThresholdKb.toDouble(),
-          min: 256,
-          max: 20480,
-          divisions: 78,
-          onChanged: (v) async {
-            setState(() => aria2BanUploadThresholdKb = v.round());
-            await GStorage.putSetting(
-                SettingsKeys.aria2BanUploadThresholdKb, v.round());
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        SettingsSliderTile(
-          title: const Text('封禁触发阈值'),
-          description: const Text('行为得分 ≥ 该值后封禁（越大越保守）'),
-          valueLabel: '$aria2BanThreshold',
-          value: aria2BanThreshold.toDouble(),
-          min: 1,
-          max: 10,
-          divisions: 9,
-          onChanged: (v) async {
-            setState(() => aria2BanThreshold = v.round());
-            await GStorage.putSetting(SettingsKeys.aria2BanThreshold, v.round());
-            await _controller.applyAria2SettingsChanged();
-          },
-        ),
-        Observer(builder: (_) {
-          return SettingsTile(
-            leading: Icons.block_rounded,
-            title: const Text('已封禁 IP'),
-            description: Text('共 ${_controller.bannedPeers.length} 条 · '
-                'Windows 防火墙落地'),
-            onPressed: (_) => _showBannedList(),
-          );
-        }),
-      ],
-    );
-  }
-
-  String _banSize(int kb) {
-    if (kb < 1024) return '$kb KiB';
-    return '${(kb / 1024).toStringAsFixed(1)} MiB';
-  }
-
   String _formatTime(DateTime t) {
     return '${t.month.toString().padLeft(2, '0')}-'
         '${t.day.toString().padLeft(2, '0')} '
@@ -572,12 +489,10 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
           leading: Icons.info_outline_rounded,
           title: const Text('使用提示'),
           description: const Text(
-            '• 内置引擎需要 aria2c.exe：可放到应用目录 data/aria2/ 下，'
-            '或通过“选择 aria2c”手动指定\n'
+            '• 内置引擎基于 libtorrent 2.x，随应用自动启动/停止\n'
             '• DHT / UPnP 可提升无 tracker 资源的下发成功率\n'
-            '• Tracker 会自动更新，也可随时“立即更新”\n'
-            '• 节点安全仅作用于内置引擎下载的 BitTorrent 任务\n'
-            '• 远程模式仍需本地运行 Aria2 并开启 RPC',
+            '• libtorrent 自带公共 tracker 抓取，此处缓存用于参考\n'
+            '• 删除任务不会删除已下载的文件',
           ),
         ),
       ],
@@ -585,7 +500,6 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   }
 
   // ---------------- 交互 ----------------
-  // 以下为继承自旧版页面的辅助方法，保持搜索源编辑能力。
   Future<void> _editMikanBaseUrl() async {
     final controller = TextEditingController(text: mikanBaseUrl);
     final result = await KazumiDialog.show<String>(
@@ -618,8 +532,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   }
 
   Future<void> _editTrackerSources() async {
-    final finalController =
-        TextEditingController(text: aria2TrackerSources);
+    final finalController = TextEditingController(text: trackerSources);
     final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -650,9 +563,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
       ),
     );
     if (result == null) return;
-    setState(() => aria2TrackerSources = result);
-    await GStorage.putSetting(SettingsKeys.aria2TrackerSources, result);
-    await _controller.applyAria2SettingsChanged();
+    setState(() => trackerSources = result);
+    await GStorage.putSetting(SettingsKeys.magnetTrackerSources, result);
+    await _controller.applyMagnetSettingsChanged();
   }
 
   Future<void> _pickDownloadDir() async {
@@ -662,9 +575,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         dialogTitle: '选择默认下载目录',
       );
       if (dir == null) return;
-      setState(() => aria2DownloadDir = dir);
-      await GStorage.putSetting(SettingsKeys.aria2DownloadDir, dir);
-      await _controller.applyAria2SettingsChanged();
+      setState(() => downloadDir = dir);
+      await GStorage.putSetting(SettingsKeys.magnetDownloadDir, dir);
+      await _controller.applyMagnetSettingsChanged();
     } finally {
       if (mounted) setState(() => isPickingDir = false);
     }
@@ -699,80 +612,5 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
       ),
     );
     if (result != null) await onSave(result);
-  }
-
-  Future<void> _showBannedList() async {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (innerContext, setInnerState) {
-            final peers = _controller.bannedPeers.toList();
-            return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text('已封禁 IP（${peers.length}）',
-                              style: const TextStyle(fontSize: 16)),
-                        ),
-                        if (peers.isNotEmpty)
-                          TextButton(
-                            onPressed: () async {
-                              await _controller.clearPeerBans();
-                              setInnerState(() {});
-                            },
-                            child: const Text('全部解封'),
-                          ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          child: const Text('关闭'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 8),
-                  if (peers.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('当前没有封禁记录'),
-                    )
-                  else
-                    Flexible(
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          for (final peer in peers)
-                            ListTile(
-                              dense: true,
-                              leading: const Icon(
-                                  Icons.block_rounded, size: 20),
-                              title: Text(peer.ip),
-                              subtitle: Text('${peer.reason}\n'
-                                  '${_formatTime(peer.bannedAt)} · 得分 ${peer.score}'),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.undo_rounded, size: 20),
-                                tooltip: '解封',
-                                onPressed: () async {
-                                  await _controller.unbanPeers(peer.ip);
-                                  setInnerState(() {});
-                                },
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 }

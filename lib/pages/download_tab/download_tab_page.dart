@@ -6,10 +6,10 @@ import 'package:kazumi/bean/widget/empty_state_widget.dart' show GeneralEmptySta
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
-import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetDownloadsTab, MagnetSubscriptionsTab;
+import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetDownloadsTab, MagnetSearchTab, MagnetSubscriptionsTab;
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 
-/// 下载中心：汇总磁力下载、RSS 订阅与离线缓存，作为底部导航的「下载」标签页。
+/// 下载中心：汇总磁力搜索、磁力下载、RSS 订阅与离线缓存，作为底部导航的「下载」标签页。
 class DownloadTabPage extends StatefulWidget {
   const DownloadTabPage({
     super.key,
@@ -27,17 +27,19 @@ class DownloadTabPage extends StatefulWidget {
 class _DownloadTabPageState extends State<DownloadTabPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     widget.downloadController.refreshRecords();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -82,6 +84,7 @@ class _DownloadTabPageState extends State<DownloadTabPage>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
+            Tab(text: '磁力搜索'),
             Tab(text: '磁力下载'),
             Tab(text: 'RSS 订阅'),
             Tab(text: '离线缓存'),
@@ -91,6 +94,10 @@ class _DownloadTabPageState extends State<DownloadTabPage>
       body: TabBarView(
         controller: _tabController,
         children: [
+          MagnetSearchTab(
+            controller: widget.magnetController,
+            searchController: _searchController,
+          ),
           MagnetDownloadsTab(controller: widget.magnetController),
           MagnetSubscriptionsTab(controller: widget.magnetController),
           _OfflineCacheTab(controller: widget.downloadController),

@@ -553,21 +553,6 @@ class SettingsKeys {
     '',
     group: SettingGroup.magnet,
   );
-  static const magnetAria2Enable = SettingKey<bool>(
-    'magnetAria2Enable',
-    false,
-    group: SettingGroup.magnet,
-  );
-  static const magnetAria2RpcUrl = SettingKey<String>(
-    'magnetAria2RpcUrl',
-    'http://localhost:6800/jsonrpc',
-    group: SettingGroup.magnet,
-  );
-  static const magnetAria2Secret = SettingKey<String>(
-    'magnetAria2Secret',
-    '',
-    group: SettingGroup.magnet,
-  );
   static const magnetSubscriptions = SettingKey<String>(
     'magnetSubscriptions',
     '[]',
@@ -579,163 +564,116 @@ class SettingsKeys {
     group: SettingGroup.magnet,
   );
 
-  // ---------- 内置磁力引擎（Windows） ----------
-  /// 引擎模式：builtin（内置 Aria2，随应用启动/停止） | remote（连接外部 Aria2 RPC）。
-  static const magnetEngineMode = SettingKey<String>(
-    'magnetEngineMode',
-    'builtin',
-    group: SettingGroup.magnet,
-  );
-  /// 内置 aria2c 可执行文件路径，留空则自动查找（应用目录、PATH）。
-  static const aria2ExecutablePath = SettingKey<String>(
-    'aria2ExecutablePath',
-    '',
-    group: SettingGroup.magnet,
-  );
-  /// 内置引擎 RPC 监听端口，0 表示自动选择。
-  static const aria2RpcPort = SettingKey<int>(
-    'aria2RpcPort',
-    0,
+  // ---------- 内置磁力引擎（Libtorrent） ----------
+  /// 是否启用内置磁力下载引擎（随应用启动 / 停止）。
+  static const magnetEngineEnabled = SettingKey<bool>(
+    'magnetEngineEnabled',
+    true,
     group: SettingGroup.magnet,
   );
   /// 默认下载目录，留空使用系统“下载”目录。
-  static const aria2DownloadDir = SettingKey<String>(
-    'aria2DownloadDir',
+  static const magnetDownloadDir = SettingKey<String>(
+    'magnetDownloadDir',
     '',
     group: SettingGroup.magnet,
   );
-  /// 最大并发下载任务数。
-  static const aria2MaxConcurrentDownloads = SettingKey<int>(
-    'aria2MaxConcurrentDownloads',
-    5,
-    group: SettingGroup.magnet,
-  );
-  /// BitTorrent 与 DHT 的 TCP/UDP 监听端口，0 表示自动。
-  static const aria2ListenPort = SettingKey<int>(
-    'aria2ListenPort',
-    6881,
-    group: SettingGroup.magnet,
-  );
-  /// 单个任务最大对等节点数，0 表示不限。
-  static const aria2MaxPeers = SettingKey<int>(
-    'aria2MaxPeers',
-    60,
-    group: SettingGroup.magnet,
-  );
-  /// 全局最大上传速度（KiB/s），0 表示不限。
-  static const aria2MaxUploadLimitKb = SettingKey<int>(
-    'aria2MaxUploadLimitKb',
+  /// BitTorrent 对等节点监听端口，0 表示使用默认。
+  static const magnetListenPort = SettingKey<int>(
+    'magnetListenPort',
     0,
     group: SettingGroup.magnet,
   );
-  /// 是否启用 IPv4 DHT。
-  static const aria2EnableDht = SettingKey<bool>(
-    'aria2EnableDht',
-    true,
+  /// 单个会话最大对等节点连接数。
+  static const magnetMaxPeers = SettingKey<int>(
+    'magnetMaxPeers',
+    100,
     group: SettingGroup.magnet,
   );
-  /// 是否启用 IPv6 DHT。
-  static const aria2EnableDht6 = SettingKey<bool>(
-    'aria2EnableDht6',
-    true,
+  /// 全局最大上传速度（KiB/s），0 表示不限。
+  static const magnetMaxUploadLimitKb = SettingKey<int>(
+    'magnetMaxUploadLimitKb',
+    0,
     group: SettingGroup.magnet,
   );
-  /// 是否启用 UPnP 端口映射。
-  static const aria2EnableUpnp = SettingKey<bool>(
-    'aria2EnableUpnp',
-    true,
+  /// 全局最大下载速度（KiB/s），0 表示不限。
+  static const magnetMaxDownloadLimitKb = SettingKey<int>(
+    'magnetMaxDownloadLimitKb',
+    0,
     group: SettingGroup.magnet,
   );
-  /// 是否启用 NAT-PMP 端口映射。
-  static const aria2EnableNatPmp = SettingKey<bool>(
-    'aria2EnableNatPmp',
-    true,
+  /// 做种停止策略：none=不自动停止（一直做种）/
+  /// time=做种指定时长后停止 / ratio=分享率达到阈值后停止。
+  static const magnetSeedingStopMode = SettingKey<String>(
+    'magnetSeedingStopMode',
+    'ratio',
     group: SettingGroup.magnet,
   );
-  /// 做种时间（分钟）。0 表示下载完成后立即停止做种；-1 表示不限时。
-  static const aria2SeedTime = SettingKey<int>(
-    'aria2SeedTime',
-    -1,
+  /// 做种停止时长（小时），配合 [magnetSeedingStopMode]=time。
+  static const magnetSeedingStopHours = SettingKey<int>(
+    'magnetSeedingStopHours',
+    24,
     group: SettingGroup.magnet,
   );
-  /// 做种分享率，达到该比例后停止做种。0 表示不限。
-  static const aria2SeedRatio = SettingKey<double>(
-    'aria2SeedRatio',
+  /// 做种停止分享率阈值（0.1-10.0），配合 [magnetSeedingStopMode]=ratio。
+  static const magnetSeedingStopRatio = SettingKey<double>(
+    'magnetSeedingStopRatio',
     1.0,
     group: SettingGroup.magnet,
   );
+  /// 是否启用 DHT 节点发现。
+  static const magnetEnableDht = SettingKey<bool>(
+    'magnetEnableDht',
+    true,
+    group: SettingGroup.magnet,
+  );
+  /// 是否启用 UPnP / NAT-PMP 端口映射。
+  static const magnetEnableUpnp = SettingKey<bool>(
+    'magnetEnableUpnp',
+    true,
+    group: SettingGroup.magnet,
+  );
+  /// 是否强制加密连接。
+  static const magnetForceEncrypt = SettingKey<bool>(
+    'magnetForceEncrypt',
+    false,
+    group: SettingGroup.magnet,
+  );
+  /// 是否启用 IPv6 监听。
+  static const magnetEnableIpv6 = SettingKey<bool>(
+    'magnetEnableIpv6',
+    false,
+    group: SettingGroup.magnet,
+  );
   /// 是否自动更新 tracker 列表。
-  static const aria2TrackerAutoUpdate = SettingKey<bool>(
-    'aria2TrackerAutoUpdate',
+  static const magnetTrackerAutoUpdate = SettingKey<bool>(
+    'magnetTrackerAutoUpdate',
     true,
     group: SettingGroup.magnet,
   );
   /// tracker 自动更新间隔（小时）。
-  static const aria2TrackerUpdateHours = SettingKey<int>(
-    'aria2TrackerUpdateHours',
+  static const magnetTrackerUpdateHours = SettingKey<int>(
+    'magnetTrackerUpdateHours',
     24,
     group: SettingGroup.magnet,
   );
   /// tracker 更新源，每行一个 URL。
-  static const aria2TrackerSources = SettingKey<String>(
-    'aria2TrackerSources',
+  static const magnetTrackerSources = SettingKey<String>(
+    'magnetTrackerSources',
     'https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all.txt\n'
         'https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/best.txt\n'
         'https://newtrackon.com/api/stable',
     group: SettingGroup.magnet,
   );
   /// tracker 最近一次成功更新时间（epoch 毫秒），0 表示从未更新。
-  static const aria2TrackerLastUpdated = SettingKey<int>(
-    'aria2TrackerLastUpdated',
+  static const magnetTrackerLastUpdated = SettingKey<int>(
+    'magnetTrackerLastUpdated',
     0,
     group: SettingGroup.magnet,
   );
   /// 缓存的 tracker 列表（每行一个 announce URL）。
-  static const aria2TrackersCache = SettingKey<String>(
-    'aria2TrackersCache',
+  static const magnetTrackersCache = SettingKey<String>(
+    'magnetTrackersCache',
     '',
-    group: SettingGroup.magnet,
-  );
-  /// 是否自动封禁吸血节点。
-  static const aria2BanLeecher = SettingKey<bool>(
-    'aria2BanLeecher',
-    true,
-    group: SettingGroup.magnet,
-  );
-  /// 是否自动封禁行为异常 IP（连接抖动、peerId 频繁变化等）。
-  static const aria2BanAbnormalIp = SettingKey<bool>(
-    'aria2BanAbnormalIp',
-    true,
-    group: SettingGroup.magnet,
-  );
-  /// 对等节点行为扫描间隔（秒）。
-  static const aria2BanScanInterval = SettingKey<int>(
-    'aria2BanScanInterval',
-    30,
-    group: SettingGroup.magnet,
-  );
-  /// 触发封禁所需的行为得分（越大越保守）。
-  static const aria2BanThreshold = SettingKey<int>(
-    'aria2BanThreshold',
-    3,
-    group: SettingGroup.magnet,
-  );
-  /// 单个对等节点被判定为“吸血”的最短累计观察时长（秒）。
-  static const aria2BanObserveSeconds = SettingKey<int>(
-    'aria2BanObserveSeconds',
-    120,
-    group: SettingGroup.magnet,
-  );
-  /// 吸血判定：我方已上传量需超过该值（KiB）且对端回传不足其 5% 时才计一次。
-  static const aria2BanUploadThresholdKb = SettingKey<int>(
-    'aria2BanUploadThresholdKb',
-    2048,
-    group: SettingGroup.magnet,
-  );
-  /// 被封禁的 IP 列表（JSON 数组），持久化保存。
-  static const aria2BannedIps = SettingKey<String>(
-    'aria2BannedIps',
-    '[]',
     group: SettingGroup.magnet,
   );
 
@@ -755,9 +693,27 @@ class SettingsKeys {
     '{}',
     group: SettingGroup.media,
   );
+  /// 媒体库视图模式：`folder`（按文件夹）/ `anime`（按番剧）/ `grid`（网格海报墙）。
   static const localMediaViewMode = SettingKey<String>(
     'localMediaViewMode',
     'folder',
+    group: SettingGroup.media,
+  );
+
+  /// 番剧 / 网格视图的排序依据：`date`（首播日期）/ `name`（标题）/ `count`（文件数）。
+  ///
+  /// 默认按番剧首播日期排序，配合 [localMediaSortDescending] 默认降序，
+  /// 也就是「最新番剧排在最前面」。
+  static const localMediaSortMode = SettingKey<String>(
+    'localMediaSortMode',
+    'date',
+    group: SettingGroup.media,
+  );
+
+  /// 排序方向，true 为降序（日期越新 / 文件越多越靠前）。
+  static const localMediaSortDescending = SettingKey<bool>(
+    'localMediaSortDescending',
+    true,
     group: SettingGroup.media,
   );
   /// 图片识别兜底：ffmpeg 可执行文件路径，留空则自动从 PATH/常见目录查找。
@@ -769,6 +725,16 @@ class SettingsKeys {
   /// 是否启用「抽帧 → trace.moe 以图搜番」兜底。
   static const localMediaTraceFallback = SettingKey<bool>(
     'localMediaTraceFallback',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// 批量搜刮时是否跳过已匹配的文件夹，只处理尚未匹配的番剧。
+  ///
+  /// 默认开启：已匹配的结果通常已人工确认过，重复搜刮既浪费请求配额，
+  /// 也有把正确结果覆盖成错误匹配的风险。
+  static const localMediaScrapeOnlyUnmatched = SettingKey<bool>(
+    'localMediaScrapeOnlyUnmatched',
     true,
     group: SettingGroup.media,
   );
@@ -872,43 +838,35 @@ class SettingsKeys {
     mikanBaseUrl,
     magnetSearchSources,
     magnetDefaultSource,
-    magnetAria2Enable,
-    magnetAria2RpcUrl,
-    magnetAria2Secret,
     magnetSubscriptions,
     magnetDownloadEntries,
-    magnetEngineMode,
-    aria2ExecutablePath,
-    aria2RpcPort,
-    aria2DownloadDir,
-    aria2MaxConcurrentDownloads,
-    aria2ListenPort,
-    aria2MaxPeers,
-    aria2MaxUploadLimitKb,
-    aria2EnableDht,
-    aria2EnableDht6,
-    aria2EnableUpnp,
-    aria2EnableNatPmp,
-    aria2SeedTime,
-    aria2SeedRatio,
-    aria2TrackerAutoUpdate,
-    aria2TrackerUpdateHours,
-    aria2TrackerSources,
-    aria2TrackerLastUpdated,
-    aria2TrackersCache,
-    aria2BanLeecher,
-    aria2BanAbnormalIp,
-    aria2BanScanInterval,
-    aria2BanThreshold,
-    aria2BanObserveSeconds,
-    aria2BanUploadThresholdKb,
-    aria2BannedIps,
+    magnetEngineEnabled,
+    magnetDownloadDir,
+    magnetListenPort,
+    magnetMaxPeers,
+    magnetMaxUploadLimitKb,
+    magnetMaxDownloadLimitKb,
+    magnetSeedingStopMode,
+    magnetSeedingStopHours,
+    magnetSeedingStopRatio,
+    magnetEnableDht,
+    magnetEnableUpnp,
+    magnetForceEncrypt,
+    magnetEnableIpv6,
+    magnetTrackerAutoUpdate,
+    magnetTrackerUpdateHours,
+    magnetTrackerSources,
+    magnetTrackerLastUpdated,
+    magnetTrackersCache,
     localMediaFolders,
     localMediaGroupByFolder,
     localMediaScrapeResults,
     localMediaViewMode,
+    localMediaSortMode,
+    localMediaSortDescending,
     localMediaFfmpegPath,
     localMediaTraceFallback,
+    localMediaScrapeOnlyUnmatched,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {

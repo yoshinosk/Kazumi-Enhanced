@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:window_manager/window_manager.dart';
@@ -54,6 +55,7 @@ class SysAppBar extends StatelessWidget implements PreferredSizeWidget {
     if (isDesktop()) {
       // acs.add(IconButton(onPressed: () => windowManager.minimize(), icon: const Icon(Icons.minimize)));
       if (!showWindowButton()) {
+        acs.add(const WindowMaximizeButton());
         acs.add(CloseButton(onPressed: () => windowManager.close()));
       }
       acs.add(const SizedBox(width: 8));

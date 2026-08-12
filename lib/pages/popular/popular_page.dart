@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/utils/device.dart';
 
 class PopularPage extends StatefulWidget {
@@ -248,6 +249,7 @@ class _PopularPageState extends State<PopularPage> {
     );
     if (isDesktop()) {
       if (!showWindowButton()) {
+        actions.add(const WindowMaximizeButton());
         actions.add(
           IconButton(
             tooltip: '退出',

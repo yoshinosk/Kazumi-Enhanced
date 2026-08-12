@@ -83,7 +83,7 @@ class MagnetSubscription {
   /// 资源体积上限（MB，仅 Animes Garden 生效，客户端过滤）。
   final double? maxSizeMb;
 
-  /// 下载目录（aria2 下载该订阅资源时的 dir，留空用默认）。
+  /// 下载目录（磁力引擎下载该订阅资源时的 dir，留空用默认）。
   final String? downloadPath;
 
   const MagnetSubscription({
@@ -172,113 +172,6 @@ class MagnetSubscription {
         if (maxSizeMb != null) 'maxSizeMb': maxSizeMb,
         if (downloadPath != null) 'downloadPath': downloadPath,
       };
-}
-
-/// 一个 aria2 下载任务的状态。
-class MagnetDownloadTask {
-  final String gid;
-  final String status;
-  final int totalLength;
-  final int completedLength;
-  final int downloadSpeed;
-  final String fileName;
-
-  const MagnetDownloadTask({
-    required this.gid,
-    required this.status,
-    required this.totalLength,
-    required this.completedLength,
-    required this.downloadSpeed,
-    required this.fileName,
-  });
-
-  double get progress =>
-      totalLength > 0 ? completedLength / totalLength : 0.0;
-
-  bool get isCompleted => status == 'complete';
-  bool get isActive => status == 'active' || status == 'waiting' || status == 'paused';
-  bool get isError => status == 'error' || status == 'removed';
-}
-
-/// `aria2.getPeers` 返回的单个对等节点信息。
-class MagnetPeer {
-  final String peerId;
-  final String ip;
-  final String port;
-  final String bitfield;
-  final bool amChoking;
-  final bool peerChoking;
-  final int downloadSpeed;
-  final int uploadSpeed;
-  final bool seeder;
-
-  const MagnetPeer({
-    required this.peerId,
-    required this.ip,
-    required this.port,
-    required this.bitfield,
-    required this.amChoking,
-    required this.peerChoking,
-    required this.downloadSpeed,
-    required this.uploadSpeed,
-    required this.seeder,
-  });
-
-  /// 该节点对我的分享是否完整（是否全种）。
-  bool get hasFullData => bitfield.contains('0') == false && bitfield.isNotEmpty;
-
-  factory MagnetPeer.fromJson(Map<String, dynamic> json) {
-    int parseInt(dynamic v) {
-      if (v is int) return v;
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
-    }
-
-    return MagnetPeer(
-      peerId: json['peerId'] as String? ?? '',
-      ip: json['ip'] as String? ?? '',
-      port: json['port'] as String? ?? '',
-      bitfield: json['bitfield'] as String? ?? '',
-      amChoking: (json['amChoking'] as String?) == 'true',
-      peerChoking: (json['peerChoking'] as String?) == 'true',
-      downloadSpeed: parseInt(json['downloadSpeed']),
-      uploadSpeed: parseInt(json['uploadSpeed']),
-      seeder: (json['seeder'] as String?) == 'true',
-    );
-  }
-}
-
-/// `aria2.getGlobalStat` 返回的全局统计。
-class MagnetGlobalStat {
-  final int downloadSpeed;
-  final int uploadSpeed;
-  final int numActive;
-  final int numWaiting;
-  final int numStopped;
-
-  const MagnetGlobalStat({
-    required this.downloadSpeed,
-    required this.uploadSpeed,
-    required this.numActive,
-    required this.numWaiting,
-    required this.numStopped,
-  });
-
-  factory MagnetGlobalStat.fromJson(Map<String, dynamic> json) {
-    int parseInt(dynamic v) {
-      if (v is int) return v;
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
-    }
-
-    return MagnetGlobalStat(
-      downloadSpeed: parseInt(json['downloadSpeed']),
-      uploadSpeed: parseInt(json['uploadSpeed']),
-      numActive: parseInt(json['numActive']),
-      numWaiting: parseInt(json['numWaiting']),
-      numStopped: parseInt(json['numStopped']),
-    );
-  }
 }
 
 /// 订阅仓库：以 JSON 字符串形式持久化在设置盒子中，避免新增 Hive 适配器。

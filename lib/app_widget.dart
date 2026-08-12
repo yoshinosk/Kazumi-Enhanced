@@ -5,6 +5,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
@@ -206,8 +207,19 @@ class _AppWidgetState extends State<AppWidget>
       case 'show_window':
         windowManager.show();
       case 'exit':
-        exit(0);
+        _flushMagnetThenExit();
     }
+  }
+
+  /// 退出前冲刷磁力下载进度（任务索引持久化 + 引擎暂停），
+  /// 避免直接 `exit(0)` 丢进程导致最近进度丢失。
+  Future<void> _flushMagnetThenExit() async {
+    try {
+      await inject<MagnetController>().dispose();
+    } catch (e) {
+      KazumiLogger().w('AppWidget: magnet dispose on exit failed', error: e);
+    }
+    exit(0);
   }
 
   /// 处理窗口关闭事件，
@@ -218,7 +230,7 @@ class _AppWidgetState extends State<AppWidget>
 
     switch (exitBehavior) {
       case 0:
-        exit(0);
+        _flushMagnetThenExit();
       case 1:
         KazumiDialog.dismiss();
         windowManager.hide();
@@ -262,7 +274,7 @@ class _AppWidgetState extends State<AppWidget>
                     if (saveExitBehavior) {
                       await GStorage.putSetting(SettingsKeys.exitBehavior, 0);
                     }
-                    exit(0);
+                    _flushMagnetThenExit();
                   },
                   child: const Text('退出 Kazumi')),
               TextButton(

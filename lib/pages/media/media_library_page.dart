@@ -98,6 +98,8 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
         actions: [
           // 视图切换
           _ViewModeToggle(controller: controller),
+          // 排序（仅番剧 / 网格视图有意义）
+          _SortMenu(controller: controller),
           IconButton(
             tooltip: '扫描',
             icon: const Icon(Icons.refresh_rounded),
@@ -136,6 +138,9 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
               title: '所选文件夹中没有发现视频文件',
             ),
           );
+        }
+        if (controller.isGridMode) {
+          return _GridView(controller: controller, onFileTap: _playFile);
         }
         return controller.isAnimeMode
             ? _AnimeView(controller: controller, onFileTap: _playFile)
@@ -177,26 +182,80 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
   }
 
   void _confirmScrape(BuildContext context) {
+    final total = controller.library.length;
+    final unmatched = controller.unmatchedCount;
+    var onlyUnmatched = controller.scrapeOnlyUnmatched;
+
     KazumiDialog.show(
-      builder: (context) => AlertDialog(
-        title: const Text('搜刮番剧元数据'),
-        content: const Text('将根据文件夹名称自动搜索 Bangumi 匹配番剧信息，可能需要一些时间。'),
-        actions: [
-          TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
-            child: Text(
-              '取消',
-              style: TextStyle(color: Theme.of(context).colorScheme.outline),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final theme = Theme.of(context);
+          final targetCount = onlyUnmatched ? unmatched : total;
+          final canStart = targetCount > 0;
+          return AlertDialog(
+            title: const Text('搜刮番剧元数据'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('将根据文件夹名称自动搜索 Bangumi 匹配番剧信息，可能需要一些时间。'),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    '共 $total 个文件夹 · 已匹配 ${total - unmatched} · 未匹配 $unmatched',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                CheckboxListTile(
+                  value: onlyUnmatched,
+                  onChanged: (value) {
+                    final next = value ?? false;
+                    setDialogState(() => onlyUnmatched = next);
+                    controller.setScrapeOnlyUnmatched(next);
+                  },
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
+                  title: const Text('仅搜刮未匹配的番剧'),
+                  subtitle: Text(
+                    onlyUnmatched
+                        ? '跳过已匹配的 ${total - unmatched} 个文件夹，保留其现有结果'
+                        : '重新搜刮全部 $total 个文件夹，已有匹配可能被覆盖',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: onlyUnmatched
+                          ? theme.colorScheme.outline
+                          : theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          TextButton(
-            onPressed: () {
-              controller.scrapeAll();
-              KazumiDialog.dismiss();
-            },
-            child: const Text('开始搜刮'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => KazumiDialog.dismiss(),
+                child: Text(
+                  '取消',
+                  style: TextStyle(color: theme.colorScheme.outline),
+                ),
+              ),
+              TextButton(
+                onPressed: canStart
+                    ? () {
+                        controller.scrapeAll(onlyUnmatched: onlyUnmatched);
+                        KazumiDialog.dismiss();
+                      }
+                    : null,
+                child: Text(
+                  canStart ? '开始搜刮（$targetCount）' : '无待搜刮项',
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -227,18 +286,108 @@ class _ViewModeToggle extends StatelessWidget {
 
   final MediaController controller;
 
+  IconData _iconFor(String mode) => switch (mode) {
+        'grid' => Icons.grid_view_rounded,
+        'anime' => Icons.movie_outlined,
+        _ => Icons.folder_outlined,
+      };
+
   @override
   Widget build(BuildContext context) {
     return Observer(builder: (_) {
+      final current = controller.viewMode;
       return PopupMenuButton<String>(
         tooltip: '视图模式',
-        icon: Icon(controller.isAnimeMode
-            ? Icons.movie_outlined
-            : Icons.folder_outlined),
+        icon: Icon(_iconFor(current)),
         onSelected: (mode) => controller.setViewMode(mode),
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'folder', child: Text('按文件夹')),
-          PopupMenuItem(value: 'anime', child: Text('按番剧')),
+        itemBuilder: (_) => [
+          for (final entry in const [
+            ('folder', '按文件夹', Icons.folder_outlined),
+            ('anime', '按番剧', Icons.movie_outlined),
+            ('grid', '网格', Icons.grid_view_rounded),
+          ])
+            PopupMenuItem(
+              value: entry.$1,
+              child: Row(
+                children: [
+                  Icon(entry.$3, size: 20),
+                  const SizedBox(width: 12),
+                  Text(entry.$2),
+                  if (current == entry.$1) ...[
+                    const Spacer(),
+                    const Icon(Icons.check_rounded, size: 18),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      );
+    });
+  }
+}
+
+// ============ 排序菜单 ============
+
+/// 番剧 / 网格视图的排序控制：依据 + 方向。
+///
+/// 文件夹视图按磁盘扫描顺序展示，排序无意义，直接隐藏。
+class _SortMenu extends StatelessWidget {
+  const _SortMenu({required this.controller});
+
+  final MediaController controller;
+
+  static const _modes = [
+    ('date', '按番剧日期'),
+    ('name', '按标题'),
+    ('count', '按文件数'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Observer(builder: (_) {
+      if (!controller.isAnimeMode && !controller.isGridMode) {
+        return const SizedBox.shrink();
+      }
+      final current = controller.sortMode;
+      final desc = controller.sortDescending;
+      return PopupMenuButton<String>(
+        tooltip: '排序方式',
+        icon: const Icon(Icons.sort_rounded),
+        onSelected: (value) {
+          if (value == '__direction__') {
+            controller.setSortDescending(!desc);
+          } else {
+            controller.setSortMode(value);
+          }
+        },
+        itemBuilder: (_) => [
+          for (final entry in _modes)
+            PopupMenuItem(
+              value: entry.$1,
+              child: Row(
+                children: [
+                  Text(entry.$2),
+                  if (current == entry.$1) ...[
+                    const Spacer(),
+                    const Icon(Icons.check_rounded, size: 18),
+                  ],
+                ],
+              ),
+            ),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: '__direction__',
+            child: Row(
+              children: [
+                Icon(
+                  desc ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                  size: 18,
+                ),
+                const SizedBox(width: 12),
+                Text(desc ? '降序（最新在前）' : '升序（最早在前）'),
+              ],
+            ),
+          ),
         ],
       );
     });
@@ -289,7 +438,9 @@ class _StatsBar extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            '共 ${controller.library.length} 个文件夹，${controller.totalFiles} 个视频',
+            controller.isGridMode
+                ? '共 ${controller.gridItems.length} 项 · ${controller.totalFiles} 个视频'
+                : '共 ${controller.library.length} 个文件夹，${controller.totalFiles} 个视频',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const Spacer(),
@@ -511,6 +662,7 @@ class _FolderSectionState extends State<_FolderSection> {
       file,
       widget.folder.files,
       widget.controller.getScrapeInfo(widget.folder.path),
+      onPlay: widget.onFileTap,
     );
   }
 
@@ -680,7 +832,13 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                         group.info,
                       ),
                       onMenu: () => _showFileActionSheet(
-                        context, widget.controller, file, folder.files, group.info),
+                        context,
+                        widget.controller,
+                        file,
+                        folder.files,
+                        group.info,
+                        onPlay: widget.onFileTap,
+                      ),
                     ),
                 ],
               ],
@@ -700,6 +858,382 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
       ),
     );
   }
+}
+
+// ============ 网格视图 ============
+
+class _GridView extends StatelessWidget {
+  const _GridView({required this.controller, required this.onFileTap});
+
+  final MediaController controller;
+  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
+      onFileTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Observer(builder: (_) {
+      final items = controller.gridItems;
+      return CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: _StatsBar(controller: controller)),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            sliver: SliverGrid.builder(
+              gridDelegate:
+                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                // 桌面宽屏下自动铺满，窄屏至少两列
+                maxCrossAxisExtent: 168,
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 14,
+                childAspectRatio: 0.56,
+              ),
+              itemCount: items.length,
+              itemBuilder: (context, index) => _GridCard(
+                item: items[index],
+                onTap: () => _showGridItemSheet(
+                  context,
+                  controller,
+                  items[index],
+                  onFileTap,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+/// 网格海报卡片：悬停时轻微上浮放大，桌面端手感更接近原生媒体库应用。
+class _GridCard extends StatefulWidget {
+  const _GridCard({required this.item, required this.onTap});
+
+  final MediaGridItem item;
+  final VoidCallback onTap;
+
+  @override
+  State<_GridCard> createState() => _GridCardState();
+}
+
+class _GridCardState extends State<_GridCard> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final item = widget.item;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedScale(
+        scale: _hovered ? 1.04 : 1.0,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final w = constraints.maxWidth;
+                    final h = constraints.maxHeight;
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: _hovered
+                              ? [
+                                  BoxShadow(
+                                    color: colorScheme.shadow
+                                        .withValues(alpha: 0.28),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (item.coverUrl.isNotEmpty)
+                              NetworkImgLayer(
+                                src: item.coverUrl,
+                                width: w,
+                                height: h,
+                              )
+                            else
+                              Container(
+                                color: colorScheme.surfaceContainerHighest,
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  item.isMatched
+                                      ? Icons.movie_outlined
+                                      : Icons.help_outline_rounded,
+                                  size: 34,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            // 底部渐变，保证角标与文字在浅色封面上依然可读
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              height: h * 0.4,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withValues(alpha: 0.62),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 集数角标
+                            Positioned(
+                              right: 6,
+                              top: 6,
+                              child: _Badge(
+                                text: '${item.fileCount}',
+                                background:
+                                    colorScheme.primary.withValues(alpha: 0.92),
+                                foreground: colorScheme.onPrimary,
+                              ),
+                            ),
+                            if (!item.isMatched)
+                              Positioned(
+                                left: 6,
+                                top: 6,
+                                child: _Badge(
+                                  text: '未匹配',
+                                  background:
+                                      colorScheme.error.withValues(alpha: 0.92),
+                                  foreground: colorScheme.onError,
+                                ),
+                              ),
+                            if (item.airDate.isNotEmpty)
+                              Positioned(
+                                left: 8,
+                                right: 8,
+                                bottom: 6,
+                                child: Text(
+                                  item.airDate,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                item.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  color: _hovered ? colorScheme.primary : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({
+    required this.text,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String text;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w600,
+              height: 1.1,
+            ),
+      ),
+    );
+  }
+}
+
+/// 点击网格卡片后弹出的剧集列表。
+void _showGridItemSheet(
+  BuildContext context,
+  MediaController controller,
+  MediaGridItem item,
+  Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
+      onFileTap,
+) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.3,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (context, scrollController) {
+        final theme = Theme.of(context);
+        final multiFolder = item.folders.length > 1;
+        return CustomScrollView(
+          controller: scrollController,
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: SizedBox(
+                        width: 56,
+                        height: 78,
+                        child: item.coverUrl.isNotEmpty
+                            ? NetworkImgLayer(
+                                src: item.coverUrl,
+                                width: 56,
+                                height: 78,
+                              )
+                            : Container(
+                                color: theme.colorScheme.surfaceContainerHighest,
+                                child: const Icon(Icons.movie_outlined, size: 26),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${item.fileCount} 个文件'
+                            '${multiFolder ? " · ${item.folders.length} 个文件夹" : ""}'
+                            '${item.airDate.isNotEmpty ? " · ${item.airDate}" : ""}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          if (!item.isMatched)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  showDialog<void>(
+                                    context: sheetContext,
+                                    builder: (_) => _ManualMatchDialog(
+                                      controller: controller,
+                                      folder: item.folders.first,
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.search_rounded, size: 18),
+                                label: const Text('手动匹配番剧'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(child: Divider(height: 1)),
+            for (final folder in item.folders) ...[
+              if (multiFolder)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 2),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.folder_outlined, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            folder.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              SliverList.builder(
+                itemCount: folder.files.length,
+                itemBuilder: (context, index) {
+                  final file = folder.files[index];
+                  return _FileTile(
+                    file: file,
+                    onTap: () {
+                      Navigator.pop(context);
+                      onFileTap(file, folder.files, item.info);
+                    },
+                    onMenu: () => _showFileActionSheet(
+                      sheetContext,
+                      controller,
+                      file,
+                      folder.files,
+                      item.info,
+                      onPlay: onFileTap,
+                    ),
+                  );
+                },
+              ),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          ],
+        );
+      },
+    ),
+  );
 }
 
 // ============ 文件条目 ============
@@ -748,13 +1282,21 @@ class _FileTile extends StatelessWidget {
 
 // ============ 文件操作菜单 ============
 
+/// [onPlay] 必须由调用方显式传入。
+///
+/// 不要退回 `findAncestorStateOfType<_MediaLibraryPageState>()` ——
+/// 模态路由挂在 Navigator 下、不在页面子树里，从 sheet 内部往上找拿不到页面 State，
+/// 会导致「播放」静默失效。
 void _showFileActionSheet(
   BuildContext context,
   MediaController controller,
   LocalMediaFile file,
   List<LocalMediaFile> siblings,
-  MediaScrapeInfo? info,
-) {
+  MediaScrapeInfo? info, {
+  required Future<void> Function(
+          LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
+      onPlay,
+}) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -778,11 +1320,9 @@ void _showFileActionSheet(
             leading: const Icon(Icons.play_arrow_rounded),
             title: const Text('播放'),
             onTap: () {
-              final _MediaLibraryPageState? pageState =
-                  context.findAncestorStateOfType<_MediaLibraryPageState>();
               Navigator.pop(context);
               if (Platform.isWindows) {
-                pageState?._playFile(file, siblings, info);
+                onPlay(file, siblings, info);
               } else {
                 OpenFilex.open(file.path);
               }

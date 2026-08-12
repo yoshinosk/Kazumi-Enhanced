@@ -100,7 +100,7 @@ class MikanSearchService {
               '');
 
       // 当 enclosure 提供了 torrent 直链时，若仍缺少磁力链，
-      // 后续可由 aria2 直接下载该种子。
+      // 后续可由磁力引擎直接下载该种子。
       result.add(MagnetSearchItem(
         title: title,
         magnetLink: magnet,

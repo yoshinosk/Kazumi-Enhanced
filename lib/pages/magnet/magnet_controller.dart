@@ -3,12 +3,11 @@ import 'dart:async';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/animes_garden_service.dart';
-import 'package:kazumi/services/magnet/aria2_engine.dart';
+import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/magnet/magnet_subscription_service.dart';
-import 'package:kazumi/services/magnet/peer_protection_monitor.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:mobx/mobx.dart';
 
@@ -75,20 +74,17 @@ abstract class _MagnetController with Store {
   String currentSourceId =
       GStorage.getSetting(SettingsKeys.magnetDefaultSource);
 
-  bool get aria2Enabled => _downloads.aria2Enabled;
+  bool get engineEnabled => _downloads.engineEnabled;
 
   /// 内置引擎状态。
   @observable
-  Aria2EngineState engineState = Aria2EngineState.stopped;
+  LibtorrentEngineState engineState = LibtorrentEngineState.stopped;
 
   @observable
   String? engineError;
 
   /// 内置引擎正在运行吗。
-  bool get engineRunning => engineState == Aria2EngineState.running;
-
-  /// 内置引擎当前 RPC 地址（未启动时可能为 null）。
-  String? get engineRpcUrl => _downloads.engine.activeRpcUrl;
+  bool get engineRunning => engineState == LibtorrentEngineState.running;
 
   /// Tracker 缓存数量。
   @observable
@@ -100,10 +96,6 @@ abstract class _MagnetController with Store {
 
   @observable
   bool trackerUpdating = false;
-
-  /// 已封禁 IP 列表。
-  @observable
-  ObservableList<BannedPeer> bannedPeers = ObservableList();
 
   /// 当前默认搜索源。
   MagnetSearchSource get defaultSource =>
@@ -129,13 +121,6 @@ abstract class _MagnetController with Store {
       engineState = state;
       engineError = _downloads.engine.lastError;
     };
-    _downloads.onPeerBanned = (peer) {
-      _refreshPeerBans();
-      KazumiDialog.showToast(
-        message: '已自动封禁可疑节点 ${peer.ip}（${peer.reason}）',
-        duration: const Duration(seconds: 4),
-      );
-    };
     _subscriptions.onSubscriptionsChanged = (list) {
       subscriptions
         ..clear()
@@ -147,8 +132,8 @@ abstract class _MagnetController with Store {
         message: '订阅「${sub.name}」有 ${items.length} 条新内容',
         duration: const Duration(seconds: 3),
       );
-      // 订阅自动下载：Aria2 启用时把新条目提交下载，使用订阅指定的下载目录。
-      if (_downloads.aria2Enabled && items.isNotEmpty) {
+      // 订阅自动下载：引擎启用时把新条目提交下载，使用订阅指定的下载目录。
+      if (_downloads.engineEnabled && items.isNotEmpty) {
         for (final item in items) {
           _downloads.add(item, dir: sub.downloadPath);
         }
@@ -166,12 +151,11 @@ abstract class _MagnetController with Store {
           .w('MagnetController: subscription service init failed', error: e);
     }
     _refreshEngineInfo();
-    _refreshPeerBans();
   }
 
-  void dispose() {
-    _downloads.dispose();
-    _subscriptions.dispose();
+  Future<void> dispose() async {
+    await _downloads.dispose();
+    await _subscriptions.dispose();
   }
 
   /// 同步引擎 / tracker 状态到 observable。
@@ -180,12 +164,6 @@ abstract class _MagnetController with Store {
     engineError = _downloads.engine.lastError;
     trackerCount = _downloads.cachedTrackerCount;
     trackerUpdatedAt = _downloads.trackerLastUpdated;
-  }
-
-  void _refreshPeerBans() {
-    bannedPeers
-      ..clear()
-      ..addAll(_downloads.bannedPeers);
   }
 
   /// 手动启动内置引擎。
@@ -221,20 +199,6 @@ abstract class _MagnetController with Store {
     } else {
       KazumiDialog.showToast(message: 'Tracker 更新失败，请检查网络后重试');
     }
-  }
-
-  /// 解封某个 IP。
-  @action
-  Future<void> unbanPeers(String ip) async {
-    await _downloads.unbanIp(ip);
-    _refreshPeerBans();
-  }
-
-  /// 清空全部封禁。
-  @action
-  Future<void> clearPeerBans() async {
-    await _downloads.clearBans();
-    _refreshPeerBans();
   }
 
   @action
@@ -357,13 +321,13 @@ abstract class _MagnetController with Store {
 
   @action
   Future<void> addDownload(MagnetSearchItem item, {String? dir}) async {
-    if (!aria2Enabled) {
-      KazumiDialog.showToast(message: '请先在设置中开启 Aria2');
+    if (!engineEnabled) {
+      KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
       return;
     }
     final gid = await _downloads.add(item, dir: dir);
     if (gid.isEmpty) {
-      KazumiDialog.showToast(message: '提交下载失败，请检查 Aria2 连接');
+      KazumiDialog.showToast(message: '提交下载失败，请检查引擎状态');
       return;
     }
     KazumiDialog.showToast(message: '已添加到下载队列');
@@ -390,13 +354,13 @@ abstract class _MagnetController with Store {
   @action
   Future<void> refreshDownloads() => _downloads.refresh();
 
-  /// Aria2 设置变化时调用，重新启动 / 停止引擎与轮询。
+  /// 引擎设置变化时调用，重新启动 / 停止引擎。
   @action
-  Future<void> applyAria2SettingsChanged() async {
+  Future<void> applyMagnetSettingsChanged() async {
     await _downloads.applySettingsChanged();
     _refreshEngineInfo();
   }
 
-  /// 测试 Aria2 连接，返回版本号或 null。
-  Future<String?> pingAria2() => _downloads.ping();
+  /// 测试引擎连接，返回 libtorrent 版本或 null。
+  Future<String?> pingEngine() => _downloads.ping();
 }

@@ -6,6 +6,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/video_frame_extractor.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/chinese_convert.dart';
 import 'package:path/path.dart' as p;
 
 /// 单个文件夹的搜刮结果。
@@ -84,6 +85,9 @@ class ScrapeProgress {
 class MediaScraper {
   MediaScraper();
 
+  /// 单个标题最多派生的候选关键词数，避免一个文件夹打爆搜索接口。
+  static const int _kMaxKeywordVariants = 6;
+
   /// 取出「basename」，仅在末尾是真正的视频扩展名时去掉扩展名。
   ///
   /// 不能用 `p.basenameWithoutExtension`：文件夹名里如果自带点号
@@ -134,10 +138,18 @@ class MediaScraper {
     name = name.replaceAll(RegExp(r'\[[^\]]*\]'), ' ');
     // 移除圆括号内容 (xxx)
     name = name.replaceAll(RegExp(r'\([^)]*\)'), ' ');
+    // 移除全角圆括号 （xxx） —— 台配源常用，如 `（僅限港澳台）`
+    name = name.replaceAll(RegExp(r'（[^）]*）'), ' ');
     // 移除【xxx】
     name = name.replaceAll(RegExp(r'【[^】]*】'), ' ');
     // 移除花括号 {xxx}
     name = name.replaceAll(RegExp(r'\{[^}]*\}'), ' ');
+
+    // 移除播出地区/语言限定标记（未被括号包住时的兜底）
+    name = name.replaceAll(
+      RegExp(r'(僅限|仅限)?(港澳台|台澎金馬|台澎金马|臺灣|台灣|台湾)(地區|地区)?'),
+      ' ',
+    );
 
     // 移除分辨率/编码标签
     name = name.replaceAll(
@@ -168,6 +180,15 @@ class MediaScraper {
           caseSensitive: false),
       ' ',
     );
+
+    // 全角标点归一为半角：`Re：從零開始…` 与条目名 `Re:从零开始…` 只差一个冒号，
+    // 不归一会白白丢掉召回。
+    name = name
+        .replaceAll('：', ':')
+        .replaceAll('！', '!')
+        .replaceAll('？', '?')
+        .replaceAll('，', ',')
+        .replaceAll('　', ' ');
 
     // 点号分隔转空格
     name = name.replaceAll('.', ' ');
@@ -241,9 +262,88 @@ class MediaScraper {
     return map[v];
   }
 
+  /// 归一化用于比较的字符串：转小写 + 去装饰符号 + **繁体转简体**。
+  ///
+  /// 繁简归一是关键：台配源（[ANi]/[Baha]）标题是繁体，而 Bangumi
+  /// 条目名基本是简体或日文原名，不归一就永远打不上分。
   String _normalize(String s) {
-    return s.toLowerCase().replaceAll(
+    return toSimplifiedChinese(s).toLowerCase().replaceAll(
         RegExp(r'[\s\-_·・.。:：（）()\[\]【】{}「」『』"''~～+×x*]'), '');
+  }
+
+  /// 去掉标题里的「季数标记及其之后的一切」，得到主标题。
+  ///
+  /// 台配标题常把季数和分篇一起堆在后面，整段丢弃才能拿到可搜索的主名：
+  /// - `歡迎來到實力至上主義的教室 第四季 2年級篇 第一學期` → `歡迎來到實力至上主義的教室`
+  /// - `杖與劍的魔劍譚 Season 2` → `杖與劍的魔劍譚`
+  String stripSeasonSuffix(String title) {
+    var out = title;
+    // 中文：第X季 / 第X期 / 第X部（连同其后的副标题一并丢弃）
+    out = out.replaceFirst(
+        RegExp(r'\s*第\s*[一二三四五六七八九十\d１-９]+\s*[季期部].*$'), '');
+    // 英文：Season 2 / S2 / 2nd Season / Final Season（必须在结尾且前有分隔）
+    out = out.replaceFirst(
+      RegExp(
+        r'\s+(?:season\s*\d{1,2}|s\d{1,2}|\d{1,2}(?:st|nd|rd|th)\s+season|final\s+season)\s*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    return out.trim();
+  }
+
+  /// 去掉「～副标题～」「 -Sub Title- 」这类装饰性副标题。
+  ///
+  /// - `無職轉生～到了異世界就拿出真本事～` → `無職轉生`
+  /// - `ATRI -My Dear Moments-` → `ATRI`
+  ///
+  /// 不处理冒号副标题：`Re:從零開始的異世界生活` 砍掉冒号后只剩 `Re`，得不偿失。
+  String stripSubtitle(String title) {
+    var out = title;
+    // 全角波浪号副标题：从第一个波浪号起整段丢弃
+    out = out.replaceFirst(RegExp(r'\s*[～〜].*$'), '');
+    // 破折号引导的英文副标题：`ATRI -My Dear Moments-` → `ATRI`。
+    // 要求破折号前有空格，避免误伤 `86-Eighty Six` 这类连字正名；
+    // 收尾破折号可选，因为 _process 会把结尾的连字符先行剥掉。
+    out = out.replaceFirst(RegExp(r'\s+-\s*[^-]{2,}-?\s*$'), '');
+    return out.trim();
+  }
+
+  /// 由一个清洗后的标题派生出多个搜索候选关键词，按「命中概率」降序排列。
+  ///
+  /// 逐层剥离（原标题 → 去季数 → 去副标题），每层都产出简体与原文两版；
+  /// **简体版全部排在前面**，因为 Bangumi 条目名以简体/日文原名为主，
+  /// 繁体关键词几乎必然是 0 结果，排后面可以少发无谓请求。
+  List<String> expandKeyword(String title) {
+    final bases = <String>[title];
+    void addBase(String value) {
+      final v = value.trim();
+      if (v.length < 2 || bases.contains(v)) return;
+      bases.add(v);
+    }
+
+    addBase(stripSeasonSuffix(title));
+    for (final b in List<String>.from(bases)) {
+      addBase(stripSubtitle(b));
+    }
+
+    final simplified = <String>[];
+    final originals = <String>[];
+    for (final b in bases) {
+      final s = toSimplifiedChinese(b);
+      simplified.add(s);
+      if (s != b) originals.add(b);
+    }
+
+    final ordered = <String>[];
+    for (final v in [...simplified, ...originals]) {
+      final t = v.trim();
+      if (t.length < 2 || ordered.contains(t)) continue;
+      ordered.add(t);
+    }
+    return ordered.length <= _kMaxKeywordVariants
+        ? ordered
+        : ordered.sublist(0, _kMaxKeywordVariants);
   }
 
   /// 搜索单个文件夹，返回结果（可能未命中）。
@@ -425,10 +525,28 @@ class MediaScraper {
     LocalMediaFolder folder, {
     String? keyword,
   }) {
+    final candidates = <_KeywordCandidate>[];
+    void add(String value, {int? season, int? year}) {
+      final v = value.trim();
+      if (v.isEmpty) return;
+      if (candidates.any((c) => c.keyword == v)) return;
+      candidates.add(_KeywordCandidate(v, season: season, year: year));
+    }
+
+    /// 把一个标题展开成「原文 + 简体 + 去季数 + 去副标题」等多个候选。
+    void addExpanded(String title, {int? season, int? year}) {
+      for (final kw in expandKeyword(title)) {
+        add(kw, season: season, year: year);
+      }
+    }
+
     if (keyword != null && keyword.trim().isNotEmpty) {
-      return [
-        _KeywordCandidate(keyword.trim(), season: parseSeason(keyword), year: null),
-      ];
+      final manual = keyword.trim();
+      final season = parseSeason(manual);
+      // 手动指定的关键词原样优先，再补上派生candidates（用户可能输的是繁体）
+      add(manual, season: season);
+      addExpanded(manual, season: season);
+      return candidates;
     }
 
     final base = folder.name;
@@ -438,9 +556,7 @@ class MediaScraper {
     final season = parseSeason(base);
     final year = parseYear(base);
 
-    final candidates = <_KeywordCandidate>[
-      _KeywordCandidate(trimmed, season: season, year: year),
-    ];
+    addExpanded(trimmed, season: season, year: year);
 
     // 清洗后信息太短时，尝试内部视频文件的首个文件名与去发布组前缀的原始名
     if (trimmed.length <= 4) {
@@ -454,11 +570,11 @@ class MediaScraper {
       if (firstFile != null) {
         final fileClean = cleanName(firstFile.name);
         if (fileClean.isNotEmpty && fileClean != trimmed) {
-          candidates.add(_KeywordCandidate(
+          addExpanded(
             fileClean,
             season: parseSeason(firstFile.name),
             year: parseYear(firstFile.name),
-          ));
+          );
         }
       }
       final noBrackets =
@@ -466,7 +582,7 @@ class MediaScraper {
       if (noBrackets.isNotEmpty &&
           noBrackets != base &&
           noBrackets != trimmed) {
-        candidates.add(_KeywordCandidate(noBrackets, year: year));
+        add(noBrackets, year: year);
       }
     }
     return candidates;
@@ -525,8 +641,18 @@ class MediaScraper {
 
     double bonus = 0;
     if (season != null && season > 1) {
-      final s = parseSeason(item.nameCn.isNotEmpty ? item.nameCn : item.name);
-      if (s == season) bonus += 0.1;
+      // nameCn 常常不带季数标记，两个名字都试一遍再判断
+      final itemSeason =
+          parseSeason(item.nameCn) ?? parseSeason(item.name);
+      if (itemSeason == season) {
+        bonus += 0.18;
+      } else if (itemSeason != null) {
+        // 季数写明了但对不上（找第三季却给第二季），明确降权
+        bonus -= 0.12;
+      } else {
+        // 条目没有季数标记，多半是第一季，轻微降权
+        bonus -= 0.06;
+      }
     }
     if (year != null) {
       final y = item.airDate.length >= 4
@@ -534,7 +660,8 @@ class MediaScraper {
           : null;
       if (y == year) bonus += 0.08;
     }
-    return bestNameScore + bonus;
+    final score = bestNameScore + bonus;
+    return score < 0 ? 0 : score;
   }
 
   /// 关键词与条目名称的相似度（0~1）。

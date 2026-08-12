@@ -205,6 +205,22 @@ mixin _$VideoPageController on _VideoPageController, Store {
     });
   }
 
+  late final _$isLocalMediaModeAtom =
+      Atom(name: '_VideoPageController.isLocalMediaMode', context: context);
+
+  @override
+  bool get isLocalMediaMode {
+    _$isLocalMediaModeAtom.reportRead();
+    return super.isLocalMediaMode;
+  }
+
+  @override
+  set isLocalMediaMode(bool value) {
+    _$isLocalMediaModeAtom.reportWrite(value, super.isLocalMediaMode, () {
+      super.isLocalMediaMode = value;
+    });
+  }
+
   late final _$roadListAtom =
       Atom(name: '_VideoPageController.roadList', context: context);
 
@@ -262,6 +278,25 @@ mixin _$VideoPageController on _VideoPageController, Store {
           episodeNumber: episodeNumber,
           road: road,
           downloadedEpisodes: downloadedEpisodes);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void _initForLocalMediaPlayback(
+      {required BangumiItem bangumiItem,
+      required List<LocalMediaFile> files,
+      required int selectedIndex,
+      required String pluginName}) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._initForLocalMediaPlayback');
+    try {
+      return super._initForLocalMediaPlayback(
+          bangumiItem: bangumiItem,
+          files: files,
+          selectedIndex: selectedIndex,
+          pluginName: pluginName);
     } finally {
       _$_VideoPageControllerActionController.endAction(_$actionInfo);
     }
@@ -347,6 +382,7 @@ isPip: ${isPip},
 showTabBody: ${showTabBody},
 historyOffset: ${historyOffset},
 isOfflineMode: ${isOfflineMode},
+isLocalMediaMode: ${isLocalMediaMode},
 roadList: ${roadList}
     ''';
   }

@@ -31,9 +31,9 @@
 
 ### 磁力下载
 
-- [x] 基于 Aria2 的内置下载引擎（`services/magnet/aria2_engine.dart`）与外部 RPC 客户端（`services/magnet/aria2_client.dart`）
+- [x] 基于 libtorrent 的内置下载引擎（`services/magnet/libtorrent_engine.dart`，libtorrent_flutter）
 - [x] 磁力链接解析、下载任务管理与进度持久化（`services/magnet/magnet_download_service.dart`）
-- [x] Tracker 列表自动更新、对等节点保护监控（`services/magnet/tracker_updater.dart`、`peer_protection_monitor.dart`）
+- [x] Tracker 列表自动更新（`services/magnet/tracker_updater.dart`）
 - [x] 磁力搜索源（Mikan / AnimesGarden）与订阅（`services/magnet/magnet_search_sources.dart`、`magnet_subscription_service.dart`）
 - [ ] 下载完成后自动入库媒体库、边下边播等仍在完善
 

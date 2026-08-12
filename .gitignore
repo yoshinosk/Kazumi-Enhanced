@@ -58,3 +58,6 @@ android/build/reports/problems/
 
 # WorkBuddy 项目数据（非源码）
 .workbuddy/
+
+# 本地凭据（不入库）
+local_*.env
