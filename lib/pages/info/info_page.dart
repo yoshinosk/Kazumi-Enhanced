@@ -9,6 +9,7 @@ import 'package:kazumi/bean/widget/collect_button.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/info/info_controller.dart';
+import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
 import 'package:kazumi/bean/card/bangumi_info_card.dart';
 import 'package:kazumi/pages/info/source_sheet.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
@@ -221,7 +222,10 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
       return;
     }
     if (titles.length == 1) {
-      context.pushNamed('/magnet/', arguments: titles.first);
+      context.pushNamed(
+        '/magnet/',
+        arguments: MagnetSearchRouteArgs(query: titles.first, anime: item),
+      );
       return;
     }
     showAdaptiveBottomSheet<void>(
@@ -243,7 +247,10 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                   title: Text(title),
                   onTap: () {
                     Navigator.of(context).pop();
-                    this.context.pushNamed('/magnet/', arguments: title);
+                    this.context.pushNamed(
+                      '/magnet/',
+                      arguments: MagnetSearchRouteArgs(query: title, anime: item),
+                    );
                   },
                 ),
               const SizedBox(height: 8),

@@ -373,10 +373,10 @@ class BangumiApi {
         items: bangumiList,
         rawCount: jsonList.length,
       );
-      } catch (e) {
-        KazumiLogger().e('Network: unknown search problem', error: e);
-        return null;
-      }
+    } catch (e) {
+      KazumiLogger().e('Network: unknown search problem', error: e);
+      return null;
+    }
   }
 
   static Future<BangumiItem?> getBangumiInfoByID(int id) async {
@@ -670,6 +670,39 @@ class BangumiApi {
         .d('get Bangumi collection count: ${bangumiCollection.length}');
     KazumiLogger().d('get item failed count: $failedItemCount');
     return bangumiCollection;
+  }
+
+  /// 获取当前用户某条目的已看集数。未收藏返回 0，网络或鉴权失败返回 null。
+  static Future<int?> getBangumiCollectionProgressById(int subjectId) async {
+    final username = await getUsername();
+    if (username == null || username.isEmpty) return null;
+    try {
+      final jsonData = await _client.get(
+        ApiEndpoints.formatUrl(
+          ApiEndpoints.bangumiAuthAPIMirrorDomain +
+              ApiEndpoints.bangumiGetCollectionBySubject,
+          [username, subjectId],
+        ),
+        requiresAuth: true,
+      );
+      if (jsonData is! Map) return null;
+      final value = jsonData['ep_status'];
+      if (value is num) return value.toInt();
+      return int.tryParse('$value') ?? 0;
+    } on NetworkException catch (e) {
+      if (e.statusCode == 404) return 0;
+      KazumiLogger().w(
+        'BangumiApi: fetch collection progress failed for $subjectId',
+        error: e,
+      );
+      return null;
+    } catch (e) {
+      KazumiLogger().w(
+        'BangumiApi: fetch collection progress failed for $subjectId',
+        error: e,
+      );
+      return null;
+    }
   }
 
   /// Update the Bangumi collection by ID

@@ -15,10 +15,6 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:mobx/mobx.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/modules/bangumi/episode_item.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/modules/comments/comment_response.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
@@ -67,10 +63,6 @@ abstract class _VideoPageController with Store implements Disposable {
   );
 
   late BangumiItem bangumiItem;
-  EpisodeInfo episodeInfo = EpisodeInfo.fromTemplate();
-
-  @observable
-  var episodeCommentsList = ObservableList<EpisodeCommentItem>();
 
   // Resolution state machine: [_beginEpisodeSwitch] enters the loading state;
   // [_finishLoading] and [_failLoading] are the only terminal transitions.
@@ -88,15 +80,11 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   VideoEpisodeSelection? playingEpisode;
 
-  @observable
-  int commentsEpisode = 1;
-
   @action
   void resetEpisodeState({int episode = 1, int road = 0}) {
     final selection = VideoEpisodeSelection(episode: episode, road: road);
     selectedEpisode = selection;
     playingEpisode = null;
-    commentsEpisode = commentEpisodeForSelection(selection);
   }
 
   VideoEpisodeSelection get playbackEpisode =>
@@ -105,15 +93,10 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   bool isFullscreen = false;
 
-  @observable
-  bool isCommentsAscending = false;
-
-  // Playback, automatic danmaku loading, and comment loading have separate
-  // owners. Manual danmaku selection can cancel auto danmaku without touching
-  // playback; comment refreshes never cancel playback.
+  // Playback and automatic danmaku loading have separate owners. Manual
+  // danmaku selection can cancel auto danmaku without touching playback.
   final AsyncSessionOwner _playbackSessions = AsyncSessionOwner();
   final AsyncSessionOwner _danmakuSessions = AsyncSessionOwner();
-  final AsyncSessionOwner _commentSessions = AsyncSessionOwner();
 
   @observable
   bool isPip = false;
@@ -149,6 +132,12 @@ abstract class _VideoPageController with Store implements Disposable {
   String _offlinePluginName = '';
 
   String _localMediaPluginName = '';
+
+  int? _localMediaBangumiSyncId;
+
+  /// 本地媒体模式下的 Bangumi subject ID，仅搜刮来源为 bangumi 时非空；
+  /// 播放完成后的 Bangumi 进度联动应使用它，而不是 [bangumiItem] 的播放 ID。
+  int? get bangumiSyncId => _localMediaBangumiSyncId;
 
   final HistoryController historyController;
   final IDownloadRepository downloadRepository;
@@ -188,6 +177,7 @@ abstract class _VideoPageController with Store implements Disposable {
           files: args.files,
           selectedIndex: args.selectedIndex,
           pluginName: args.pluginName,
+          bangumiSyncId: args.bangumiSyncId,
         );
     }
   }
@@ -219,7 +209,6 @@ abstract class _VideoPageController with Store implements Disposable {
     );
     selectedEpisode = selected;
     playingEpisode = null;
-    commentsEpisode = commentEpisodeForSelection(selected);
     final resolvedEpisode = _resolveOfflineEpisode(
       selected.episode,
       road: selected.road,
@@ -255,9 +244,11 @@ abstract class _VideoPageController with Store implements Disposable {
     required List<LocalMediaFile> files,
     required int selectedIndex,
     required String pluginName,
+    required int? bangumiSyncId,
   }) {
     this.bangumiItem = bangumiItem;
     _localMediaPluginName = pluginName;
+    _localMediaBangumiSyncId = bangumiSyncId;
     title =
         bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
     isLocalMediaMode = true;
@@ -274,7 +265,6 @@ abstract class _VideoPageController with Store implements Disposable {
     );
     selectedEpisode = selected;
     playingEpisode = null;
-    commentsEpisode = commentEpisodeForSelection(selected);
     final resolvedEpisode = _resolveLocalMediaEpisode(
       selected.episode,
       road: selected.road,
@@ -487,25 +477,12 @@ abstract class _VideoPageController with Store implements Disposable {
     return _resolveOnlineEpisode(selection.episode, road: selection.road);
   }
 
-  int commentEpisodeForSelection(VideoEpisodeSelection selection) {
-    final resolvedEpisode = resolveEpisode(selection);
-    return resolvedEpisode?.danmakuEpisodeNumber ?? selection.episode;
-  }
-
   /// Resets pre-switch state as a single transaction so observers see one
   /// notification instead of one per field.
   @action
   void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
-    final targetCommentsEpisode = commentEpisodeForSelection(selection);
     selectedEpisode = selection;
     playingEpisode = null;
-    // The comments sheet only re-queries when [commentsEpisode] changes, so
-    // resetting comment state here without changing it would blank the sheet
-    // permanently.
-    if (targetCommentsEpisode != commentsEpisode) {
-      commentsEpisode = targetCommentsEpisode;
-      _resetEpisodeComments();
-    }
     _loading = true;
     _errorMessage = null;
   }
@@ -516,7 +493,6 @@ abstract class _VideoPageController with Store implements Disposable {
       episode: resolvedEpisode.listIndex,
       road: resolvedEpisode.roadIndex,
     );
-    commentsEpisode = commentEpisodeForSelection(selectedEpisode);
   }
 
   @action
@@ -677,6 +653,13 @@ abstract class _VideoPageController with Store implements Disposable {
     return aliases.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   }
 
+  /// 弹幕侧车文件的作用域：用番剧名哈希区分同目录混放的多部番剧。
+  String get _localMediaDanmakuScope {
+    final title =
+        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    return danmakuSidecarScope(title);
+  }
+
   Future<void> _changeLocalMediaEpisode(
     VideoEpisodeSelection selection,
     int offset, {
@@ -729,6 +712,7 @@ abstract class _VideoPageController with Store implements Disposable {
           bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
       bangumiNameAliases: _danmakuTitleAliases(resolvedEpisode.displayTitle),
       localDanmakuDirectory: p.dirname(localPath),
+      danmakuScope: _localMediaDanmakuScope,
     );
 
     final initialized = await playerController.init(params);
@@ -757,6 +741,7 @@ abstract class _VideoPageController with Store implements Disposable {
         localVideoPath: params.isLocalPlayback ? params.videoUrl : null,
         bangumiName: params.bangumiName,
         bangumiNameAliases: params.bangumiNameAliases,
+        danmakuScope: params.danmakuScope,
       );
       if (session.isActive && danmakuSession.isActive) {
         if (result.hasDanmakus) {
@@ -765,9 +750,23 @@ abstract class _VideoPageController with Store implements Disposable {
           playerController.danmaku.applyDanmakuLoad(
             result,
             enableDanmaku: enableDanmaku,
+            animeTitle: result.animeTitle.isNotEmpty
+                ? result.animeTitle
+                : params.bangumiName,
+            episodeTitle: result.episodeTitle.isNotEmpty
+                ? result.episodeTitle
+                : '第${params.danmakuEpisodeNumber}集',
           );
         } else {
           playerController.danmaku.applyUnavailableDanmakuLoad(result);
+          playerController.danmaku.applyDanmakuBinding(
+            animeTitle: result.animeTitle.isNotEmpty
+                ? result.animeTitle
+                : params.bangumiName,
+            episodeTitle: result.episodeTitle.isNotEmpty
+                ? result.episodeTitle
+                : '第${params.danmakuEpisodeNumber}集',
+          );
           if (result.isFailed) {
             KazumiDialog.showToast(message: '弹幕加载失败，可手动检索');
           }
@@ -878,80 +877,11 @@ abstract class _VideoPageController with Store implements Disposable {
     }
   }
 
-  void _resetEpisodeComments() {
-    _commentSessions.cancel();
-    episodeInfo.reset();
-    episodeCommentsList.clear();
-  }
-
-  Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
-    final session = _commentSessions.begin();
-    final EpisodeInfo latestEpisodeInfo;
-    try {
-      latestEpisodeInfo = await BangumiApi.getBangumiEpisodeByID(id, episode);
-    } catch (_) {
-      if (session.isStale) {
-        return false;
-      }
-      rethrow;
-    }
-    if (session.isStale) {
-      return false;
-    }
-    final EpisodeCommentResponse value;
-    try {
-      value =
-          await BangumiApi.getBangumiCommentsByEpisodeID(latestEpisodeInfo.id);
-    } catch (_) {
-      if (session.isStale) {
-        return false;
-      }
-      rethrow;
-    }
-    if (session.isStale) {
-      return false;
-    }
-    final commentsList = value.commentList;
-    if (!isCommentsAscending) {
-      commentsList
-          .sort((a, b) => b.comment.createdAt.compareTo(a.comment.createdAt));
-    } else {
-      commentsList
-          .sort((a, b) => a.comment.createdAt.compareTo(b.comment.createdAt));
-    }
-    _applyEpisodeComments(episode, latestEpisodeInfo, commentsList);
-    KazumiLogger().i(
-        'VideoPageController: loaded comments list length ${episodeCommentsList.length}');
-    return true;
-  }
-
-  @action
-  void _applyEpisodeComments(
-    int episode,
-    EpisodeInfo info,
-    List<EpisodeCommentItem> comments,
-  ) {
-    commentsEpisode = episode;
-    episodeInfo = info;
-    episodeCommentsList = ObservableList.of(comments);
-  }
-
-  @action
-  void toggleSortOrder() {
-    isCommentsAscending = !isCommentsAscending;
-    episodeCommentsList.sort(
-      (a, b) => isCommentsAscending
-          ? a.comment.createdAt.compareTo(b.comment.createdAt)
-          : b.comment.createdAt.compareTo(a.comment.createdAt),
-    );
-  }
-
   /// Called by Modular when the '/video' route scope is disposed.
   @override
   void dispose() {
     _playbackSessions.cancel();
     _danmakuSessions.cancel();
-    _commentSessions.cancel();
     _logSubscription?.cancel();
     _logSubscription = null;
     if (!_logStreamController.isClosed) {

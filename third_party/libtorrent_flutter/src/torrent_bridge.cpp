@@ -2135,6 +2135,23 @@ TORRENT_API void lt_remove_torrent(lt_session_t session,
     sw->ephemeral_torrents.erase(id);
 }
 
+TORRENT_API void lt_add_trackers(lt_session_t session, lt_torrent_id id,
+                                 const char* const* trackers, int count) {
+    if (!session || !trackers || count <= 0) return;
+    auto* sw = to_sw(session);
+    std::lock_guard<std::mutex> lk(sw->mu);
+    auto it = sw->handles.find(id);
+    if (it == sw->handles.end() || !it->second.is_valid()) return;
+    try {
+        // 逐条添加：libtorrent 按 URL 去重，重复调用安全。
+        for (int i = 0; i < count; ++i) {
+            if (trackers[i] && *trackers[i]) {
+                it->second.add_tracker(lt::announce_entry(trackers[i]));
+            }
+        }
+    } catch (...) {}
+}
+
 TORRENT_API void lt_pause_torrent(lt_session_t session, lt_torrent_id id) {
     if (!session) return;
     auto* sw = to_sw(session);
@@ -2696,8 +2713,16 @@ TORRENT_API void lt_configure_session(lt_session_t session,
     lt::settings_pack sp;
 
     // port of: bt.config.DisableIPv6 = !settings.BTsets.EnableIPv6
-    if (!cfg.enable_ipv6) {
-        sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881");
+    // Listen interfaces: apply the configured port (0 = OS-assigned random).
+    // IPv6 disabled -> IPv4 only; enabled -> dual stack on the same port.
+    {
+        int listen_port = cfg.peers_listen_port;
+        if (listen_port < 0 || listen_port > 65535) listen_port = 0;
+        std::string interfaces = "0.0.0.0:" + std::to_string(listen_port);
+        if (cfg.enable_ipv6) {
+            interfaces += ",[::]:" + std::to_string(listen_port);
+        }
+        sp.set_str(lt::settings_pack::listen_interfaces, interfaces);
     }
 
     // port of: bt.config.DisableTCP / DisableUTP

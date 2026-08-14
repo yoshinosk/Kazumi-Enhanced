@@ -26,11 +26,9 @@ import 'package:kazumi/pages/player/video_details_sheet.dart';
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/request/apis/danmaku_api.dart';
-import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
-import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
+import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
 import 'package:kazumi/pages/player/player_item_surface.dart';
 import 'package:mobx/mobx.dart' as mobx;
 import 'package:kazumi/pages/my/my_controller.dart';
@@ -39,6 +37,7 @@ import 'package:kazumi/services/player/audio_controller.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/platform/display_mode_service.dart';
 import 'package:kazumi/services/platform/player_menu_service.dart';
+import 'package:kazumi/services/media/bangumi_progress_sync_service.dart';
 
 class PlayerItem extends StatefulWidget {
   const PlayerItem({
@@ -121,6 +120,10 @@ class _PlayerItemState extends State<PlayerItem>
   Timer? playerTimer;
   Timer? mouseScrollerTimer;
   Timer? _adjustmentHudHideTimer;
+
+  /// 已触发过 Bangumi 进度同步的 (bangumiId:集数) key，防止 completed
+  /// 持续状态下每个计时周期重复请求。
+  String? _bangumiSyncFiredKey;
   final Set<PlayerPanelHold> _playerPanelHolds = <PlayerPanelHold>{};
   int _openPlayerMenuCount = 0;
   PlayerPanelHold? _progressBarDragHold;
@@ -1023,160 +1026,55 @@ class _PlayerItemState extends State<PlayerItem>
           // Completion of a stale near-end resume is not a real watch;
           // replay from the beginning instead of advancing.
           unawaited(playerController.playback.restartFromBeginning());
-        } else if (playingSelection.episode < playingRoadData.data.length &&
-            autoPlayNext) {
-          final nextSelection = VideoEpisodeSelection(
-            episode: playingSelection.episode + 1,
-            road: playingSelection.road,
-          );
-          // Resolution failures surface through the controller's failed state
-          // instead of silently retrying here every second.
-          final nextRef = videoPageController.resolveEpisode(nextSelection);
-          if (nextRef != null) {
-            KazumiDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+        } else {
+          if (playingSelection.episode < playingRoadData.data.length &&
+              autoPlayNext) {
+            final nextSelection = VideoEpisodeSelection(
+              episode: playingSelection.episode + 1,
+              road: playingSelection.road,
+            );
+            // Resolution failures surface through the controller's failed state
+            // instead of silently retrying here every second.
+            final nextRef = videoPageController.resolveEpisode(nextSelection);
+            if (nextRef != null) {
+              KazumiDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+            }
+            try {
+              playerTimer!.cancel();
+            } catch (_) {}
+            widget.changeEpisode(playingSelection.episode + 1,
+                currentRoad: playingSelection.road);
           }
-          try {
-            playerTimer!.cancel();
-          } catch (_) {}
-          widget.changeEpisode(playingSelection.episode + 1,
-              currentRoad: playingSelection.road);
+          // 本地媒体库真·播放完成：可选联动 Bangumi 收藏 EP 进度。
+          // completed 是持续状态，这里按 (bangumiId, 集数) 去重，
+          // 每个完成的剧集只触发一次，避免每秒重复请求与重试链堆积。
+          final localHistoryIdentity =
+              videoPageController.currentHistoryIdentity;
+          final syncBangumiId = videoPageController.bangumiSyncId;
+          if (videoPageController.isLocalMediaMode &&
+              localHistoryIdentity != null &&
+              syncBangumiId != null) {
+            final syncKey =
+                '$syncBangumiId:${localHistoryIdentity.episodeNumber}';
+            if (_bangumiSyncFiredKey != syncKey) {
+              _bangumiSyncFiredKey = syncKey;
+              unawaited(BangumiProgressSyncService.markEpisodeWatched(
+                bangumiId: syncBangumiId,
+                episode: localHistoryIdentity.episodeNumber,
+              ));
+            }
+          }
         }
       }
       playerController.setSyncPlayCurrentPosition();
     });
   }
 
-  void showDanmakuSearchDialog(String keyword) async {
-    KazumiDialog.dismiss();
-    KazumiDialog.showLoading(msg: '弹幕检索中');
-    DanmakuSearchResponse danmakuSearchResponse;
-    DanmakuEpisodeResponse danmakuEpisodeResponse;
-    try {
-      danmakuSearchResponse =
-          await DanmakuApi.getDanmakuSearchResponse(keyword);
-    } catch (e) {
-      KazumiDialog.dismiss();
-      KazumiDialog.showToast(message: '弹幕检索错误: ${e.toString()}');
-      return;
-    }
-    KazumiDialog.dismiss();
-    if (danmakuSearchResponse.animes.isEmpty) {
-      KazumiDialog.showToast(message: '未找到匹配结果');
-      return;
-    }
-    await KazumiDialog.show(builder: (context) {
-      return Dialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: ListView(
-            shrinkWrap: true,
-            children: danmakuSearchResponse.animes.map((danmakuInfo) {
-              return ListTile(
-                title: Text(danmakuInfo.animeTitle),
-                onTap: () async {
-                  KazumiDialog.dismiss();
-                  KazumiDialog.showLoading(msg: '弹幕检索中');
-                  try {
-                    danmakuEpisodeResponse =
-                        await DanmakuApi.getDanDanEpisodesByDanDanBangumiID(
-                            danmakuInfo.animeId);
-                  } catch (e) {
-                    KazumiDialog.dismiss();
-                    KazumiDialog.showToast(message: '弹幕检索错误: ${e.toString()}');
-                    return;
-                  }
-                  KazumiDialog.dismiss();
-                  if (danmakuEpisodeResponse.episodes.isEmpty) {
-                    KazumiDialog.showToast(message: '未找到匹配结果');
-                    return;
-                  }
-                  KazumiDialog.show(builder: (context) {
-                    return Dialog(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: ListView(
-                          shrinkWrap: true,
-                          children:
-                              danmakuEpisodeResponse.episodes.map((episode) {
-                            return ListTile(
-                              title: Text(episode.episodeTitle),
-                              onTap: () async {
-                                KazumiDialog.dismiss();
-                                try {
-                                  videoPageController
-                                      .cancelAutomaticDanmakuLoad();
-                                  final hasDanmakus = await playerController
-                                      .danmaku
-                                      .getDanDanmakuByEpisodeID(
-                                          episode.episodeId);
-                                  if (!mounted) {
-                                    return;
-                                  }
-                                  if (hasDanmakus) {
-                                    playerController.danmaku
-                                        .setDanmakuEnabled(true);
-                                    KazumiDialog.showToast(message: '弹幕切换成功');
-                                  } else {
-                                    playerController.danmaku
-                                        .setDanmakuEnabled(false);
-                                    KazumiDialog.showToast(message: '未找到弹幕内容');
-                                  }
-                                } catch (e) {
-                                  KazumiDialog.showToast(message: '弹幕切换失败');
-                                }
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    );
-                  });
-                },
-              );
-            }).toList(),
-          ),
-        ),
-      );
-    });
-  }
-
   void showDanmakuSwitch() {
-    String searchKeyword = videoPageController.title;
-    KazumiDialog.show(
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('弹幕检索'),
-          content: TextFormField(
-            initialValue: searchKeyword,
-            decoration: const InputDecoration(
-              hintText: '番剧名',
-            ),
-            onChanged: (value) => searchKeyword = value,
-            onFieldSubmitted: (keyword) {
-              showDanmakuSearchDialog(keyword);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                KazumiDialog.dismiss();
-              },
-              child: Text(
-                '取消',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                showDanmakuSearchDialog(searchKeyword);
-              },
-              child: const Text(
-                '提交',
-              ),
-            ),
-          ],
-        );
-      },
+    showDanmakuSwitchDialog(
+      playerController: playerController,
+      videoPageController: videoPageController,
+      initialKeyword: videoPageController.title,
     );
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -8,6 +9,7 @@ import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/local_media_scanner.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:mobx/mobx.dart';
 import 'package:path/path.dart' as p;
 
@@ -66,7 +68,8 @@ class MediaGridItem {
 /// 未知日期既不该占据「最新」也不该占据「最早」的位置。
 int? _airDateSortKey(String airDate) {
   if (airDate.isEmpty) return null;
-  final match = RegExp(r'^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?').firstMatch(airDate);
+  final match =
+      RegExp(r'^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?').firstMatch(airDate);
   if (match == null) return null;
   final year = int.tryParse(match.group(1)!);
   if (year == null) return null;
@@ -182,7 +185,8 @@ abstract class _MediaController with Store {
     folders = ObservableList.of(LocalMediaFolderStore.load());
     scrapeResults = ObservableMap.of(MediaScrapeStore.load());
     if (folders.isNotEmpty) {
-      await scan();
+      // 不阻塞启动流程：扫描在后台进行，媒体库页通过 isScanning 展示进度。
+      unawaited(scan());
     }
   }
 
@@ -190,7 +194,7 @@ abstract class _MediaController with Store {
   Future<void> addFolder(String path) async {
     path = path.trim();
     if (path.isEmpty) return;
-    if (folders.any((f) => f.toLowerCase() == path.toLowerCase())) {
+    if (folders.any((folder) => localMediaPathsEqual(folder, path))) {
       KazumiDialog.showToast(message: '该文件夹已添加');
       return;
     }
@@ -203,13 +207,30 @@ abstract class _MediaController with Store {
   Future<void> removeFolder(String path) async {
     folders.removeWhere((f) => f == path);
     await LocalMediaFolderStore.save(folders.toList());
+    // 清理该目录（含其子目录）遗留的搜刮结果，避免设置膨胀与重新添加时
+    // 复活旧匹配。
+    final removedKeys = scrapeResults.keys
+        .where((key) => isLocalMediaPathWithin(path, key))
+        .toList();
+    if (removedKeys.isNotEmpty) {
+      for (final k in removedKeys) {
+        scrapeResults.remove(k);
+      }
+      await MediaScrapeStore.save(scrapeResults);
+    }
     await scan();
   }
 
+  /// 扫描代次：每次扫描递增；结果仅当仍是最新一代时才写入，
+  /// 防止「先开始的慢扫描」用陈旧快照覆盖「后开始的新扫描」。
+  int _scanGeneration = 0;
+
   @action
   Future<void> scan() async {
+    final generation = ++_scanGeneration;
     if (folders.isEmpty) {
       library.clear();
+      isScanning = false;
       return;
     }
     isScanning = true;
@@ -218,6 +239,9 @@ abstract class _MediaController with Store {
         folders.toList(),
         groupByFolder: groupByFolder,
       );
+      // 扫描期间又有新的扫描（或文件夹变更）发起：丢弃本次结果，
+      // 由最新一轮接管；同时避免把 isScanning 提前置 false。
+      if (generation != _scanGeneration) return;
       library
         ..clear()
         ..addAll(result);
@@ -225,7 +249,9 @@ abstract class _MediaController with Store {
       KazumiLogger().w('MediaController: scan failed', error: e);
       KazumiDialog.showToast(message: '扫描失败：$e');
     } finally {
-      isScanning = false;
+      if (generation == _scanGeneration) {
+        isScanning = false;
+      }
     }
   }
 
@@ -300,7 +326,8 @@ abstract class _MediaController with Store {
       scrapeResults
         ..removeWhere((path, _) => unmatchedPaths.contains(path))
         ..addAll(matched);
-      await MediaScrapeStore.save(Map<String, MediaScrapeInfo>.from(scrapeResults));
+      await MediaScrapeStore.save(
+          Map<String, MediaScrapeInfo>.from(scrapeResults));
       final scopeLabel = skipMatched ? '未匹配文件夹' : '文件夹';
       final toastMessage = _scrapeCancelRequested
           ? '已取消搜刮，匹配 ${matched.length}/${targets.length} 个$scopeLabel'
@@ -336,35 +363,88 @@ abstract class _MediaController with Store {
   ) async {
     final info = MediaScrapeInfo.fromBangumiItem(item);
     scrapeResults[folderPath] = info;
-    await MediaScrapeStore.save(Map<String, MediaScrapeInfo>.from(scrapeResults));
+    await MediaScrapeStore.save(
+        Map<String, MediaScrapeInfo>.from(scrapeResults));
+  }
+
+  /// 直接为文件夹写入搜刮结果（如磁力任务完成后自动同步），
+  /// 会更新内存 observable 并持久化。
+  @action
+  Future<void> applyScrapeInfo(String folderPath, MediaScrapeInfo info) async {
+    if (scrapeResults.isEmpty) {
+      // 内存映射尚未加载（媒体库未初始化时）：先读取持久化结果再合并，
+      // 避免用空映射覆盖已保存的搜刮数据。
+      scrapeResults = ObservableMap.of(MediaScrapeStore.load());
+    }
+    scrapeResults[folderPath] = info;
+    await MediaScrapeStore.save(
+        Map<String, MediaScrapeInfo>.from(scrapeResults));
   }
 
   /// 清除文件夹的搜刮结果。
   @action
   Future<void> removeScrapeResult(String folderPath) async {
     scrapeResults.remove(folderPath);
-    await MediaScrapeStore.save(Map<String, MediaScrapeInfo>.from(scrapeResults));
+    await MediaScrapeStore.save(
+        Map<String, MediaScrapeInfo>.from(scrapeResults));
   }
 
   /// 获取文件夹的搜刮结果。
   MediaScrapeInfo? getScrapeInfo(String folderPath) =>
       scrapeResults[folderPath];
 
+  /// 缺失集数检测：对比本地已解析集数与 Bangumi 正片（type=0）集数。
+  ///
+  /// 返回升序的缺失集数列表；本地集数解析为空、未匹配番剧或网络失败时
+  /// 返回空列表。缺失列表以「本地最大集数 + 12」为上界，避免把尚未
+  /// 播出的未来集数全部报为缺集。
+  Future<List<int>> detectMissingEpisodes(String folderPath) async {
+    final info = scrapeResults[folderPath];
+    final bangumiId = info?.bangumiId;
+    if (bangumiId == null) return const [];
+    final folder = library.where((f) => f.path == folderPath).firstOrNull;
+    if (folder == null) return const [];
+    final have = <int>{};
+    for (final file in folder.files) {
+      final ep = parseLocalEpisodeNumber(file.name);
+      if (ep > 0) have.add(ep);
+    }
+    if (have.isEmpty) return const [];
+    final maxHave = have.reduce((a, b) => a > b ? a : b);
+    try {
+      final episodes = await BangumiApi.getBangumiEpisodesByID(bangumiId);
+      final missing = <int>{};
+      for (final e in episodes) {
+        if (e.type != 0) continue;
+        final n = e.episode.toInt();
+        if (n <= 0 || have.contains(n)) continue;
+        // 只报本地已有最大集数附近的一段，其余视为未播出。
+        if (n > maxHave + 12) continue;
+        missing.add(n);
+      }
+      return missing.toList()..sort();
+    } catch (e) {
+      KazumiLogger()
+          .w('MediaController: detect missing episodes failed', error: e);
+      return const [];
+    }
+  }
+
   /// 按番剧分组返回，排序遵循 [sortMode] / [sortDescending]，未匹配组恒定排在末尾。
   List<AnimeGroup> get animeGroups {
-    final matched = <int, AnimeGroup>{};
+    final matched = <String, AnimeGroup>{};
     final unmatched = <LocalMediaFolder>[];
     for (final folder in library) {
       final info = scrapeResults[folder.path];
       if (info != null) {
-        final existing = matched[info.id];
+        final existing = matched[info.identityKey];
         if (existing != null) {
-          matched[info.id] = AnimeGroup(
+          matched[info.identityKey] = AnimeGroup(
             info: info,
             folders: [...existing.folders, folder],
           );
         } else {
-          matched[info.id] = AnimeGroup(info: info, folders: [folder]);
+          matched[info.identityKey] = AnimeGroup(info: info, folders: [folder]);
         }
       } else {
         unmatched.add(folder);
@@ -389,7 +469,7 @@ abstract class _MediaController with Store {
   ///
   /// 默认按番剧首播日期降序（最新番在前），无日期的条目恒定沉底。
   List<MediaGridItem> get gridItems {
-    final matched = <int, MediaGridItem>{};
+    final matched = <String, MediaGridItem>{};
     final unmatched = <MediaGridItem>[];
     for (final folder in library) {
       final info = scrapeResults[folder.path];
@@ -400,8 +480,8 @@ abstract class _MediaController with Store {
         ));
         continue;
       }
-      final existing = matched[info.id];
-      matched[info.id] = MediaGridItem(
+      final existing = matched[info.identityKey];
+      matched[info.identityKey] = MediaGridItem(
         info: info,
         title: info.displayName,
         folders: [...?existing?.folders, folder],
@@ -417,7 +497,8 @@ abstract class _MediaController with Store {
             bCount: b.fileCount,
           ));
     // 未匹配条目没有元数据可排，统一按名称升序垫在最后。
-    unmatched.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    unmatched
+        .sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     return [...items, ...unmatched];
   }
 
@@ -461,6 +542,23 @@ abstract class _MediaController with Store {
 
   // ============ 文件操作 ============
 
+  /// 立即从内存库中移除文件条目，保证面板即时刷新；
+  /// 随后的 [scan] 会与磁盘状态做最终同步。
+  void _removeFileFromLibrary(LocalMediaFile file) {
+    final updated = <LocalMediaFolder>[];
+    for (final folder in library) {
+      if (folder.files.any((f) => f.path == file.path)) {
+        final files = folder.files.where((f) => f.path != file.path).toList();
+        if (files.isEmpty) continue; // 分组清空，交由扫描重建
+        updated.add(LocalMediaFolder(
+            path: folder.path, name: folder.name, files: files));
+      } else {
+        updated.add(folder);
+      }
+    }
+    library = ObservableList.of(updated);
+  }
+
   @action
   Future<void> deleteFile(LocalMediaFile file) async {
     try {
@@ -468,6 +566,7 @@ abstract class _MediaController with Store {
       if (await f.exists()) {
         await f.delete();
       }
+      _removeFileFromLibrary(file);
       KazumiDialog.showToast(message: '已删除 ${file.name}');
       await scan();
     } catch (e) {
@@ -495,6 +594,7 @@ abstract class _MediaController with Store {
       if (await f.exists()) {
         await f.rename(newPath);
       }
+      _removeFileFromLibrary(file);
       KazumiDialog.showToast(message: '已重命名为 $newName');
       await scan();
     } catch (e) {
@@ -533,6 +633,7 @@ abstract class _MediaController with Store {
         await src.copy(newPath);
         await src.delete();
       }
+      _removeFileFromLibrary(file);
       KazumiDialog.showToast(message: '已移动 ${file.name}');
       await scan();
     } catch (e) {

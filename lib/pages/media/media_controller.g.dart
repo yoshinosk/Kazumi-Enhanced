@@ -261,6 +261,15 @@ mixin _$MediaController on _MediaController, Store {
         .run(() => super.setFolderMatch(folderPath, item));
   }
 
+  late final _$applyScrapeInfoAsyncAction =
+      AsyncAction('_MediaController.applyScrapeInfo', context: context);
+
+  @override
+  Future<void> applyScrapeInfo(String folderPath, MediaScrapeInfo info) {
+    return _$applyScrapeInfoAsyncAction
+        .run(() => super.applyScrapeInfo(folderPath, info));
+  }
+
   late final _$removeScrapeResultAsyncAction =
       AsyncAction('_MediaController.removeScrapeResult', context: context);
 

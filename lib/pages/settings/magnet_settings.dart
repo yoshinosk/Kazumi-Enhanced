@@ -37,6 +37,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late bool trackerAutoUpdate;
   late int trackerUpdateHours;
   late String trackerSources;
+  late bool autoImportToLibrary;
+  late String autoImportRoot;
+  late bool syncBangumiProgress;
   bool isPickingDir = false;
 
   MagnetController get _controller => inject<MagnetController>();
@@ -71,6 +74,11 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     trackerAutoUpdate = GStorage.getSetting(SettingsKeys.magnetTrackerAutoUpdate);
     trackerUpdateHours = GStorage.getSetting(SettingsKeys.magnetTrackerUpdateHours);
     trackerSources = GStorage.getSetting(SettingsKeys.magnetTrackerSources);
+    autoImportToLibrary =
+        GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary);
+    autoImportRoot = GStorage.getSetting(SettingsKeys.magnetAutoImportRoot);
+    syncBangumiProgress =
+        GStorage.getSetting(SettingsKeys.localMediaSyncBangumiProgress);
   }
 
   @override
@@ -84,6 +92,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
           if (engineEnabled) ...[
             _connectionSection(),
             _trackerSection(),
+            _libraryLinkSection(),
           ],
           _infoSection(),
         ],
@@ -392,6 +401,63 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         ),
       ],
     );
+  }
+
+  // ---------------- 媒体库联动 ----------------
+  Widget _libraryLinkSection() {
+    return SettingsSection(
+      title: const Text('媒体库联动'),
+      tiles: [
+        SettingsTile.switchTile(
+          leading: Icons.video_library_rounded,
+          title: const Text('下载完成后自动入库'),
+          description: const Text('把「已搜刮」任务的下载文件移动到媒体库文件夹并按集数命名'),
+          initialValue: autoImportToLibrary,
+          onToggle: (value) async {
+            final v = value ?? autoImportToLibrary;
+            setState(() => autoImportToLibrary = v);
+            await GStorage.putSetting(
+                SettingsKeys.magnetAutoImportToLibrary, v);
+          },
+        ),
+        if (autoImportToLibrary)
+          SettingsTile(
+            leading: Icons.folder_rounded,
+            title: const Text('入库目标根目录'),
+            description: Text(
+              autoImportRoot.isEmpty
+                  ? '未设置，使用媒体库的第一个文件夹'
+                  : autoImportRoot,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onPressed: (_) => _pickAutoImportRoot(),
+          ),
+        SettingsTile.switchTile(
+          leading: Icons.cloud_sync_rounded,
+          title: const Text('本地看完联动 Bangumi 进度'),
+          description: const Text('媒体库播完一集后，把 Bangumi 收藏的 EP 进度更新为该集数'),
+          initialValue: syncBangumiProgress,
+          onToggle: (value) async {
+            final v = value ?? syncBangumiProgress;
+            setState(() => syncBangumiProgress = v);
+            await GStorage.putSetting(
+                SettingsKeys.localMediaSyncBangumiProgress, v);
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickAutoImportRoot() async {
+    if (isPickingDir) return;
+    isPickingDir = true;
+    final picked = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择入库根目录');
+    isPickingDir = false;
+    if (picked == null) return;
+    setState(() => autoImportRoot = picked);
+    await GStorage.putSetting(SettingsKeys.magnetAutoImportRoot, picked);
   }
 
   String _seedingStopDescription() {

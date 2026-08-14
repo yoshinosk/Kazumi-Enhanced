@@ -50,6 +50,7 @@ class LocalMediaVideoPlaybackArgs extends VideoPlaybackArgs {
     required this.files,
     required this.selectedIndex,
     required this.pluginName,
+    this.bangumiSyncId,
   });
 
   /// 同一文件夹下的全部本地视频文件，支持选集切换。
@@ -60,4 +61,8 @@ class LocalMediaVideoPlaybackArgs extends VideoPlaybackArgs {
 
   /// 用于历史记录与弹幕缓存的标识，本地媒体固定为 'local'。
   final String pluginName;
+
+  /// 已确认的 Bangumi subject ID，仅搜刮来源为 bangumi 时非空。
+  /// 播放完成后的 Bangumi 进度联动用它；legacy/AniList 条目为 null 不触发同步。
+  final int? bangumiSyncId;
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -8,8 +9,13 @@ import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/magnet/magnet_subscription_service.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
+import 'package:kazumi/utils/local_episode_parser.dart';
+import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:mobx/mobx.dart';
+import 'package:path/path.dart' as p;
 
 part 'magnet_controller.g.dart';
 
@@ -21,16 +27,32 @@ String? _cleanOptional(String? value) {
 }
 
 abstract class _MagnetController with Store {
-  _MagnetController()
+  _MagnetController({MediaController? mediaController})
       : _engine = MagnetSearchEngine(),
         _downloads = MagnetDownloadService(),
         _subscriptions = MagnetSubscriptionService(),
-        _animesGarden = AnimesGardenService();
+        _animesGarden = AnimesGardenService(),
+        _mediaController = mediaController;
 
   final MagnetSearchEngine _engine;
   final MagnetDownloadService _downloads;
   final MagnetSubscriptionService _subscriptions;
   final AnimesGardenService _animesGarden;
+
+  /// 本地媒体库控制器，用于把已完成任务的搜刮结果同步到媒体库。
+  /// 由 InitPage 在启动时注入；独立构建（测试等）时可缺省。
+  MediaController? _mediaController;
+
+  /// 关联本地媒体库控制器（启动时由 InitPage 注入，必须在 init() 前调用）。
+  void attachMediaController(MediaController controller) {
+    _mediaController = controller;
+  }
+
+  /// 已同步刮削信息、已自动入库和正在入库的稳定任务 ID。
+  final Set<String> _scrapeSyncedTaskIds = {};
+  final Set<String> _scrapeSyncingTaskIds = {};
+  final Set<String> _autoImportedTaskIds = {};
+  final Set<String> _autoImportingTaskIds = {};
 
   bool _initialized = false;
 
@@ -116,6 +138,7 @@ abstract class _MagnetController with Store {
       downloadTasks
         ..clear()
         ..addAll(entries);
+      _syncCompletedToLibrary(entries);
     };
     _downloads.onEngineStateChanged = (state) {
       engineState = state;
@@ -126,23 +149,39 @@ abstract class _MagnetController with Store {
         ..clear()
         ..addAll(list);
     };
-    _subscriptions.onNewItems = (sub, items) {
+    _subscriptions.onNewItems = (sub, items) async {
       KazumiLogger().i('Magnet: ${items.length} new items for ${sub.name}');
+      // 订阅自动下载：引擎启用且订阅开启自动下载时把新条目提交下载，
+      // 使用订阅指定的下载目录；按磁力链去重，避免重复任务。
+      if (!sub.autoDownload) {
+        KazumiDialog.showToast(
+          message: '订阅「${sub.name}」有 ${items.length} 条新内容（自动下载已关闭）',
+          duration: const Duration(seconds: 3),
+        );
+        return true;
+      }
       KazumiDialog.showToast(
         message: '订阅「${sub.name}」有 ${items.length} 条新内容',
         duration: const Duration(seconds: 3),
       );
-      // 订阅自动下载：引擎启用时把新条目提交下载，使用订阅指定的下载目录。
-      if (_downloads.engineEnabled && items.isNotEmpty) {
-        for (final item in items) {
-          _downloads.add(item, dir: sub.downloadPath);
-        }
+      if (!_downloads.engineEnabled) {
+        KazumiDialog.showToast(message: '下载引擎未启用，订阅内容将在下次检查时重试');
+        return false;
       }
+      for (final item in items) {
+        final uri =
+            item.magnetLink.isNotEmpty ? item.magnetLink : item.torrentUrl;
+        if (uri.isEmpty || _downloads.hasDownload(uri)) continue;
+        final taskId = await _downloads.add(item, dir: sub.downloadPath);
+        if (taskId.isEmpty) return false;
+      }
+      return true;
     };
     try {
       await _downloads.init();
     } catch (e) {
-      KazumiLogger().w('MagnetController: download service init failed', error: e);
+      KazumiLogger()
+          .w('MagnetController: download service init failed', error: e);
     }
     try {
       await _subscriptions.init();
@@ -319,40 +358,282 @@ abstract class _MagnetController with Store {
     KazumiDialog.showToast(message: '已检查所有订阅');
   }
 
+  /// 切换订阅的自动下载开关。
   @action
-  Future<void> addDownload(MagnetSearchItem item, {String? dir}) async {
+  Future<void> setSubscriptionAutoDownload(String id, bool value) async {
+    await _subscriptions.setAutoDownload(id, value);
+  }
+
+  @action
+  Future<void> addDownload(
+    MagnetSearchItem item, {
+    String? dir,
+    MediaScrapeInfo? scrapeInfo,
+  }) async {
     if (!engineEnabled) {
       KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
       return;
     }
-    final gid = await _downloads.add(item, dir: dir);
-    if (gid.isEmpty) {
+    final taskId = await _downloads.add(item, dir: dir, scrapeInfo: scrapeInfo);
+    if (taskId.isEmpty) {
       KazumiDialog.showToast(message: '提交下载失败，请检查引擎状态');
       return;
     }
     KazumiDialog.showToast(message: '已添加到下载队列');
   }
 
+  /// 文件完整落盘后同步刮削结果；只有停止做种进入 complete 后才自动入库。
+  ///
+  /// 这样把磁力下载目录加入本地媒体库后，无需手动搜刮即显示为已匹配番剧。
+  /// 同步以任务的实际落盘目录为键：多文件种子会落在 `<savePath>/<种子名>/`
+  /// 下（与扫描器按子目录建文件夹的口径一致），因此优先用引擎文件列表
+  /// 求真实目录，拿不到时回退 savePath；仅处理本轮会话内新完成的任务，
+  /// 且不覆盖媒体库已有的匹配结果。
+  void _syncCompletedToLibrary(List<MagnetDownloadEntry> entries) {
+    final media = _mediaController;
+    if (media == null) return;
+    for (final entry in entries) {
+      if (entry.scrapeInfo == null) continue;
+      if (entry.status != 'complete' && entry.status != 'seeding') continue;
+      if (entry.savePath.isEmpty) continue;
+      if (entry.importedPath.isNotEmpty) {
+        _autoImportedTaskIds.add(entry.taskId);
+        _syncScrapeInfo(entry, entry.importedPath);
+        continue;
+      }
+      final folderPath = _actualDownloadDir(entry);
+      if (folderPath.isEmpty) continue;
+      final shouldAutoImport = entry.status == 'complete' &&
+          GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary);
+      if (!shouldAutoImport) _syncScrapeInfo(entry, folderPath);
+      if (shouldAutoImport &&
+          !_autoImportedTaskIds.contains(entry.taskId) &&
+          _autoImportingTaskIds.add(entry.taskId)) {
+        unawaited(_runAutoImport(entry));
+      }
+    }
+  }
+
+  void _syncScrapeInfo(MagnetDownloadEntry entry, String folderPath) {
+    final media = _mediaController;
+    if (media == null) return;
+    if (media.getScrapeInfo(folderPath) != null) {
+      _scrapeSyncedTaskIds.add(entry.taskId);
+    } else if (!_scrapeSyncedTaskIds.contains(entry.taskId) &&
+        _scrapeSyncingTaskIds.add(entry.taskId)) {
+      unawaited(_runScrapeSync(entry, folderPath));
+    }
+  }
+
+  Future<void> _runScrapeSync(
+      MagnetDownloadEntry entry, String folderPath) async {
+    try {
+      await _mediaController?.applyScrapeInfo(folderPath, entry.scrapeInfo!);
+      _scrapeSyncedTaskIds.add(entry.taskId);
+    } catch (e) {
+      KazumiLogger().w('MagnetController: sync scrape info failed', error: e);
+    } finally {
+      _scrapeSyncingTaskIds.remove(entry.taskId);
+    }
+  }
+
+  Future<void> _runAutoImport(MagnetDownloadEntry entry) async {
+    try {
+      if (await _autoImportToLibrary(entry)) {
+        _autoImportedTaskIds.add(entry.taskId);
+      } else {
+        _syncScrapeInfo(entry, _actualDownloadDir(entry));
+      }
+    } finally {
+      _autoImportingTaskIds.remove(entry.taskId);
+    }
+  }
+
+  /// 任务文件的实际落盘目录：多文件种子在 `<savePath>/<种子名>` 下，
+  /// 单文件种子直接落在 savePath。用引擎文件列表取第一个文件的目录。
+  String _actualDownloadDir(MagnetDownloadEntry entry) {
+    final selected = entry.selectedFileIndexes?.toSet();
+    for (final file in entry.files) {
+      if (selected != null && !selected.contains(file.index)) continue;
+      final absolutePath = entry.absolutePathFor(file);
+      if (absolutePath != null) return p.dirname(absolutePath);
+    }
+    if (entry.fileName.isNotEmpty) {
+      final candidate = p.join(entry.savePath, entry.fileName);
+      if (Directory(candidate).existsSync()) return p.normalize(candidate);
+    }
+    return p.normalize(entry.savePath);
+  }
+
+  /// 下载完成后自动入库（需在设置中开启且任务已搜刮）：
+  /// 把所选文件移动到 `<目标根>/<番剧名>/`，尽量按 `第N话` 重命名，
+  /// 然后把目标文件夹加入媒体库并触发重扫。
+  Future<bool> _autoImportToLibrary(MagnetDownloadEntry entry) async {
+    if (entry.status != 'complete') return false;
+    if (!GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary)) {
+      return false;
+    }
+    final info = entry.scrapeInfo;
+    if (info == null) return false;
+    final media = _mediaController;
+    if (media == null) return false;
+    final root = await _resolveAutoImportRoot(media);
+    if (root == null) return false;
+
+    final safeName = _safeFolderName(info.displayName);
+    if (safeName.isEmpty) return false;
+    final targetDirPath = p.join(root, safeName);
+    try {
+      final files = await _downloads.listFiles(entry.taskId);
+      if (files.isEmpty) return false;
+      final selected = entry.selectedFileIndexes?.toSet();
+      final targetDir = Directory(targetDirPath);
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+      var movedCount = 0;
+      for (final f in files) {
+        if (selected != null && !selected.contains(f.index)) continue;
+        if (!f.isStreamable) continue;
+        final manifestFile = MagnetDownloadFile.fromFileInfo(f);
+        final sourcePath = entry.absolutePathFor(manifestFile);
+        if (sourcePath == null) continue;
+        final src = File(sourcePath);
+        if (!await src.exists()) continue;
+        final ext = p.extension(f.name).toLowerCase();
+        final ep = parseLocalEpisodeNumber(f.name);
+        final baseName = ep > 0
+            ? '第${ep.toString().padLeft(2, '0')}话'
+            : p.basenameWithoutExtension(f.name);
+        final dst = await _uniqueDestination(targetDirPath, baseName, ext,
+            p.basenameWithoutExtension(f.name), sourcePath);
+        try {
+          await _moveVerified(src, dst);
+          movedCount++;
+        } catch (e) {
+          KazumiLogger()
+              .w('MagnetController: move file failed: ${src.path}', error: e);
+        }
+      }
+      if (movedCount == 0) return false;
+      // 目标目录加入媒体库并写入搜刮结果，然后重扫。
+      if (!media.folders.any((folder) => localMediaPathsEqual(folder, root))) {
+        await media.addFolder(root);
+      } else {
+        await media.scan();
+      }
+      final previousFolder = _actualDownloadDir(entry);
+      if (!localMediaPathsEqual(previousFolder, targetDirPath)) {
+        await media.removeScrapeResult(previousFolder);
+      }
+      await media.applyScrapeInfo(targetDirPath, info);
+      await _downloads.markImported(entry.taskId, targetDirPath);
+      KazumiDialog.showToast(
+        message: '「${info.displayName}」已自动入库（$movedCount 个文件）',
+        duration: const Duration(seconds: 3),
+      );
+      return true;
+    } catch (e) {
+      KazumiLogger().w('MagnetController: auto import failed', error: e);
+      return false;
+    }
+  }
+
+  /// 同盘优先原子重命名；跨盘时复制到临时文件，校验长度后再替换并删源。
+  static Future<void> _moveVerified(File source, File destination) async {
+    if (localMediaPathsEqual(source.path, destination.path)) return;
+    try {
+      await source.rename(destination.path);
+      return;
+    } on FileSystemException {
+      final temporary = File('${destination.path}.kazumi-importing');
+      if (await temporary.exists()) await temporary.delete();
+      try {
+        await source.copy(temporary.path);
+        final sourceLength = await source.length();
+        if (await temporary.length() != sourceLength) {
+          throw const FileSystemException('Copied file length mismatch');
+        }
+        await temporary.rename(destination.path);
+        await source.delete();
+      } catch (_) {
+        if (await temporary.exists()) await temporary.delete();
+        rethrow;
+      }
+    }
+  }
+
+  static Future<File> _uniqueDestination(String directory, String baseName,
+      String extension, String original, String sourcePath) async {
+    var candidate = File(p.join(directory, '$baseName$extension'));
+    if (!await candidate.exists() ||
+        localMediaPathsEqual(candidate.path, sourcePath)) {
+      return candidate;
+    }
+    candidate = File(p.join(directory, '$baseName.$original$extension'));
+    if (!await candidate.exists() ||
+        localMediaPathsEqual(candidate.path, sourcePath)) {
+      return candidate;
+    }
+    var suffix = 2;
+    while (await candidate.exists()) {
+      candidate =
+          File(p.join(directory, '$baseName.$original-$suffix$extension'));
+      suffix++;
+    }
+    return candidate;
+  }
+
+  /// 自动入库目标根目录：优先设置值，其次媒体库第一个文件夹。
+  Future<String?> _resolveAutoImportRoot(MediaController media) async {
+    final configured =
+        GStorage.getSetting(SettingsKeys.magnetAutoImportRoot).trim();
+    if (configured.isNotEmpty) return configured;
+    if (media.folders.isNotEmpty) return media.folders.first;
+    return null;
+  }
+
+  /// 清洗番剧名为可用的文件夹名。
+  static String _safeFolderName(String name) {
+    return name
+        .trim()
+        .replaceAll(RegExp(r'[<>:"/\\|?*\u0000-\u001f]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   @action
-  Future<void> pauseDownload(String gid) async {
-    final ok = await _downloads.pause(gid);
+  Future<void> pauseDownload(String taskId) async {
+    final ok = await _downloads.pause(taskId);
     if (!ok) KazumiDialog.showToast(message: '暂停任务失败');
   }
 
   @action
-  Future<void> resumeDownload(String gid) async {
-    final ok = await _downloads.unpause(gid);
+  Future<void> resumeDownload(String taskId) async {
+    final ok = await _downloads.unpause(taskId);
     if (!ok) KazumiDialog.showToast(message: '恢复任务失败');
   }
 
   @action
-  Future<void> removeDownload(String gid) async {
-    final ok = await _downloads.remove(gid);
+  Future<void> removeDownload(String taskId, {bool deleteFiles = false}) async {
+    final ok = await _downloads.remove(taskId, deleteFiles: deleteFiles);
     if (!ok) KazumiDialog.showToast(message: '删除任务失败');
   }
 
   @action
   Future<void> refreshDownloads() => _downloads.refresh();
+
+  /// 列出任务的种子文件（元数据就绪后才可用）。
+  Future<List<FileInfo>> listDownloadFiles(String taskId) =>
+      _downloads.listFiles(taskId);
+
+  /// 设置任务的文件选择（部分下载）。
+  Future<bool> setDownloadFileSelection(
+      String taskId, List<int> selected) async {
+    final ok = await _downloads.setFileSelection(taskId, selected);
+    if (!ok) KazumiDialog.showToast(message: '设置文件选择失败');
+    return ok;
+  }
 
   /// 引擎设置变化时调用，重新启动 / 停止引擎。
   @action

@@ -228,18 +228,6 @@ class _MyPageState extends State<MyPage> {
           onTap: () => context.pushNamed('/settings/download/'),
         ),
         SettingsCategoryTile(
-          icon: Icons.search_rounded,
-          title: '磁力搜索',
-          description: '番剧资源搜索、下载与 RSS 订阅',
-          onTap: () => context.pushNamed('/magnet/'),
-        ),
-        SettingsCategoryTile(
-          icon: Icons.video_library_rounded,
-          title: '本地媒体库',
-          description: '扫描并播放本地视频文件',
-          onTap: () => context.navigate('/tab/media/'),
-        ),
-        SettingsCategoryTile(
           icon: Icons.settings_rounded,
           title: '设置',
           description: '播放、弹幕、外观与规则',

@@ -26,11 +26,15 @@ class DanmakuLoadResult {
     required this.danmakus,
     required this.bangumiID,
     required this.status,
+    this.animeTitle = '',
+    this.episodeTitle = '',
   });
 
   factory DanmakuLoadResult.success({
     required List<DanmakuEntry> danmakus,
     required int bangumiID,
+    String animeTitle = '',
+    String episodeTitle = '',
   }) {
     return DanmakuLoadResult(
       danmakus: danmakus,
@@ -38,22 +42,34 @@ class DanmakuLoadResult {
       status: danmakus.isEmpty
           ? DanmakuLoadStatus.empty
           : DanmakuLoadStatus.success,
+      animeTitle: animeTitle,
+      episodeTitle: episodeTitle,
     );
   }
 
   factory DanmakuLoadResult.failed({
     required int bangumiID,
+    String animeTitle = '',
+    String episodeTitle = '',
   }) {
     return DanmakuLoadResult(
       danmakus: const [],
       bangumiID: bangumiID,
       status: DanmakuLoadStatus.failed,
+      animeTitle: animeTitle,
+      episodeTitle: episodeTitle,
     );
   }
 
   final List<DanmakuEntry> danmakus;
   final int bangumiID;
   final DanmakuLoadStatus status;
+
+  /// 弹幕来源番剧标题（弹弹 Play 侧），检索/文件匹配时可获知。
+  final String animeTitle;
+
+  /// 弹幕来源分集标题（弹弹 Play 侧）。
+  final String episodeTitle;
 
   bool get hasDanmakus => status == DanmakuLoadStatus.success;
 
@@ -102,7 +118,19 @@ abstract class _PlayerDanmakuController with Store {
   bool danmakuLoading = false;
   DanmakuDestination danmakuDestination = DanmakuDestination.remoteDanmaku;
 
+  @observable
   int bangumiID = 0;
+
+  /// 当前弹幕绑定到的番剧标题（弹弹 Play 侧；自动加载回退为本地番剧标题）。
+  @observable
+  String danmakuAnimeTitle = '';
+
+  /// 当前弹幕绑定到的分集标题（弹弹 Play 侧；自动加载回退为「第X集」）。
+  @observable
+  String danmakuEpisodeTitle = '';
+
+  /// 当前弹幕绑定到的分集 ID，仅在手动绑定/文件匹配时可知。
+  int danmakuEpisodeId = 0;
   int _scheduledDanmakuGeneration = 0;
 
   int get scheduledDanmakuGeneration => _scheduledDanmakuGeneration;
@@ -147,6 +175,7 @@ abstract class _PlayerDanmakuController with Store {
     String? localVideoPath,
     String? bangumiName,
     List<String>? bangumiNameAliases,
+    String? danmakuScope,
   }) async {
     if (isLocalPlayback()) {
       return await _fetchCachedDanmaku(
@@ -157,6 +186,7 @@ abstract class _PlayerDanmakuController with Store {
         localVideoPath: localVideoPath,
         bangumiName: bangumiName,
         bangumiNameAliases: bangumiNameAliases,
+        danmakuScope: danmakuScope,
       );
     }
     return await _fetchDanDanmakuByBgmBangumiID(
@@ -168,6 +198,7 @@ abstract class _PlayerDanmakuController with Store {
   @action
   void beginDanmakuLoad() {
     danDanmakus.clear();
+    danmakuEpisodeId = 0;
     danmakuLoading = true;
   }
 
@@ -175,11 +206,25 @@ abstract class _PlayerDanmakuController with Store {
   void applyDanmakuLoad(
     DanmakuLoadResult result, {
     required bool enableDanmaku,
+    String? animeTitle,
+    String? episodeTitle,
   }) {
     bangumiID = result.bangumiID;
     addDanmakus(result.danmakus);
     danmakuOn = enableDanmaku;
     danmakuLoading = false;
+    applyDanmakuBinding(animeTitle: animeTitle, episodeTitle: episodeTitle);
+  }
+
+  /// 更新弹幕绑定信息（当前弹幕来自哪部番剧的哪一集）。空字符串不会被覆盖。
+  @action
+  void applyDanmakuBinding({String? animeTitle, String? episodeTitle}) {
+    if (animeTitle != null && animeTitle.isNotEmpty) {
+      danmakuAnimeTitle = animeTitle;
+    }
+    if (episodeTitle != null && episodeTitle.isNotEmpty) {
+      danmakuEpisodeTitle = episodeTitle;
+    }
   }
 
   @action
@@ -214,7 +259,8 @@ abstract class _PlayerDanmakuController with Store {
       String? localDanmakuDirectory,
       String? localVideoPath,
       String? bangumiName,
-      List<String>? bangumiNameAliases}) async {
+      List<String>? bangumiNameAliases,
+      String? danmakuScope}) async {
     KazumiLogger().i(
         'PlayerController: attempting to load cached danmaku for episode $episode');
     var nextBangumiID = bangumiID;
@@ -223,12 +269,14 @@ abstract class _PlayerDanmakuController with Store {
         localDanmakuDirectory != null && localDanmakuDirectory.isNotEmpty;
     final bool hasLocalFile =
         localVideoPath != null && localVideoPath.isNotEmpty;
+    final scope = danmakuScope ?? '';
 
     // --- 1 & 2. 本地缓存 ---
     try {
       if (hasLocalDirectory) {
         final sidecar = await downloadController
-            .readDirectoryDanmaku(localDanmakuDirectory, episode: episode);
+            .readDirectoryDanmaku(localDanmakuDirectory,
+                episode: episode, scope: scope);
         if (sidecar != null && sidecar.danmakus.isNotEmpty) {
           KazumiLogger().i(
               'PlayerController: loaded ${sidecar.danmakus.length} danmakus from local danmaku file');
@@ -264,6 +312,7 @@ abstract class _PlayerDanmakuController with Store {
         localVideoPath,
         localDanmakuDirectory: localDanmakuDirectory,
         episode: episode,
+        danmakuScope: scope,
       );
       if (matched != null) return matched;
     }
@@ -316,6 +365,7 @@ abstract class _PlayerDanmakuController with Store {
         episode: episode,
         bangumiName: bangumiName,
         bangumiNameAliases: bangumiNameAliases,
+        danmakuScope: scope,
       );
       if (titleResult != null) return titleResult;
       return DanmakuLoadResult.failed(bangumiID: nextBangumiID);
@@ -335,6 +385,7 @@ abstract class _PlayerDanmakuController with Store {
     String localVideoPath, {
     required String? localDanmakuDirectory,
     required int episode,
+    String? danmakuScope,
   }) async {
     try {
       final matchResponse = await DanmakuApi.matchLocalFile(localVideoPath);
@@ -359,11 +410,13 @@ abstract class _PlayerDanmakuController with Store {
       if (localDanmakuDirectory != null && localDanmakuDirectory.isNotEmpty) {
         await downloadController.writeDirectoryDanmaku(
             localDanmakuDirectory, res, match.animeId,
-            episode: episode);
+            episode: episode, scope: danmakuScope ?? '');
       }
       return DanmakuLoadResult.success(
         danmakus: res,
         bangumiID: match.animeId,
+        animeTitle: match.animeTitle,
+        episodeTitle: match.episodeTitle,
       );
     } catch (e) {
       KazumiLogger()
@@ -378,6 +431,7 @@ abstract class _PlayerDanmakuController with Store {
     required int episode,
     String? bangumiName,
     List<String>? bangumiNameAliases,
+    String? danmakuScope,
   }) async {
     final candidates = <String>{
       if (bangumiName != null && bangumiName.trim().isNotEmpty)
@@ -395,10 +449,11 @@ abstract class _PlayerDanmakuController with Store {
             'PlayerController: fetched ${res.length} danmakus via title "$candidate"');
         await downloadController.writeDirectoryDanmaku(
             localDanmakuDirectory, res, titleId,
-            episode: episode);
+            episode: episode, scope: danmakuScope ?? '');
         return DanmakuLoadResult.success(
           danmakus: res,
           bangumiID: titleId,
+          animeTitle: candidate,
         );
       } catch (e) {
         KazumiLogger().w(
@@ -460,13 +515,19 @@ abstract class _PlayerDanmakuController with Store {
   }
 
   @action
-  Future<bool> getDanDanmakuByEpisodeID(int episodeID) async {
+  Future<bool> getDanDanmakuByEpisodeID(
+    int episodeID, {
+    String? animeTitle,
+    String? episodeTitle,
+  }) async {
     KazumiLogger().i('PlayerController: attempting to get danmaku $episodeID');
     danmakuLoading = true;
     try {
       danDanmakus.clear();
       var res = await DanmakuApi.getDanDanmakuByEpisodeID(episodeID);
       addDanmakus(res);
+      danmakuEpisodeId = episodeID;
+      applyDanmakuBinding(animeTitle: animeTitle, episodeTitle: episodeTitle);
       return res.isNotEmpty;
     } catch (e) {
       KazumiLogger().w('PlayerController: failed to get danmaku', error: e);

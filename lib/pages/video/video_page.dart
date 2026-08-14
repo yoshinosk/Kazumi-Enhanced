@@ -18,7 +18,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
-import 'package:kazumi/pages/player/episode_comments_sheet.dart';
+import 'package:kazumi/pages/player/episode_danmaku_sheet.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
@@ -1092,7 +1092,6 @@ class _VideoPageState extends State<VideoPage>
 
   Widget get tabBody {
     final bool danmakuOn = playerController.danmaku.danmakuOn;
-    final int episodeNum = videoPageController.commentsEpisode;
 
     return Container(
       color: Theme.of(context).canvasColor,
@@ -1117,7 +1116,7 @@ class _VideoPageState extends State<VideoPage>
                   },
                   tabs: const [
                     Tab(text: '选集'),
-                    Tab(text: '评论'),
+                    Tab(text: '弹幕'),
                   ],
                 ),
                 if (MediaQuery.sizeOf(context).width <=
@@ -1206,9 +1205,8 @@ class _VideoPageState extends State<VideoPage>
                         ),
                     ],
                   ),
-                  EpisodeCommentsSheet(
-                    episode: episodeNum,
-                    selection: videoPageController.selectedEpisode,
+                  EpisodeDanmakuSheet(
+                    playerController: playerController,
                     videoPageController: videoPageController,
                   ),
                 ],

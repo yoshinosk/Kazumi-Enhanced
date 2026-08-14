@@ -15,14 +15,14 @@ Kazumi 本地 vendor 的 `libtorrent_flutter` 1.9.2，用于「重启续做种�
 
 1. 安装 vcpkg 并安装 libtorrent 2.0：
    ```powershell
-   git clone https://github.com/microsoft/vcpkg C:\vcpkg
-   C:\vcpkg\bootstrap-vcpkg.bat
-   C:\vcpkg\vcpkg install libtorrent-rasterbar:x64-windows
+   git clone https://github.com/microsoft/vcpkg "D:\Program Files\vcpkg"
+   & "D:\Program Files\vcpkg\bootstrap-vcpkg.bat"
+   & "D:\Program Files\vcpkg\vcpkg.exe" install libtorrent-rasterbar:x64-windows
    ```
 2. 删除 `prebuilt/` 目录（或构建时置 `LIBTORRENT_FLUTTER_SKIP_DOWNLOAD=ON`），使 `windows/CMakeLists.txt` 走 `add_subdirectory(src)` 从源码构建。
 3. 设置 `VCPKG_ROOT` 环境变量后重新构建 Kazumi：
    ```powershell
-   $env:VCPKG_ROOT = "C:\vcpkg"
+   $env:VCPKG_ROOT = "D:\Program Files\vcpkg"
    flutter build windows
    ```
 4. 构建成功后，将 `lib/src/libtorrent_flutter_base.dart` 的 `resumeAware` 翻为 `true`，再次构建。

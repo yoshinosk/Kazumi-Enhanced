@@ -86,6 +86,9 @@ class MagnetSubscription {
   /// 下载目录（磁力引擎下载该订阅资源时的 dir，留空用默认）。
   final String? downloadPath;
 
+  /// 发现新条目时是否自动提交下载（默认 true，兼容旧数据）。
+  final bool autoDownload;
+
   const MagnetSubscription({
     required this.id,
     required this.name,
@@ -100,11 +103,13 @@ class MagnetSubscription {
     this.minSizeMb,
     this.maxSizeMb,
     this.downloadPath,
+    this.autoDownload = true,
   });
 
   MagnetSubscription copyWith({
     String? lastGuid,
     DateTime? lastCheckedAt,
+    bool? autoDownload,
   }) {
     return MagnetSubscription(
       id: id,
@@ -120,6 +125,7 @@ class MagnetSubscription {
       minSizeMb: minSizeMb,
       maxSizeMb: maxSizeMb,
       downloadPath: downloadPath,
+      autoDownload: autoDownload ?? this.autoDownload,
     );
   }
 
@@ -147,6 +153,7 @@ class MagnetSubscription {
       minSizeMb: (json['minSizeMb'] as num?)?.toDouble(),
       maxSizeMb: (json['maxSizeMb'] as num?)?.toDouble(),
       downloadPath: _cleanOptional(json['downloadPath'] as String?),
+      autoDownload: json['autoDownload'] as bool? ?? true,
     );
   }
 
@@ -171,6 +178,7 @@ class MagnetSubscription {
         if (minSizeMb != null) 'minSizeMb': minSizeMb,
         if (maxSizeMb != null) 'maxSizeMb': maxSizeMb,
         if (downloadPath != null) 'downloadPath': downloadPath,
+        'autoDownload': autoDownload,
       };
 }
 

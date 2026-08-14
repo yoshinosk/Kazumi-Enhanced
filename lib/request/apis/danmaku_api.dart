@@ -83,7 +83,9 @@ class DanmakuApi {
       return DanmakuMatchResponse.empty;
     }
     final fileSize = await readFileSize(filePath);
-    final fileName = p.basenameWithoutExtension(filePath);
+    // 弹弹 Play 的 /api/v2/match 期望完整的文件名（含扩展名，与种子文件名
+    // 口径一致）；去掉扩展名会导致 hashAndFileName 模式下的文件名比对失配。
+    final fileName = p.basename(filePath);
 
     final endPoint = ApiEndpoints.dandanAPIDomain + ApiEndpoints.dandanAPIMatch;
     KazumiLogger()

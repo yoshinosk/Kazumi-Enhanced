@@ -1,3 +1,4 @@
+import 'package:kazumi/utils/chinese_convert.dart';
 import 'package:path/path.dart' as p;
 
 /// 本地媒体文件名解析工具。
@@ -243,4 +244,19 @@ String sanitizeAnimeTitle(String fileName) {
   if (candidates.isEmpty) return '';
   candidates.sort((a, b) => b.length.compareTo(a.length));
   return candidates.first;
+}
+
+/// 生成弹幕侧车文件的作用域标识。
+///
+/// 同一目录混放多部番剧（扫描器按标题拆分组）时，仅按集数命名的
+/// `danmaku_<ep>.json` 会被两部番剧的「第 1 集」共用，导致弹幕串剧。
+/// 用番剧名（繁转简归一）的稳定哈希作为作用域后缀区分。
+String danmakuSidecarScope(String title) {
+  final normalized = toSimplifiedChinese(title).trim();
+  if (normalized.isEmpty) return '';
+  var h = 0;
+  for (final code in normalized.codeUnits) {
+    h = (h * 31 + code) & 0x7FFFFFFF;
+  }
+  return h.toRadixString(16);
 }

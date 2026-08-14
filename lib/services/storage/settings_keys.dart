@@ -676,6 +676,18 @@ class SettingsKeys {
     '',
     group: SettingGroup.magnet,
   );
+  /// 下载完成后是否自动把文件移入媒体库（仅「已搜刮」任务生效）。
+  static const magnetAutoImportToLibrary = SettingKey<bool>(
+    'magnetAutoImportToLibrary',
+    false,
+    group: SettingGroup.magnet,
+  );
+  /// 自动入库的目标根目录；留空时使用媒体库的第一个文件夹。
+  static const magnetAutoImportRoot = SettingKey<String>(
+    'magnetAutoImportRoot',
+    '',
+    group: SettingGroup.magnet,
+  );
 
   // 本地媒体库相关设置
   static const localMediaFolders = SettingKey<String>(
@@ -736,6 +748,15 @@ class SettingsKeys {
   static const localMediaScrapeOnlyUnmatched = SettingKey<bool>(
     'localMediaScrapeOnlyUnmatched',
     true,
+    group: SettingGroup.media,
+  );
+
+  /// 本地媒体库播完一集后，是否把 Bangumi 收藏的 EP 进度更新为该集数。
+  ///
+  /// 默认关闭：仅对已搜刮到真实 Bangumi ID 的番剧生效，播放完成时触发。
+  static const localMediaSyncBangumiProgress = SettingKey<bool>(
+    'localMediaSyncBangumiProgress',
+    false,
     group: SettingGroup.media,
   );
 
@@ -858,6 +879,8 @@ class SettingsKeys {
     magnetTrackerSources,
     magnetTrackerLastUpdated,
     magnetTrackersCache,
+    magnetAutoImportToLibrary,
+    magnetAutoImportRoot,
     localMediaFolders,
     localMediaGroupByFolder,
     localMediaScrapeResults,
@@ -867,6 +890,7 @@ class SettingsKeys {
     localMediaFfmpegPath,
     localMediaTraceFallback,
     localMediaScrapeOnlyUnmatched,
+    localMediaSyncBangumiProgress,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {

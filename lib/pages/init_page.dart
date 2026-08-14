@@ -72,15 +72,18 @@ class _InitPageState extends State<InitPage> {
     } catch (e) {
       KazumiLogger().e('InitPage: downloadController.init() failed', error: e);
     }
-    try {
-      await magnetController.init();
-    } catch (e) {
-      KazumiLogger().e('InitPage: magnetController.init() failed', error: e);
-    }
+    // 先初始化媒体库（加载已持久化的搜刮结果），
+    // 磁力控制器随后把已完成任务的搜刮结果同步到媒体库。
     try {
       await mediaController.init();
     } catch (e) {
       KazumiLogger().e('InitPage: mediaController.init() failed', error: e);
+    }
+    try {
+      magnetController.attachMediaController(mediaController);
+      await magnetController.init();
+    } catch (e) {
+      KazumiLogger().e('InitPage: magnetController.init() failed', error: e);
     }
 
     await _checkRunningOnX11();

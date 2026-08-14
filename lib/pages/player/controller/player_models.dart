@@ -25,6 +25,10 @@ class PlaybackInitParams {
   /// （`danmaku.json`）。仅本地媒体播放时非空。
   final String? localDanmakuDirectory;
 
+  /// 弹幕侧车文件的番剧作用域（`danmaku_<ep>_<scope>.json`）。
+  /// 同目录混放多部番剧时避免侧车文件互相覆盖；仅本地媒体播放时非空。
+  final String? danmakuScope;
+
   const PlaybackInitParams({
     required this.videoUrl,
     required this.offset,
@@ -44,6 +48,7 @@ class PlaybackInitParams {
     this.bangumiName,
     this.bangumiNameAliases,
     this.localDanmakuDirectory,
+    this.danmakuScope,
   });
 }
 

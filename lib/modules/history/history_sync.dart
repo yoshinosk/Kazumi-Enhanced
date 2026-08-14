@@ -244,7 +244,9 @@ class HistorySyncSnapshot {
   factory HistorySyncSnapshot.fromHistories(List<History> histories) {
     final itemVersions = <String, String>{};
     final progressVersions = <String, Map<int, String>>{};
-    for (final history in histories) {
+    // 本地媒体库条目含本机绝对路径，不参与跨设备同步。
+    final syncable = histories.where((h) => !isLocalMediaHistory(h)).toList();
+    for (final history in syncable) {
       history.entryKind = HistoryEntryKind.normalize(history.entryKind);
       final version = HistorySyncVersion.of(
         updatedAt: history.lastWatchTime.millisecondsSinceEpoch,
@@ -261,7 +263,7 @@ class HistorySyncSnapshot {
     }
     return HistorySyncSnapshot(
       generatedAt: DateTime.now().millisecondsSinceEpoch,
-      histories: histories,
+      histories: syncable,
       itemVersions: itemVersions,
       progressVersions: progressVersions,
       deletedVersions: const {},

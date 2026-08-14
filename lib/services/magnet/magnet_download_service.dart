@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/tracker_updater.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:path/path.dart' as p;
@@ -112,7 +114,24 @@ class MagnetDownloadService {
 
   /// 立即更新 tracker 列表；成功返回数量，失败返回 -1。
   Future<int> updateTrackers() async {
-    return TrackerUpdater.instance.update();
+    final count = await TrackerUpdater.instance.update();
+    // 把缓存 tracker 注入引擎会话内的现有任务，让用户配置的
+    // tracker 源真正参与下载（libtorrent 按 URL 去重，重复注入安全）。
+    if (count > 0 && LibtorrentFlutter.isInitialized) {
+      final trackers = _cachedTrackersForEngine();
+      if (trackers.isNotEmpty) {
+        final engine = LibtorrentFlutter.instance;
+        for (final id in engine.torrents.keys) {
+          try {
+            engine.addTrackers(id, trackers);
+          } catch (e) {
+            KazumiLogger()
+                .w('MagnetDownloadService: add trackers failed', error: e);
+          }
+        }
+      }
+    }
+    return count;
   }
 
   /// 当前缓存 tracker 数量。
@@ -123,9 +142,16 @@ class MagnetDownloadService {
 
   /// 当设置中的引擎相关开关变化时调用。
   Future<void> applySettingsChanged() async {
+    final wasRunning = _engine.isRunning;
     await _engine.applySettingsChanged();
     _startTrackerScheduler();
     _startRefreshScheduler();
+    // 引擎由停用变为启用（或在设置页启动新会话）时，为尚未挂载的
+    // 持久化任务重挂，否则历史任务会一直保持静态记录。
+    if (!wasRunning && _engine.isRunning) {
+      _onTorrents(LibtorrentFlutter.instance.torrents);
+      await _reconcileWithEngine();
+    }
   }
 
   /// Tracker 自动更新调度。
@@ -166,10 +192,32 @@ class MagnetDownloadService {
     }
     try {
       final list = jsonDecode(raw) as List;
+      final parsed = <MagnetDownloadEntry>[];
+      final taskIds = <String>{};
+      var migrated = false;
+      for (final e in list) {
+        try {
+          final json = Map<String, dynamic>.from(e as Map);
+          final persistedTaskId = json['taskId'] as String?;
+          if (persistedTaskId == null ||
+              persistedTaskId.isEmpty ||
+              taskIds.contains(persistedTaskId)) {
+            json.remove('taskId');
+            migrated = true;
+          }
+          final entry = MagnetDownloadEntry.fromJson(json);
+          taskIds.add(entry.taskId);
+          parsed.add(entry);
+        } catch (e) {
+          // 单条数据损坏时跳过该条，避免整份任务索引被清空。
+          KazumiLogger()
+              .w('MagnetDownloadService: skip corrupt entry', error: e);
+        }
+      }
       _entries
         ..clear()
-        ..addAll(list.map((e) => MagnetDownloadEntry.fromJson(
-            Map<String, dynamic>.from(e as Map))));
+        ..addAll(parsed);
+      if (migrated) await _saveEntries();
     } catch (e) {
       KazumiLogger().w('MagnetDownloadService: load entries failed', error: e);
       _entries.clear();
@@ -187,7 +235,7 @@ class MagnetDownloadService {
   /// 引擎会话新建（如重启后）时，为尚未挂载的任务重新提交磁力 / 种子。
   ///
   /// 恢复期间置位 [_reconciling]，让 [_onTorrents] 暂时忽略状态流，
-  /// 防止旧 gid（上一会话的 torrent 序号）在重挂过程中匹配到新会话里
+  /// 防止旧会话的 torrent 序号在重挂过程中匹配到新会话里
   /// 序号相同但内容不同的任务，造成进度/状态错乱。
   Future<void> _reconcileWithEngine() async {
     if (!LibtorrentFlutter.isInitialized) return;
@@ -197,10 +245,14 @@ class MagnetDownloadService {
       var changed = false;
       final reconciled = <MagnetDownloadEntry>[];
       for (final entry in _entries) {
-        final id = int.tryParse(entry.gid);
+        final id = int.tryParse(entry.sessionGid ?? '');
         if (id != null && existing.containsKey(id)) {
           reconciled.add(entry);
           continue;
+        }
+        if (entry.sessionGid != null) {
+          entry.sessionGid = null;
+          changed = true;
         }
         // 已完成 / 做种中任务的重挂策略：
         // - 原生引擎支持「重挂自动校验磁盘」（LibtorrentFlutter.resumeAware，
@@ -215,13 +267,12 @@ class MagnetDownloadService {
         final bool resumeCapable = LibtorrentFlutter.resumeAware;
         final bool activeish =
             entry.status != 'complete' && entry.status != 'seeding';
-        final bool essentiallyDone = entry.totalLength > 0 &&
-            entry.verifiedLength >= entry.totalLength;
+        final bool essentiallyDone =
+            entry.totalLength > 0 && entry.verifiedLength >= entry.totalLength;
         // 已完成任务（做种停止条件已满足）不再重挂；做种中任务在
         // 引擎支持校验且文件完整时重挂以续做种。
         final bool shouldRemount = resumeCapable
-            ? (activeish ||
-                (entry.status == 'seeding' && _isFileIntact(entry)))
+            ? (activeish || (entry.status == 'seeding' && _isFileIntact(entry)))
             : (activeish && !essentiallyDone);
         if (!shouldRemount) {
           reconciled.add(entry);
@@ -232,7 +283,9 @@ class MagnetDownloadService {
                 ? entry.savePath
                 : await LibtorrentEngine.resolveDownloadDir());
         if (newId != null && newId.isNotEmpty) {
-          entry.gid = newId;
+          entry.sessionGid = newId;
+          // 重挂后文件选择需要重新应用（元数据就绪时由 _onTorrents 处理）。
+          entry._fileSelectionApplied = false;
           if (entry.status == 'complete' || entry.status == 'seeding') {
             // 续做种重挂：引擎将校验磁盘（checking 期 totalDone 从 0
             // 爬升是校验而非下载），标记 _reseed 让 UI 保持 100% 显示；
@@ -241,13 +294,33 @@ class MagnetDownloadService {
             entry._uploadBase = entry.totalUploaded;
             entry._restartFloor = null;
           } else {
-            // 未完成任务：维持重启恢复混合基线（引擎校验生效前作为
-            // 兜底；校验生效后 _wasRestoring 会以真实字节对齐）。
+            // 未完成任务：resumeAware 引擎重挂后会真实校验磁盘（checking
+            // 期 totalDone 从 0 爬升是校验而非下载），置位 _wasRestoring
+            // 让校验期保留旧进度、校验完成后按真实字节对齐，避免
+            // 「从零重下」混合基线导致的进度虚高。
             entry._reseed = false;
             entry._uploadBase = 0;
-            entry._restartFloor = entry.totalLength > 0
-                ? (entry.verifiedLength / entry.totalLength).clamp(0.0, 1.0)
-                : 0.0;
+            if (resumeCapable) {
+              entry._restartFloor = null;
+              entry._wasRestoring = true;
+            } else {
+              entry._restartFloor = entry.totalLength > 0
+                  ? (entry.verifiedLength / entry.totalLength).clamp(0.0, 1.0)
+                  : 0.0;
+            }
+          }
+          // 用户手动暂停的任务重挂后保持暂停，避免恢复下载。
+          if (entry.status == 'paused') {
+            try {
+              final pausedId = int.tryParse(entry.sessionGid ?? '');
+              if (pausedId != null) {
+                LibtorrentFlutter.instance.pauseTorrent(pausedId);
+              }
+            } catch (e) {
+              KazumiLogger().w(
+                  'MagnetDownloadService: re-pause remounted torrent failed',
+                  error: e);
+            }
           }
           reconciled.add(entry);
           changed = true;
@@ -272,13 +345,29 @@ class MagnetDownloadService {
   static bool isFileIntactForTest(MagnetDownloadEntry entry) =>
       _isFileIntact(entry);
 
-  /// 判断任务的主文件是否仍完整存在于磁盘上（重挂续做种的守卫）。
-  ///
-  /// 以 `savePath/fileName` 的存在性为准；文件被改名 / 移走会保守地
-  /// 判定为缺失（保持静态记录，不触发重挂重下）。
+  /// 判断已选择的种子文件是否仍完整存在于磁盘上（重挂续做种的守卫）。
   static bool _isFileIntact(MagnetDownloadEntry entry) {
-    if (entry.savePath.isEmpty || entry.fileName.isEmpty) return false;
-    return File(p.join(entry.savePath, entry.fileName)).existsSync();
+    if (entry.savePath.isEmpty) return false;
+    if (entry.files.isNotEmpty) {
+      final selected = entry.selectedFileIndexes?.toSet();
+      final requiredFiles = selected == null
+          ? entry.files
+          : entry.files.where((file) => selected.contains(file.index));
+      var found = false;
+      for (final file in requiredFiles) {
+        found = true;
+        final path = entry.absolutePathFor(file);
+        if (path == null) return false;
+        final diskFile = File(path);
+        if (!diskFile.existsSync() || diskFile.lengthSync() != file.size) {
+          return false;
+        }
+      }
+      return found;
+    }
+    if (entry.fileName.isEmpty) return false;
+    final candidate = p.join(entry.savePath, entry.fileName);
+    return File(candidate).existsSync() || Directory(candidate).existsSync();
   }
 
   // ---------------- 任务操作 ----------------
@@ -286,8 +375,14 @@ class MagnetDownloadService {
   /// 提交磁力 / 种子链接到引擎。
   ///
   /// [dir] 指定下载目录，留空则使用引擎默认目录。
+  /// [scrapeInfo] 为已关联的番剧信息（如从番剧详情页发起搜索时携带），
+  /// 此时任务默认为「已搜刮」的番剧，下载完成后会自动同步到媒体库。
   /// 返回 torrent 标识；若引擎不可用则返回空字符串。
-  Future<String> add(MagnetSearchItem item, {String? dir}) async {
+  Future<String> add(
+    MagnetSearchItem item, {
+    String? dir,
+    MediaScrapeInfo? scrapeInfo,
+  }) async {
     // 引擎未运行则先尝试启动。
     if (LibtorrentEngine.enabledBySettings &&
         LibtorrentEngine.supported &&
@@ -308,53 +403,203 @@ class MagnetDownloadService {
     final savePath = (dir != null && dir.trim().isNotEmpty)
         ? dir.trim()
         : await LibtorrentEngine.resolveDownloadDir();
-    final gid = await _engineAdd(uri, savePath: savePath);
-    if (gid == null || gid.isEmpty) return '';
+    final sessionGid = await _engineAdd(uri, savePath: savePath);
+    if (sessionGid == null || sessionGid.isEmpty) return '';
     final entry = MagnetDownloadEntry(
-      gid: gid,
+      sessionGid: sessionGid,
       title: item.title,
       sourceUri: uri,
       savePath: savePath,
       addedAt: DateTime.now(),
+      scrapeInfo: scrapeInfo,
     );
     _entries.insert(0, entry);
     await _saveEntries();
     onChanged?.call(_entries);
-    return gid;
+    return entry.taskId;
   }
 
-  Future<bool> pause(String gid) async {
-    final id = int.tryParse(gid);
-    if (id == null || !LibtorrentFlutter.isInitialized) return false;
-    LibtorrentFlutter.instance.pauseTorrent(id);
-    _find(gid)?.status = 'paused';
-    onChanged?.call(_entries);
-    return true;
-  }
-
-  Future<bool> unpause(String gid) async {
-    final id = int.tryParse(gid);
-    if (id == null || !LibtorrentFlutter.isInitialized) return false;
-    LibtorrentFlutter.instance.resumeTorrent(id);
-    await refresh();
-    return true;
-  }
-
-  Future<bool> remove(String gid) async {
-    final id = int.tryParse(gid);
-    if (id == null || !LibtorrentFlutter.isInitialized) return false;
-    // 仅移除任务，保留已下载文件。
-    LibtorrentFlutter.instance.removeTorrent(id, deleteFiles: false);
-    _entries.removeWhere((e) => e.gid == gid);
+  Future<bool> pause(String taskId) async {
+    final entry = _find(taskId);
+    if (entry == null) return false;
+    final id = int.tryParse(entry.sessionGid ?? '');
+    if (id != null && LibtorrentFlutter.isInitialized) {
+      try {
+        LibtorrentFlutter.instance.pauseTorrent(id);
+      } catch (e) {
+        KazumiLogger()
+            .w('MagnetDownloadService: pause torrent failed', error: e);
+      }
+    }
+    entry.status = 'paused';
     await _saveEntries();
     onChanged?.call(_entries);
     return true;
+  }
+
+  Future<bool> unpause(String taskId) async {
+    final entry = _find(taskId);
+    if (entry == null) return false;
+    final id = int.tryParse(entry.sessionGid ?? '');
+    if (id != null && LibtorrentFlutter.isInitialized && _engine.isRunning) {
+      try {
+        LibtorrentFlutter.instance.resumeTorrent(id);
+      } catch (e) {
+        KazumiLogger()
+            .w('MagnetDownloadService: resume torrent failed', error: e);
+      }
+    }
+    // 引擎未运行时仅更新索引状态，待引擎启动后由 reconcile 重挂。
+    entry.status = 'waiting';
+    await _saveEntries();
+    onChanged?.call(_entries);
+    return true;
+  }
+
+  Future<bool> remove(String taskId, {bool deleteFiles = false}) async {
+    final entry = _find(taskId);
+    if (entry == null) return false;
+    final id = int.tryParse(entry.sessionGid ?? '');
+    // 引擎可用时同步移除引擎中的任务；引擎不可用（启动失败 / 旧数据）
+    // 时直接移除索引，避免任务永久无法删除。
+    if (id != null && LibtorrentFlutter.isInitialized) {
+      try {
+        LibtorrentFlutter.instance.removeTorrent(id, deleteFiles: deleteFiles);
+      } catch (e) {
+        KazumiLogger()
+            .w('MagnetDownloadService: remove torrent failed', error: e);
+      }
+    }
+    if (deleteFiles) {
+      // 引擎可能已把任务移除（如已完成任务停止做种后）、删除失败或不可用：
+      // 兜底按落盘路径清理（幂等，引擎已删除时 no-op）。
+      try {
+        await _deleteOnDisk(entry);
+      } catch (e) {
+        KazumiLogger()
+            .w('MagnetDownloadService: delete files failed', error: e);
+      }
+    }
+    _entries.removeWhere((e) => e.taskId == taskId);
+    await _saveEntries();
+    onChanged?.call(_entries);
+    return true;
+  }
+
+  /// 删除任务落盘文件：多文件种子为 `<savePath>/<种子名>` 目录，
+  /// 单文件种子为 `<savePath>/<文件名>`。
+  /// [fileName] 为空（从未拿到元数据）时跳过，避免误删整个下载目录。
+  static Future<void> _deleteOnDisk(MagnetDownloadEntry entry) async {
+    if (entry.savePath.isEmpty) return;
+    if (entry.files.isNotEmpty) {
+      final selected = entry.selectedFileIndexes?.toSet();
+      final parentDirs = <String>{};
+      for (final torrentFile in entry.files) {
+        if (selected != null && !selected.contains(torrentFile.index)) continue;
+        final path = entry.absolutePathFor(torrentFile);
+        if (path == null) continue;
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+        var parent = p.dirname(path);
+        while (p.isWithin(p.absolute(entry.savePath), parent)) {
+          parentDirs.add(parent);
+          parent = p.dirname(parent);
+        }
+      }
+      final deepestFirst = parentDirs.toList()
+        ..sort((a, b) => b.length.compareTo(a.length));
+      for (final path in deepestFirst) {
+        final directory = Directory(path);
+        if (!await directory.exists()) continue;
+        if (await directory.list().isEmpty) await directory.delete();
+      }
+      return;
+    }
+    if (entry.savePath.isEmpty || entry.fileName.isEmpty) return;
+    final candidate = p.join(entry.savePath, entry.fileName);
+    final dir = Directory(candidate);
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+      return;
+    }
+    final file = File(candidate);
+    if (await file.exists()) {
+      await file.delete();
+    }
   }
 
   /// 重新拉取所有任务的实时状态。
   Future<void> refresh() async {
     if (!LibtorrentFlutter.isInitialized) return;
     _onTorrents(LibtorrentFlutter.instance.torrents);
+  }
+
+  /// 列出任务的种子文件（元数据就绪后才可用）。
+  Future<List<FileInfo>> listFiles(String taskId) async {
+    final entry = _find(taskId);
+    if (entry == null) return const [];
+    final id = int.tryParse(entry.sessionGid ?? '');
+    if (id == null || !LibtorrentFlutter.isInitialized) {
+      return entry.files.map((file) => file.toFileInfo()).toList();
+    }
+    try {
+      final files = LibtorrentFlutter.instance.getFiles(id);
+      if (files.isNotEmpty) {
+        entry.files = files.map(MagnetDownloadFile.fromFileInfo).toList();
+        await _saveEntries();
+      }
+      return files;
+    } catch (e) {
+      KazumiLogger().w('MagnetDownloadService: list files failed', error: e);
+      return entry.files.map((file) => file.toFileInfo()).toList();
+    }
+  }
+
+  /// 设置任务的文件选择（部分下载）。
+  ///
+  /// [selectedIndexes] 为需要下载的文件索引集合；与当前全部文件一致
+  /// （即全选）时归一为 null。返回是否成功。
+  Future<bool> setFileSelection(
+      String taskId, List<int> selectedIndexes) async {
+    final entry = _find(taskId);
+    if (entry == null) return false;
+    final id = int.tryParse(entry.sessionGid ?? '');
+    if (id == null || !LibtorrentFlutter.isInitialized) return false;
+    try {
+      final files = LibtorrentFlutter.instance.getFiles(id);
+      if (files.isEmpty) return false;
+      entry.files = files.map(MagnetDownloadFile.fromFileInfo).toList();
+      final selected = selectedIndexes.toSet();
+      final priorities = [
+        for (var i = 0; i < files.length; i++) selected.contains(i) ? 4 : 0,
+      ];
+      LibtorrentFlutter.instance.setFilePriorities(id, priorities);
+      // 总量切换为所选文件大小之和，保证进度口径与引擎 totalWanted 一致。
+      var newTotal = 0;
+      for (final i in selected) {
+        if (i >= 0 && i < files.length) newTotal += files[i].size;
+      }
+      entry.totalLength = newTotal;
+      entry.selectedFileIndexes =
+          selected.length == files.length ? null : (selected.toList()..sort());
+      entry._fileSelectionApplied = true;
+      await _saveEntries();
+      onChanged?.call(_entries);
+      return true;
+    } catch (e) {
+      KazumiLogger()
+          .w('MagnetDownloadService: set file selection failed', error: e);
+      return false;
+    }
+  }
+
+  /// 记录已完成任务的媒体库目标目录，避免重启后重复自动入库。
+  Future<void> markImported(String taskId, String importedPath) async {
+    final entry = _find(taskId);
+    if (entry == null) return;
+    entry.importedPath = p.normalize(importedPath);
+    await _saveEntries();
+    onChanged?.call(_entries);
   }
 
   /// 测试引擎是否可用，返回 libtorrent 版本或 null。
@@ -364,11 +609,17 @@ class MagnetDownloadService {
     return version.isEmpty ? 'engine' : version;
   }
 
-  MagnetDownloadEntry? _find(String gid) {
+  MagnetDownloadEntry? _find(String taskId) {
     for (final e in _entries) {
-      if (e.gid == gid) return e;
+      if (e.taskId == taskId) return e;
     }
     return null;
+  }
+
+  /// 是否已存在使用同一磁力链 / 种子地址的任务（订阅自动下载去重用）。
+  bool hasDownload(String uri) {
+    if (uri.isEmpty) return false;
+    return _entries.any((e) => e.sourceUri == uri);
   }
 
   /// 进度平滑：允许估算值领先已验证字节的时间窗口（秒）。
@@ -386,12 +637,23 @@ class MagnetDownloadService {
         GStorage.getSetting(SettingsKeys.magnetSeedingStopHours);
     var changed = false;
     for (final entry in _entries) {
-      final id = int.tryParse(entry.gid);
+      final id = int.tryParse(entry.sessionGid ?? '');
       if (id == null) continue;
       final t = torrents[id];
       if (t == null) continue;
       final status = _mapStatus(t);
       final prevStatus = entry.status;
+      if (t.hasMetadata && entry.files.isEmpty) {
+        try {
+          final files = LibtorrentFlutter.instance.getFiles(id);
+          if (files.isNotEmpty) {
+            entry.files = files.map(MagnetDownloadFile.fromFileInfo).toList();
+          }
+        } catch (e) {
+          KazumiLogger()
+              .w('MagnetDownloadService: cache torrent files failed', error: e);
+        }
+      }
       applyTorrentStatus(
         entry,
         t,
@@ -401,6 +663,30 @@ class MagnetDownloadService {
         seedingStopRatio: seedingStopRatio,
         seedingStopHours: seedingStopHours,
       );
+      // 文件选择尚未应用到引擎（如重启重挂后）：元数据就绪时应用。
+      if (entry.selectedFileIndexes != null &&
+          !entry._fileSelectionApplied &&
+          t.hasMetadata) {
+        try {
+          final files = LibtorrentFlutter.instance.getFiles(id);
+          if (files.isNotEmpty) {
+            final selected = entry.selectedFileIndexes!.toSet();
+            final priorities = [
+              for (var i = 0; i < files.length; i++)
+                selected.contains(i) ? 4 : 0,
+            ];
+            LibtorrentFlutter.instance.setFilePriorities(id, priorities);
+            entry._fileSelectionApplied = true;
+            // 原生 set_file_priorities 会 resume 任务：暂停态任务恢复暂停。
+            if (entry.status == 'paused') {
+              LibtorrentFlutter.instance.pauseTorrent(id);
+            }
+          }
+        } catch (e) {
+          KazumiLogger().w('MagnetDownloadService: apply file selection failed',
+              error: e);
+        }
+      }
       // 做种状态流转：
       if (entry.status != prevStatus) {
         if (entry.status == 'seeding') {
@@ -415,10 +701,10 @@ class MagnetDownloadService {
           // prevStatus == 'seeding'。
           try {
             LibtorrentFlutter.instance.removeTorrent(id, deleteFiles: false);
+            entry.sessionGid = null;
           } catch (e) {
-            KazumiLogger().w(
-                'MagnetDownloadService: stop seeding failed',
-                error: e);
+            KazumiLogger()
+                .w('MagnetDownloadService: stop seeding failed', error: e);
           }
         }
       }
@@ -500,8 +786,8 @@ class MagnetDownloadService {
     if (status == 'complete') {
       final shouldSeed = switch (seedingStopMode) {
         seedingStopNone => true, // 不自动停止，一直做种
-        seedingStopTime => _seedingWithinDuration(
-            entry.seedingStartedAt, seedingStopHours, now),
+        seedingStopTime =>
+          _seedingWithinDuration(entry.seedingStartedAt, seedingStopHours, now),
         _ => entry.seedRatio < seedingStopRatio, // 分享率未达阈值
       };
       if (shouldSeed) {
@@ -576,8 +862,10 @@ class MagnetDownloadService {
         entry._progressSampleAt = now;
         entry._wasRestoring = true;
       } else {
-        if (entry._wasRestoring) {
-          // 校验完成：以引擎重新校验出的真实字节对齐，消除恢复阶段的进度跳变。
+        if (entry._wasRestoring && status == 'active') {
+          // 校验完成、真正开始下载：以引擎重新校验出的真实字节对齐，
+          // 消除恢复阶段的进度跳变。暂停 / 等待 / 错误等尚未进入
+          // 真实下载的状态保留旧进度，避免被 0 值打回。
           entry.completedLength = t.totalDone;
           entry._wasRestoring = false;
         }
@@ -634,34 +922,34 @@ class MagnetDownloadService {
 
   /// 映射任务状态。
   ///
-  /// libtorrent_flutter 的 `stateFromInt` 与原生 libtorrent 状态枚举存在一位偏移：
-  /// 原生 checking_files(1) 上报为 [TorrentState.downloadingMetadata]、
-  /// downloading_metadata(2) 上报为 [TorrentState.downloading]、
-  /// downloading(3) 上报为 [TorrentState.finished]……本方法据此还原真实状态。
-  ///
   /// 返回：waiting / metadata / checking / active / paused / complete / error。
-  /// 完成态不依赖 state，改用 progress + isFinished（原生侧计算可靠）。
-  String _mapStatus(TorrentInfo t) {
+  static String _mapStatus(TorrentInfo t) {
     if (t.isPaused) return 'paused';
-    if (t.isFinished && t.progress >= 0.999) return 'complete';
+    if ((t.isFinished && t.progress >= 0.999) ||
+        t.state == TorrentState.finished ||
+        t.state == TorrentState.seeding) {
+      return 'complete';
+    }
     switch (t.state) {
       case TorrentState.error:
         return 'error';
       case TorrentState.downloadingMetadata:
-        // 原生 checking_files：重新校验磁盘上已有数据（重启断点续传必经状态）。
-        return t.hasMetadata ? 'checking' : 'waiting';
+        return 'metadata';
       case TorrentState.downloading:
-        // 原生 downloading_metadata：磁力链接正在获取元数据。
-        return t.hasMetadata ? 'active' : 'metadata';
+        return 'active';
       case TorrentState.checkingFiles:
       case TorrentState.checkingResume:
-      case TorrentState.unknown:
-        // 原生 queued_for_checking / allocating / checking_resume_data。
+      case TorrentState.allocating:
         return t.hasMetadata ? 'checking' : 'waiting';
+      case TorrentState.unknown:
+        return 'waiting';
       default:
         return 'active';
     }
   }
+
+  @visibleForTesting
+  static String mapStatusForTest(TorrentInfo info) => _mapStatus(info);
 
   // ---------------- 引擎调用 ----------------
 
@@ -687,8 +975,22 @@ class MagnetDownloadService {
       KazumiLogger().w('MagnetDownloadService: engine add failed', error: e);
       return null;
     }
+    // 注入用户缓存的 tracker，加速冷启动时的 peer 发现。
+    final trackers = _cachedTrackersForEngine();
+    if (trackers.isNotEmpty) {
+      try {
+        engine.addTrackers(id, trackers);
+      } catch (e) {
+        KazumiLogger()
+            .w('MagnetDownloadService: add trackers failed', error: e);
+      }
+    }
     return '$id';
   }
+
+  /// 取缓存 tracker 中适合注入引擎的数量上限（过多 tracker 反而拖慢握手）。
+  static List<String> _cachedTrackersForEngine() =>
+      TrackerUpdater.instance.cachedTrackers().take(20).toList();
 
   /// 下载 .torrent 到临时目录，返回本地路径。
   Future<String?> _downloadTorrent(String url) async {
@@ -701,7 +1003,8 @@ class MagnetDownloadService {
       await _http.download(url, file.path);
       return await file.exists() ? file.path : null;
     } catch (e) {
-      KazumiLogger().w('MagnetDownloadService: download torrent failed', error: e);
+      KazumiLogger()
+          .w('MagnetDownloadService: download torrent failed', error: e);
       return null;
     }
   }
@@ -726,7 +1029,8 @@ class MagnetDownloadService {
 /// 本地缓存的下载任务索引。状态字段随引擎状态流转更新。
 class MagnetDownloadEntry {
   MagnetDownloadEntry({
-    required this.gid,
+    String? taskId,
+    this.sessionGid,
     required this.title,
     required this.sourceUri,
     required this.addedAt,
@@ -741,10 +1045,20 @@ class MagnetDownloadEntry {
     this.numSeeds = 0,
     this.numPeers = 0,
     this.fileName = '',
+    this.scrapeInfo,
+    this.selectedFileIndexes,
     this.seedingStartedAt,
-  });
+    this.importedPath = '',
+    List<MagnetDownloadFile>? files,
+  })  : taskId = taskId ?? _newTaskId(),
+        files = files ?? <MagnetDownloadFile>[];
 
-  String gid;
+  /// Kazumi 持久任务 ID。界面和业务操作只使用该 ID。
+  final String taskId;
+
+  /// libtorrent 当前进程内的临时任务 ID。重启后必须重新绑定，不持久化。
+  String? sessionGid;
+
   final String title;
   final String sourceUri;
   final DateTime addedAt;
@@ -764,6 +1078,21 @@ class MagnetDownloadEntry {
   int numSeeds;
   int numPeers;
   String fileName;
+
+  /// 元数据就绪后缓存的种子文件清单。完成任务从引擎移除后仍可展示和导入。
+  List<MagnetDownloadFile> files;
+
+  /// 已关联的番剧信息（持久化）。非空表示该任务默认为「已搜刮」的番剧，
+  /// 来源为番剧详情页发起的磁力搜索；下载完成后会自动同步到媒体库搜刮结果。
+  MediaScrapeInfo? scrapeInfo;
+
+  bool get isScraped => scrapeInfo != null;
+
+  /// 文件选择（持久化）：需要下载的文件索引集合；null 表示全部文件。
+  List<int>? selectedFileIndexes;
+
+  /// 文件选择是否已应用到引擎会话（不持久化，重挂后需重新应用）。
+  bool _fileSelectionApplied = false;
 
   /// 进度平滑用的上一次采样时间（不持久化）。
   DateTime? _progressSampleAt;
@@ -790,6 +1119,9 @@ class MagnetDownloadEntry {
   /// 做种满 [SettingsKeys.magnetSeedingStopHours] 小时后停止。
   DateTime? seedingStartedAt;
 
+  /// 自动入库成功后的目标目录。非空时不再移动原下载路径。
+  String importedPath;
+
   @visibleForTesting
   set restartFloorForTest(double? value) => _restartFloor = value;
 
@@ -802,8 +1134,10 @@ class MagnetDownloadEntry {
   @visibleForTesting
   set seedingStartedAtForTest(DateTime? value) => seedingStartedAt = value;
 
-  double get progress =>
-      totalLength > 0 ? completedLength / totalLength : 0.0;
+  @visibleForTesting
+  set fileSelectionAppliedForTest(bool value) => _fileSelectionApplied = value;
+
+  double get progress => totalLength > 0 ? completedLength / totalLength : 0.0;
 
   /// 做种率：本会话累计上传 / 磁盘真实已下载字节（下载为 0 时返回 0）。
   ///
@@ -838,33 +1172,73 @@ class MagnetDownloadEntry {
 
   factory MagnetDownloadEntry.fromJson(Map<String, dynamic> json) {
     // 兼容旧数据：新版本只持久化 verifiedLength，旧版本只有 completedLength。
-    final verified = (json['verifiedLength'] as num?)?.toInt() ??
-        (json['completedLength'] as num?)?.toInt() ??
-        0;
+    final verified =
+        _toInt(json['verifiedLength']) ?? _toInt(json['completedLength']) ?? 0;
+    final rawInfo = json['scrapeInfo'];
+    final rawFiles = json['files'];
+    final persistedTaskId = json['taskId'] as String?;
     return MagnetDownloadEntry(
-      gid: json['gid'] as String? ?? '',
+      taskId: persistedTaskId != null && persistedTaskId.isNotEmpty
+          ? persistedTaskId
+          : null,
+      // 旧 gid 属于上一次进程的引擎会话，不能恢复为 sessionGid。
+      sessionGid: null,
       title: json['title'] as String? ?? '',
       sourceUri: json['sourceUri'] as String? ?? '',
       addedAt:
           DateTime.tryParse(json['addedAt'] as String? ?? '') ?? DateTime.now(),
       savePath: json['savePath'] as String? ?? '',
       status: json['status'] as String? ?? 'waiting',
-      totalLength: (json['totalLength'] as num?)?.toInt() ?? 0,
+      totalLength: _toInt(json['totalLength']) ?? 0,
       completedLength: verified,
       verifiedLength: verified,
-      downloadSpeed: (json['downloadSpeed'] as num?)?.toInt() ?? 0,
-      uploadSpeed: (json['uploadSpeed'] as num?)?.toInt() ?? 0,
-      totalUploaded: (json['totalUploaded'] as num?)?.toInt() ?? 0,
-      numSeeds: (json['numSeeds'] as num?)?.toInt() ?? 0,
-      numPeers: (json['numPeers'] as num?)?.toInt() ?? 0,
+      downloadSpeed: _toInt(json['downloadSpeed']) ?? 0,
+      uploadSpeed: _toInt(json['uploadSpeed']) ?? 0,
+      totalUploaded: _toInt(json['totalUploaded']) ?? 0,
+      numSeeds: _toInt(json['numSeeds']) ?? 0,
+      numPeers: _toInt(json['numPeers']) ?? 0,
       fileName: json['fileName'] as String? ?? '',
+      scrapeInfo: rawInfo is Map
+          ? MediaScrapeInfo.fromJson(Map<String, dynamic>.from(rawInfo))
+          : null,
+      selectedFileIndexes: (json['selectedFileIndexes'] as List?)
+          ?.whereType<num>()
+          .map((e) => e.toInt())
+          .toList(),
       seedingStartedAt:
           DateTime.tryParse(json['seedingStartedAt'] as String? ?? ''),
+      importedPath: json['importedPath'] as String? ?? '',
+      files: rawFiles is List
+          ? rawFiles
+              .whereType<Map>()
+              .map((file) =>
+                  MagnetDownloadFile.fromJson(Map<String, dynamic>.from(file)))
+              .toList()
+          : null,
     );
   }
 
+  /// 返回种子相对路径对应的安全绝对路径；越过下载目录时返回 null。
+  String? absolutePathFor(MagnetDownloadFile file) {
+    if (savePath.isEmpty || file.path.isEmpty || p.isAbsolute(file.path)) {
+      return null;
+    }
+    final base = p.normalize(p.absolute(savePath));
+    final candidate = p.normalize(p.join(base, file.path));
+    if (candidate != base && !p.isWithin(base, candidate)) return null;
+    return candidate;
+  }
+
+  /// 容错解析数值字段：兼容历史数据中可能存在的字符串数值。
+  static int? _toInt(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    return int.tryParse('$value');
+  }
+
   Map<String, dynamic> toJson() => {
-        'gid': gid,
+        'version': 2,
+        'taskId': taskId,
         'title': title,
         'sourceUri': sourceUri,
         'addedAt': addedAt.toIso8601String(),
@@ -879,6 +1253,72 @@ class MagnetDownloadEntry {
         'numSeeds': numSeeds,
         'numPeers': numPeers,
         'fileName': fileName,
+        if (scrapeInfo != null) 'scrapeInfo': scrapeInfo!.toJson(),
+        if (selectedFileIndexes != null)
+          'selectedFileIndexes': selectedFileIndexes,
+        if (files.isNotEmpty)
+          'files': files.map((file) => file.toJson()).toList(),
         'seedingStartedAt': seedingStartedAt?.toIso8601String() ?? '',
+        if (importedPath.isNotEmpty) 'importedPath': importedPath,
+      };
+
+  static final Random _taskIdRandom = Random.secure();
+  static int _taskIdSequence = 0;
+
+  static String _newTaskId() {
+    final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    final entropy = _taskIdRandom.nextInt(0x7fffffff).toRadixString(36);
+    final sequence = (_taskIdSequence++ & 0xffff).toRadixString(36);
+    return '$timestamp-$entropy-$sequence';
+  }
+}
+
+/// 可持久化的种子文件清单项。
+class MagnetDownloadFile {
+  const MagnetDownloadFile({
+    required this.index,
+    required this.name,
+    required this.path,
+    required this.size,
+    required this.isStreamable,
+  });
+
+  final int index;
+  final String name;
+  final String path;
+  final int size;
+  final bool isStreamable;
+
+  factory MagnetDownloadFile.fromFileInfo(FileInfo file) => MagnetDownloadFile(
+        index: file.index,
+        name: file.name,
+        path: file.path,
+        size: file.size,
+        isStreamable: file.isStreamable,
+      );
+
+  factory MagnetDownloadFile.fromJson(Map<String, dynamic> json) =>
+      MagnetDownloadFile(
+        index: MagnetDownloadEntry._toInt(json['index']) ?? 0,
+        name: json['name'] as String? ?? '',
+        path: json['path'] as String? ?? '',
+        size: MagnetDownloadEntry._toInt(json['size']) ?? 0,
+        isStreamable: json['isStreamable'] as bool? ?? false,
+      );
+
+  FileInfo toFileInfo() => FileInfo(
+        index: index,
+        name: name,
+        path: path,
+        size: size,
+        isStreamable: isStreamable,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'index': index,
+        'name': name,
+        'path': path,
+        'size': size,
+        'isStreamable': isStreamable,
       };
 }

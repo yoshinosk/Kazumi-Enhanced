@@ -1,19 +1,44 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
+import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/search/image_search_module.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:path/path.dart' as p;
 
 /// 本地媒体库支持的视频扩展名。
 const Set<String> kLocalMediaExtensions = {
-  '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v', '.ts', '.m2ts',
+  '.mp4',
+  '.mkv',
+  '.avi',
+  '.mov',
+  '.flv',
+  '.wmv',
+  '.webm',
+  '.m4v',
+  '.ts',
+  '.m2ts',
 };
 
 /// 判断文件是否是支持的视频类型。
 bool isSupportedVideoFile(String path) {
   final ext = p.extension(path).toLowerCase();
   return kLocalMediaExtensions.contains(ext);
+}
+
+/// 媒体路径的比较键。Windows 忽略大小写，其他平台保留大小写。
+String localMediaPathKey(String path) {
+  final normalized = p.normalize(p.absolute(path));
+  return Platform.isWindows ? normalized.toLowerCase() : normalized;
+}
+
+bool localMediaPathsEqual(String first, String second) =>
+    localMediaPathKey(first) == localMediaPathKey(second);
+
+bool isLocalMediaPathWithin(String root, String candidate) {
+  final rootKey = localMediaPathKey(root);
+  final candidateKey = localMediaPathKey(candidate);
+  return rootKey == candidateKey || p.isWithin(rootKey, candidateKey);
 }
 
 /// 一个本地视频文件。
@@ -54,14 +79,24 @@ class LocalMediaFile {
       path: json['path'] as String? ?? '',
       name: json['name'] as String? ?? '',
       size: (json['size'] as num?)?.toInt() ?? 0,
-      modifiedAt:
-          DateTime.tryParse(json['modifiedAt'] as String? ?? '') ??
-              DateTime.now(),
+      modifiedAt: DateTime.tryParse(json['modifiedAt'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 
   static Future<LocalMediaFile> fromFileSystemEntity(File file) async {
     final stat = await file.stat();
+    return LocalMediaFile(
+      path: file.path,
+      name: p.basename(file.path),
+      size: stat.size,
+      modifiedAt: stat.modified,
+    );
+  }
+
+  /// 同步版本，供后台 isolate 扫描使用。
+  static LocalMediaFile fromFileSystemEntitySync(File file) {
+    final stat = file.statSync();
     return LocalMediaFile(
       path: file.path,
       name: p.basename(file.path),
@@ -97,8 +132,8 @@ class LocalMediaFolder {
       path: json['path'] as String? ?? '',
       name: json['name'] as String? ?? '',
       files: fileList
-          .map((e) => LocalMediaFile.fromJson(
-              Map<String, dynamic>.from(e as Map)))
+          .map((e) =>
+              LocalMediaFile.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
     );
   }
@@ -128,6 +163,8 @@ class LocalMediaFolderStore {
 }
 
 /// 番剧搜刮结果：仅保存展示所需的轻量字段。
+enum MediaMetadataSource { bangumi, anilist, legacy }
+
 class MediaScrapeInfo {
   const MediaScrapeInfo({
     required this.id,
@@ -136,6 +173,7 @@ class MediaScrapeInfo {
     required this.summary,
     required this.airDate,
     required this.coverUrl,
+    this.source = MediaMetadataSource.bangumi,
   });
 
   final int id;
@@ -144,9 +182,49 @@ class MediaScrapeInfo {
   final String summary;
   final String airDate;
   final String coverUrl;
+  final MediaMetadataSource source;
+
+  /// 只有来源明确为 Bangumi 时才允许访问 Bangumi API。
+  int? get bangumiId =>
+      source == MediaMetadataSource.bangumi && id > 0 ? id : null;
+
+  String get identityKey => '${source.name}:${id > 0 ? id : '$name|$airDate'}';
+
+  /// AniList 条目使用非正数 ID，播放器可正常展示但不会触发远端同步；
+  /// legacy 保留正 ID，与旧版本历史记录的 key（正 ID）保持一致。
+  int get playbackId {
+    if (source == MediaMetadataSource.bangumi) return id;
+    if (source == MediaMetadataSource.anilist) return id > 0 ? -id : 0;
+    return id > 0 ? id : 0;
+  }
 
   /// 优先显示中文名，为空时回退原名。
   String get displayName => nameCn.isNotEmpty ? nameCn : name;
+
+  /// 转换为应用内播放 / 弹幕关联所需的 BangumiItem。
+  BangumiItem toBangumiItem() => BangumiItem(
+        id: playbackId,
+        type: 2,
+        name: name,
+        nameCn: nameCn,
+        summary: summary,
+        airDate: airDate,
+        airWeekday: 0,
+        rank: 0,
+        images: {
+          'large': coverUrl,
+          'common': '',
+          'medium': '',
+          'small': '',
+          'grid': '',
+        },
+        tags: const [],
+        alias: const [],
+        ratingScore: 0,
+        votes: 0,
+        votesCount: const [],
+        info: '',
+      );
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -155,9 +233,11 @@ class MediaScrapeInfo {
         'summary': summary,
         'airDate': airDate,
         'coverUrl': coverUrl,
+        'source': source.name,
       };
 
   factory MediaScrapeInfo.fromJson(Map<String, dynamic> json) {
+    final rawSource = json['source'] as String?;
     return MediaScrapeInfo(
       id: (json['id'] as num?)?.toInt() ?? 0,
       name: json['name'] as String? ?? '',
@@ -165,7 +245,23 @@ class MediaScrapeInfo {
       summary: json['summary'] as String? ?? '',
       airDate: json['airDate'] as String? ?? '',
       coverUrl: json['coverUrl'] as String? ?? '',
+      // 旧格式没有 source 字段：早期只有 Bangumi 搜刮与 trace.moe 图片识别兜底
+      // 两条写入路径，图片识别兜底的结果 summary 恒为空。据此可安全区分：
+      // summary 非空且 id > 0 判定为 Bangumi（恢复缺集检测与进度同步），
+      // 其余保守保留 legacy 并禁用远端同步，避免把 AniList ID 误当 Bangumi ID。
+      source: MediaMetadataSource.values.firstWhere(
+        (source) => source.name == rawSource,
+        orElse: () => _inferLegacySource(json),
+      ),
     );
+  }
+
+  /// 推断旧数据（无 source 字段）的来源，见 [MediaScrapeInfo.fromJson]。
+  static MediaMetadataSource _inferLegacySource(Map<String, dynamic> json) {
+    final summary = json['summary'] as String? ?? '';
+    final id = (json['id'] as num?)?.toInt() ?? 0;
+    if (summary.isNotEmpty && id > 0) return MediaMetadataSource.bangumi;
+    return MediaMetadataSource.legacy;
   }
 
   /// 从 trace.moe / AniList 识别结果提取展示字段（图片识别的兜底结果）。
@@ -184,6 +280,7 @@ class MediaScrapeInfo {
           anilist.coverImage?.medium ??
           anilist.coverImage?.extraLarge ??
           '',
+      source: MediaMetadataSource.anilist,
     );
   }
 
@@ -201,6 +298,7 @@ class MediaScrapeInfo {
       summary: item.summary as String? ?? '',
       airDate: item.airDate as String? ?? '',
       coverUrl: cover ?? '',
+      source: MediaMetadataSource.bangumi,
     );
   }
 }

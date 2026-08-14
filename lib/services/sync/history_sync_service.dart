@@ -51,6 +51,8 @@ class HistorySyncService {
     required int progressMs,
     int? updatedAt,
   }) async {
+    // 本地媒体库条目（含本机绝对路径）不参与跨设备同步。
+    if (isLocalMediaHistory(history)) return;
     final deviceId = await getDeviceId();
     final effectiveUpdatedAt =
         updatedAt ?? history.lastWatchTime.millisecondsSinceEpoch;
@@ -98,6 +100,8 @@ class HistorySyncService {
   }
 
   Future<void> appendDeleteHistory(History history) async {
+    // 本地媒体库条目不参与跨设备同步。
+    if (isLocalMediaHistory(history)) return;
     final event = HistorySyncEvent.deleteHistory(
       deviceId: await getDeviceId(),
       seq: await _nextSeq(),
@@ -135,6 +139,9 @@ class HistorySyncService {
   ) {
     final events = <HistorySyncEvent>[];
     for (final history in histories) {
+      // 本地媒体库条目含本机绝对路径，同步到其他设备只会产生无法播放的
+      // 死条目，跳过。
+      if (isLocalMediaHistory(history)) continue;
       history.entryKind = HistoryEntryKind.normalize(history.entryKind);
       for (final progress in history.progresses.values) {
         final updatedAt = progress.effectiveUpdatedAtMs(history.lastWatchTime);

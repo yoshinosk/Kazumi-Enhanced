@@ -105,6 +105,11 @@ typedef _RemoveTorrentN = Void Function(
 typedef LtRemoveTorrent = void Function(
     Pointer<LtSessionOpaque>, int, int);
 
+typedef _AddTrackersN = Void Function(
+    Pointer<LtSessionOpaque>, Int64, Pointer<Pointer<Utf8>>, Int32);
+typedef LtAddTrackers = void Function(
+    Pointer<LtSessionOpaque>, int, Pointer<Pointer<Utf8>>, int);
+
 typedef _PauseTorrentN = Void Function(Pointer<LtSessionOpaque>, Int64);
 typedef LtPauseTorrent = void Function(Pointer<LtSessionOpaque>, int);
 
@@ -260,6 +265,7 @@ class TorrentBridgeBindings {
   late final LtAddMagnet          addMagnet;
   late final LtAddTorrentFile     addTorrentFile;
   late final LtRemoveTorrent      removeTorrent;
+  late final LtAddTrackers        addTrackers;
   late final LtPauseTorrent       pauseTorrent;
   late final LtResumeTorrent      resumeTorrent;
   late final LtRecheckTorrent     recheckTorrent;
@@ -291,6 +297,7 @@ class TorrentBridgeBindings {
     addMagnet           = _lib.lookup<NativeFunction<_AddMagnetN>>('lt_add_magnet').asFunction<LtAddMagnet>();
     addTorrentFile      = _lib.lookup<NativeFunction<_AddTorrentFileN>>('lt_add_torrent_file').asFunction<LtAddTorrentFile>();
     removeTorrent       = _lib.lookup<NativeFunction<_RemoveTorrentN>>('lt_remove_torrent').asFunction<LtRemoveTorrent>();
+    addTrackers         = _lib.lookup<NativeFunction<_AddTrackersN>>('lt_add_trackers').asFunction<LtAddTrackers>();
     pauseTorrent        = _lib.lookup<NativeFunction<_PauseTorrentN>>('lt_pause_torrent').asFunction<LtPauseTorrent>();
     resumeTorrent       = _lib.lookup<NativeFunction<_ResumeTorrentN>>('lt_resume_torrent').asFunction<LtResumeTorrent>();
     recheckTorrent      = _lib.lookup<NativeFunction<_RecheckTorrentN>>('lt_recheck_torrent').asFunction<LtRecheckTorrent>();

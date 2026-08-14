@@ -139,6 +139,8 @@ TORRENT_API lt_torrent_id lt_add_torrent_file(lt_session_t session,
                                               int stream_only);
 TORRENT_API void lt_remove_torrent(lt_session_t session,
                                    lt_torrent_id id, int delete_files);
+TORRENT_API void lt_add_trackers(lt_session_t session, lt_torrent_id id,
+                                 const char* const* trackers, int count);
 TORRENT_API void lt_pause_torrent(lt_session_t session, lt_torrent_id id);
 TORRENT_API void lt_resume_torrent(lt_session_t session, lt_torrent_id id);
 TORRENT_API void lt_recheck_torrent(lt_session_t session, lt_torrent_id id);

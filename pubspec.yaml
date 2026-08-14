@@ -61,9 +61,13 @@ dependencies:
   audio_video_progress_bar: ^2.0.2
   audio_service: ^0.18.15
   audio_service_mpris:
-    path: ../kazumi-win/libs_cache/audio_service_mpris
+    git:
+      url: https://github.com/Predidit/audio-service-mpris.git
+      ref: d30b53fb7dbdd8f10ceda7447fe0a0218711a220
   audio_service_win:
-    path: ../kazumi-win/libs_cache/audio_service_win
+    git:
+      url: https://github.com/Predidit/audio_service_win.git
+      ref: 8ad650c6eb487208b9861d44755c8e58db061c88
   audio_session: ^0.2.2
   dynamic_color: ^1.8.1
   flutter_displaymode: ^0.6.0
@@ -107,36 +111,68 @@ dependencies:
   ffi: ^2.1.0
   image_picker: ^1.2.1
   webview_windows:
-    path: ../kazumi-win/libs_cache/webview_windows
+    git:
+      url: https://github.com/Predidit/flutter-webview-windows.git
+      ref: 2b3306d2bfb9f22cbb328743b60e547cf50f0c3c
   desktop_webview_window:
-    path: ../kazumi-win/libs_cache/linux_webview_window
+    git:
+      url: https://github.com/Predidit/linux_webview_window.git
+      ref: b429f8ba6b8a99cd0f7eb5fe8d1621f325635c3d
   media_kit:
-    path: ../kazumi-win/libs_cache/media_kit/media_kit
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./media_kit
   media_kit_video:
-    path: ../kazumi-win/libs_cache/media_kit/media_kit_video
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./media_kit_video
   media_kit_libs_video:
-    path: ../kazumi-win/libs_cache/media_kit/libs/universal/media_kit_libs_video
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/universal/media_kit_libs_video
   macos_secure_bookmarks: ^0.2.1
   libtorrent_flutter: ^1.9.2
 
 dependency_overrides:
-  media_kit_libs_linux:
-    path: ../kazumi-win/libs_cache/media_kit/libs/linux/media_kit_libs_linux
-  media_kit_libs_ios_video:
-    path: ../kazumi-win/libs_cache/media_kit/libs/ios/media_kit_libs_ios_video
-  media_kit_libs_android_video:
-    path: ../kazumi-win/libs_cache/media_kit/libs/android/media_kit_libs_android_video
-  media_kit_libs_windows_video:
-    path: ../kazumi-win/libs_cache/media_kit/libs/windows/media_kit_libs_windows_video
-  media_kit_libs_macos_video:
-    path: ../kazumi-win/libs_cache/media_kit/libs/macos/media_kit_libs_macos_video
   # Kazumi 本地 vendor：续做种修复（原生层 no_recheck_incomplete_resume 翻转，
   # 见 third_party/libtorrent_flutter/README 与「重启续做种实施方案」）。
   # 使用 prebuilt DLL 时行为与上游一致；重建原生库后翻转 resumeAware。
   libtorrent_flutter:
     path: third_party/libtorrent_flutter
+
+  media_kit_libs_linux:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/linux/media_kit_libs_linux
+  media_kit_libs_ios_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/ios/media_kit_libs_ios_video
+  media_kit_libs_android_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/android/media_kit_libs_android_video
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/windows/media_kit_libs_windows_video
+  media_kit_libs_macos_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/macos/media_kit_libs_macos_video
   media_kit_libs_ohos:
-    path: ../kazumi-win/libs_cache/media_kit/libs/ohos/media_kit_libs_ohos
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
+      path: ./libs/ohos/media_kit_libs_ohos
 
 dev_dependencies:
   path_provider_platform_interface: ^2.1.2

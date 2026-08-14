@@ -257,6 +257,30 @@ class LibtorrentFlutter {
   /// Recheck torrent integrity.
   void recheckTorrent(int id) => _b.recheckTorrent(_session, id);
 
+  /// Add announce trackers to a torrent (deduplicated by URL natively).
+  void addTrackers(int torrentId, List<String> trackers) {
+    if (trackers.isEmpty) return;
+    final ptrs = <Pointer<Utf8>>[];
+    try {
+      for (final t in trackers) {
+        ptrs.add(t.toNativeUtf8());
+      }
+      final buf = calloc<Pointer<Utf8>>(ptrs.length);
+      try {
+        for (var i = 0; i < ptrs.length; i++) {
+          buf[i] = ptrs[i];
+        }
+        _b.addTrackers(_session, torrentId, buf, ptrs.length);
+      } finally {
+        calloc.free(buf);
+      }
+    } finally {
+      for (final p in ptrs) {
+        malloc.free(p);
+      }
+    }
+  }
+
   // ─── File Enumeration ───────────────────────────────────────────────────────
 
   /// Get the list of files in a torrent (requires metadata).

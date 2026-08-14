@@ -13,7 +13,9 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/services/player/remote.dart';
+import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
+import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
@@ -688,6 +690,25 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text("弹幕设置"),
+                  ),
+                ),
+              ),
+              MenuItemButton(
+                onPressed: () {
+                  showAdaptiveBottomSheet<void>(
+                    context: context,
+                    builder: (context) => DanmakuTimeOffsetSheet(
+                      onTimelineOffsetChanged: playerController
+                          .danmaku.clearAndInvalidateScheduledDanmakus,
+                    ),
+                  );
+                },
+                child: Container(
+                  height: 48,
+                  constraints: BoxConstraints(minWidth: 112),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text("弹幕时间轴"),
                   ),
                 ),
               ),

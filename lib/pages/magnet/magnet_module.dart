@@ -9,10 +9,15 @@ final magnetModule = createModule(
       '/',
       child: (context, state) {
         final args = state.arguments;
-        final initialQuery = args is String ? args : null;
+        // 兼容旧调用：直接传字符串作为搜索关键词；
+        // 新调用通过 MagnetSearchRouteArgs 携带关键词与关联番剧。
+        final query = args is String ? args : args is MagnetSearchRouteArgs ? args.query : null;
+        final anime =
+            args is MagnetSearchRouteArgs ? args.anime : null;
         return MagnetPage(
           controller: inject<MagnetController>(),
-          initialQuery: initialQuery,
+          initialQuery: query,
+          initialAnime: anime,
         );
       },
     );

@@ -31,6 +31,10 @@ class LibtorrentEngine {
   StreamSubscription<Map<int, TorrentInfo>>? _statusSub;
   bool _sessionActive = false;
 
+  /// 由 [stop] 主动暂停的任务 id（会话仍存活，重新 start 后需要恢复）。
+  /// 用户手动暂停的任务不在其中，避免引擎重启后被误恢复。
+  final Set<int> _pausedByStop = {};
+
   /// 引擎状态变化回调（供 Controller 刷新 observable）。
   void Function(LibtorrentEngineState state)? onStateChanged;
 
@@ -96,6 +100,7 @@ class LibtorrentEngine {
       }
       _applySettingsToSession();
       _listenStatus();
+      _resumePausedByStop();
       _sessionActive = true;
       _lastError = null;
       _state = LibtorrentEngineState.running;
@@ -139,13 +144,30 @@ class LibtorrentEngine {
     _notify();
     if (LibtorrentFlutter.isInitialized) {
       final engine = LibtorrentFlutter.instance;
-      for (final id in engine.torrents.keys) {
+      _pausedByStop.clear();
+      for (final entry in engine.torrents.entries) {
+        final id = entry.key;
+        if (!entry.value.isPaused) {
+          _pausedByStop.add(id);
+        }
         engine.pauseTorrent(id);
       }
     }
     _sessionActive = false;
     _state = LibtorrentEngineState.stopped;
     _notify();
+  }
+
+  /// 恢复上次 [stop] 时被暂停的任务；用户手动暂停的任务保持暂停。
+  void _resumePausedByStop() {
+    if (_pausedByStop.isEmpty || !LibtorrentFlutter.isInitialized) return;
+    final engine = LibtorrentFlutter.instance;
+    for (final id in _pausedByStop) {
+      if (engine.torrents.containsKey(id)) {
+        engine.resumeTorrent(id);
+      }
+    }
+    _pausedByStop.clear();
   }
 
   /// 设置变化后调用：禁用则停止；运行中则实时应用新参数。

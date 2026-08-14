@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kazumi/services/media/local_media_scanner.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
@@ -59,5 +60,40 @@ void main() {
     final result = await scanner.scan(temp.path, groupByFolder: false);
     final titles = result.map((f) => f.name).toList();
     expect(titles, containsAll(['ShowTwo', 'ShowOne']));
+  });
+
+  test('剧集文件按集数自然排序', () {
+    final files = [
+      LocalMediaFile(
+        path: pathOf('Show - 10.mkv'),
+        name: 'Show - 10.mkv',
+        size: 0,
+        modifiedAt: DateTime(2026),
+      ),
+      LocalMediaFile(
+        path: pathOf('Show - 2.mkv'),
+        name: 'Show - 2.mkv',
+        size: 0,
+        modifiedAt: DateTime(2026),
+      ),
+      LocalMediaFile(
+        path: pathOf('Show - 1.mkv'),
+        name: 'Show - 1.mkv',
+        size: 0,
+        modifiedAt: DateTime(2026),
+      ),
+    ]..sort(compareLocalMediaFilesForTest);
+
+    expect(files.map((file) => file.name), [
+      'Show - 1.mkv',
+      'Show - 2.mkv',
+      'Show - 10.mkv',
+    ]);
+  });
+
+  test('路径去重遵循当前平台大小写规则', () {
+    final upper = localMediaPathIdentityForTest(pathOf('Anime/EP01.mkv'));
+    final lower = localMediaPathIdentityForTest(pathOf('anime/ep01.mkv'));
+    expect(upper == lower, Platform.isWindows);
   });
 }

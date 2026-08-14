@@ -41,14 +41,64 @@ mixin _$PlayerDanmakuController on _PlayerDanmakuController, Store {
     });
   }
 
+  late final _$bangumiIDAtom =
+      Atom(name: '_PlayerDanmakuController.bangumiID', context: context);
+
+  @override
+  int get bangumiID {
+    _$bangumiIDAtom.reportRead();
+    return super.bangumiID;
+  }
+
+  @override
+  set bangumiID(int value) {
+    _$bangumiIDAtom.reportWrite(value, super.bangumiID, () {
+      super.bangumiID = value;
+    });
+  }
+
+  late final _$danmakuAnimeTitleAtom = Atom(
+      name: '_PlayerDanmakuController.danmakuAnimeTitle', context: context);
+
+  @override
+  String get danmakuAnimeTitle {
+    _$danmakuAnimeTitleAtom.reportRead();
+    return super.danmakuAnimeTitle;
+  }
+
+  @override
+  set danmakuAnimeTitle(String value) {
+    _$danmakuAnimeTitleAtom.reportWrite(value, super.danmakuAnimeTitle, () {
+      super.danmakuAnimeTitle = value;
+    });
+  }
+
+  late final _$danmakuEpisodeTitleAtom = Atom(
+      name: '_PlayerDanmakuController.danmakuEpisodeTitle', context: context);
+
+  @override
+  String get danmakuEpisodeTitle {
+    _$danmakuEpisodeTitleAtom.reportRead();
+    return super.danmakuEpisodeTitle;
+  }
+
+  @override
+  set danmakuEpisodeTitle(String value) {
+    _$danmakuEpisodeTitleAtom.reportWrite(value, super.danmakuEpisodeTitle, () {
+      super.danmakuEpisodeTitle = value;
+    });
+  }
+
   late final _$getDanDanmakuByEpisodeIDAsyncAction = AsyncAction(
       '_PlayerDanmakuController.getDanDanmakuByEpisodeID',
       context: context);
 
   @override
-  Future<bool> getDanDanmakuByEpisodeID(int episodeID) {
-    return _$getDanDanmakuByEpisodeIDAsyncAction
-        .run(() => super.getDanDanmakuByEpisodeID(episodeID));
+  Future<bool> getDanDanmakuByEpisodeID(int episodeID,
+      {String? animeTitle, String? episodeTitle}) {
+    return _$getDanDanmakuByEpisodeIDAsyncAction.run(() => super
+        .getDanDanmakuByEpisodeID(episodeID,
+            animeTitle: animeTitle, episodeTitle: episodeTitle));
   }
 
   late final _$_PlayerDanmakuControllerActionController =
@@ -78,11 +128,26 @@ mixin _$PlayerDanmakuController on _PlayerDanmakuController, Store {
 
   @override
   void applyDanmakuLoad(DanmakuLoadResult result,
-      {required bool enableDanmaku}) {
+      {required bool enableDanmaku, String? animeTitle, String? episodeTitle}) {
     final _$actionInfo = _$_PlayerDanmakuControllerActionController.startAction(
         name: '_PlayerDanmakuController.applyDanmakuLoad');
     try {
-      return super.applyDanmakuLoad(result, enableDanmaku: enableDanmaku);
+      return super.applyDanmakuLoad(result,
+          enableDanmaku: enableDanmaku,
+          animeTitle: animeTitle,
+          episodeTitle: episodeTitle);
+    } finally {
+      _$_PlayerDanmakuControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void applyDanmakuBinding({String? animeTitle, String? episodeTitle}) {
+    final _$actionInfo = _$_PlayerDanmakuControllerActionController.startAction(
+        name: '_PlayerDanmakuController.applyDanmakuBinding');
+    try {
+      return super.applyDanmakuBinding(
+          animeTitle: animeTitle, episodeTitle: episodeTitle);
     } finally {
       _$_PlayerDanmakuControllerActionController.endAction(_$actionInfo);
     }
@@ -114,7 +179,10 @@ mixin _$PlayerDanmakuController on _PlayerDanmakuController, Store {
   String toString() {
     return '''
 danmakuOn: ${danmakuOn},
-danmakuLoading: ${danmakuLoading}
+danmakuLoading: ${danmakuLoading},
+bangumiID: ${bangumiID},
+danmakuAnimeTitle: ${danmakuAnimeTitle},
+danmakuEpisodeTitle: ${danmakuEpisodeTitle}
     ''';
   }
 }

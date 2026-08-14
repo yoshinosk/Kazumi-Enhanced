@@ -77,6 +77,10 @@ class ApiEndpoints {
   static const String bangumiGetCollection =
       '/v0/users/{0}/collections?subject_type=2&limit={1}&offset={2}&type={3}';
 
+  /// 获取用户单个条目收藏。用户名，条目 ID。
+  static const String bangumiGetCollectionBySubject =
+      '/v0/users/{0}/collections/{1}';
+
   /// Bangumi Next API Domain
   static const String bangumiAPINextDomain = 'https://next.bgm.tv';
 

@@ -372,37 +372,49 @@ mixin _$MagnetController on _MagnetController, Store {
         .run(() => super.checkSubscriptions());
   }
 
+  late final _$setSubscriptionAutoDownloadAsyncAction = AsyncAction(
+      '_MagnetController.setSubscriptionAutoDownload',
+      context: context);
+
+  @override
+  Future<void> setSubscriptionAutoDownload(String id, bool value) {
+    return _$setSubscriptionAutoDownloadAsyncAction
+        .run(() => super.setSubscriptionAutoDownload(id, value));
+  }
+
   late final _$addDownloadAsyncAction =
       AsyncAction('_MagnetController.addDownload', context: context);
 
   @override
-  Future<void> addDownload(MagnetSearchItem item, {String? dir}) {
+  Future<void> addDownload(MagnetSearchItem item,
+      {String? dir, MediaScrapeInfo? scrapeInfo}) {
     return _$addDownloadAsyncAction
-        .run(() => super.addDownload(item, dir: dir));
+        .run(() => super.addDownload(item, dir: dir, scrapeInfo: scrapeInfo));
   }
 
   late final _$pauseDownloadAsyncAction =
       AsyncAction('_MagnetController.pauseDownload', context: context);
 
   @override
-  Future<void> pauseDownload(String gid) {
-    return _$pauseDownloadAsyncAction.run(() => super.pauseDownload(gid));
+  Future<void> pauseDownload(String taskId) {
+    return _$pauseDownloadAsyncAction.run(() => super.pauseDownload(taskId));
   }
 
   late final _$resumeDownloadAsyncAction =
       AsyncAction('_MagnetController.resumeDownload', context: context);
 
   @override
-  Future<void> resumeDownload(String gid) {
-    return _$resumeDownloadAsyncAction.run(() => super.resumeDownload(gid));
+  Future<void> resumeDownload(String taskId) {
+    return _$resumeDownloadAsyncAction.run(() => super.resumeDownload(taskId));
   }
 
   late final _$removeDownloadAsyncAction =
       AsyncAction('_MagnetController.removeDownload', context: context);
 
   @override
-  Future<void> removeDownload(String gid) {
-    return _$removeDownloadAsyncAction.run(() => super.removeDownload(gid));
+  Future<void> removeDownload(String taskId, {bool deleteFiles = false}) {
+    return _$removeDownloadAsyncAction
+        .run(() => super.removeDownload(taskId, deleteFiles: deleteFiles));
   }
 
   late final _$applyMagnetSettingsChangedAsyncAction = AsyncAction(

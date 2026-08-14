@@ -27,7 +27,10 @@
 - [x] 本地剧集信息解析（`utils/local_episode_parser.dart`）
 - [x] 媒体库浏览页面（`pages/media/media_library_page.dart`）
 - [x] 番剧元数据搜刮与匹配（`services/media/media_scraper.dart`）
-- [ ] 与播放器联动、离线弹幕等细节仍在完善
+- [x] 应用内播放、弹幕匹配（文件哈希 / BGM 映射 / 标题检索）、历史续播
+- [x] 缺集检测 → 一键磁力补集、番剧详情页跳转
+- [x] 本地看完联动 Bangumi 收藏 EP 进度（可选开启）
+- [ ] 外挂字幕、媒体库「已看」标记、多端元数据迁移等仍在完善
 
 ### 磁力下载
 
@@ -35,11 +38,12 @@
 - [x] 磁力链接解析、下载任务管理与进度持久化（`services/magnet/magnet_download_service.dart`）
 - [x] Tracker 列表自动更新（`services/magnet/tracker_updater.dart`）
 - [x] 磁力搜索源（Mikan / AnimesGarden）与订阅（`services/magnet/magnet_search_sources.dart`、`magnet_subscription_service.dart`）
-- [ ] 下载完成后自动入库媒体库、边下边播等仍在完善
+- [x] 手动添加磁力链接 / 种子、文件选择（部分下载）、删除任务可选删文件
+- [x] 下载完成后自动入库媒体库（可选开启）、订阅自动下载开关与去重
+- [ ] 边下边播、按任务限速等仍在完善
 
 ### 近期计划（TODO）
 
-- 打通「磁力下载 → 本地媒体库」的自动入库闭环
 - 提升本地媒体库的番剧匹配准确度，补全封面与元数据
 - 移动端（Android）后台下载与存储权限适配
 - 性能与稳定性打磨，补充单元测试

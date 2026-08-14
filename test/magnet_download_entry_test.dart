@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kazumi/services/magnet/magnet_download_service.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 
 TorrentInfo _info({
@@ -46,7 +47,7 @@ MagnetDownloadEntry _entry({
   double? restartFloor,
 }) {
   final e = MagnetDownloadEntry(
-    gid: '1',
+    sessionGid: '1',
     title: 'T',
     sourceUri: 'magnet:?xt=urn:btih:abc',
     addedAt: DateTime(2026, 1, 1),
@@ -63,7 +64,8 @@ void main() {
 
   group('applyTorrentStatus - pre-metadata', () {
     test('preserves totalLength and progress when metadata missing', () {
-      final e = _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -96,7 +98,8 @@ void main() {
 
   group('applyTorrentStatus - active download (same session)', () {
     test('verifiedLength tracks engine totalDone, smoothing advances', () {
-      final e = _entry(totalLength: 1000, completedLength: 0, verifiedLength: 0);
+      final e =
+          _entry(totalLength: 1000, completedLength: 0, verifiedLength: 0);
       // 第一次采样：对齐 verified
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -123,7 +126,8 @@ void main() {
     });
 
     test('adopts totalWanted once metadata arrives', () {
-      final e = _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -142,8 +146,9 @@ void main() {
 
   group('applyTorrentStatus - complete', () {
     test('pins progress to totalLength', () {
-      final e = _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
-        ..totalUploaded = 2000; // 做种率 ≥ 1 → 已完成
+      final e =
+          _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
+            ..totalUploaded = 2000; // 做种率 ≥ 1 → 已完成
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -163,10 +168,11 @@ void main() {
     });
 
     test('zeroes residual download speed on completion', () {
-      final e = _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
-        ..downloadSpeed = 5242880
-        ..uploadSpeed = 1024
-        ..totalUploaded = 1000; // 做种率 ≥ 1 → 已完成
+      final e =
+          _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
+            ..downloadSpeed = 5242880
+            ..uploadSpeed = 1024
+            ..totalUploaded = 1000; // 做种率 ≥ 1 → 已完成
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -188,10 +194,11 @@ void main() {
     });
 
     test('finished download with ratio below 1 becomes seeding', () {
-      final e = _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
-        ..downloadSpeed = 5242880
-        ..uploadSpeed = 1024
-        ..totalUploaded = 500; // 做种率 0.5 < 1 → 做种中
+      final e =
+          _entry(totalLength: 1000, completedLength: 999, verifiedLength: 990)
+            ..downloadSpeed = 5242880
+            ..uploadSpeed = 1024
+            ..totalUploaded = 500; // 做种率 0.5 < 1 → 做种中
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -217,8 +224,9 @@ void main() {
     });
 
     test('seeding flips to complete when ratio reaches 1', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..totalUploaded = 500;
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..totalUploaded = 500;
       // 做种中：做种率 0.5
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -252,8 +260,9 @@ void main() {
     });
 
     test('keeps accumulated upload ratio across engine restarts', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..totalUploaded = 800; // 持久化的累计上传量
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..totalUploaded = 800; // 持久化的累计上传量
       // 引擎新会话从 0 起计，不能覆盖累计上传量（否则做种率消失）
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -287,9 +296,10 @@ void main() {
     });
 
     test('zeroes both speeds on error', () {
-      final e = _entry(totalLength: 1000, completedLength: 100, verifiedLength: 100)
-        ..downloadSpeed = 1024
-        ..uploadSpeed = 512;
+      final e =
+          _entry(totalLength: 1000, completedLength: 100, verifiedLength: 100)
+            ..downloadSpeed = 1024
+            ..uploadSpeed = 512;
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(id: 1, totalDone: 100, totalWanted: 1000, downloadRate: 1024),
@@ -303,8 +313,8 @@ void main() {
 
   group('applyTorrentStatus - restart blend', () {
     test('progress stays at floor when engine restarts from zero', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       // 元数据阶段：引擎 totalDone=0
       MagnetDownloadService.applyTorrentStatus(
@@ -325,8 +335,8 @@ void main() {
     });
 
     test('blends floor with engine progress (no freeze, no wipe)', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -347,8 +357,8 @@ void main() {
     });
 
     test('blend completes at 100% and pins on complete', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -366,8 +376,8 @@ void main() {
     });
 
     test('blended verifiedLength is persisted for next restart floor', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -385,8 +395,8 @@ void main() {
     });
 
     test('caps persisted value below totalLength (no fake 100%)', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       // engineRatio = 1.0 → blended = 1.0 → round → 1000 → 封顶 999
       MagnetDownloadService.applyTorrentStatus(
@@ -419,9 +429,9 @@ void main() {
 
     test('hides download speed during recovery phase, shows after catch-up',
         () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 600, verifiedLength: 600)
-        ..restartFloorForTest = 0.6;
+      final e =
+          _entry(totalLength: 1000, completedLength: 600, verifiedLength: 600)
+            ..restartFloorForTest = 0.6;
       // 恢复期：floor=0.6，引擎才下到 10% → blended 0.64，差 0.54 > 0.1
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -441,8 +451,8 @@ void main() {
     });
 
     test('blend branch smooths progress between samples', () {
-      final e = _entry(
-          totalLength: 1000, completedLength: 500, verifiedLength: 500);
+      final e =
+          _entry(totalLength: 1000, completedLength: 500, verifiedLength: 500);
       e.restartFloorForTest = 0.5;
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -487,7 +497,7 @@ void main() {
   group('MagnetDownloadEntry progress', () {
     test('progress is 0 when totalLength is unknown (pre-metadata)', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'T',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -497,10 +507,9 @@ void main() {
       expect(entry.progress, 0.0);
     });
 
-    test('etaSeconds returns -1 when totalLength unknown even with speed',
-        () {
+    test('etaSeconds returns -1 when totalLength unknown even with speed', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'T',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -516,7 +525,7 @@ void main() {
 
     test('etaSeconds is 0 when download just finished', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'T',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -530,7 +539,7 @@ void main() {
 
     test('progress keeps persisted ratio when totalLength retained', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'T',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -545,7 +554,7 @@ void main() {
 
     test('seedRatio uses verified (real) bytes, not smoothed estimate', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'T',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -561,8 +570,9 @@ void main() {
 
   group('applyTorrentStatus - reseed (remounted seeding)', () {
     test('keeps 100% during disk check, ignores engine totalDone climb', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..reseedForTest = true;
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..reseedForTest = true;
       // 校验期：引擎 totalDone 从 0 爬升（校验进度）
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -583,9 +593,10 @@ void main() {
     });
 
     test('clears reseed and resumes normal logic after check', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..reseedForTest = true
-        ..totalUploaded = 500;
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..reseedForTest = true
+            ..totalUploaded = 500;
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -604,9 +615,10 @@ void main() {
     });
 
     test('accumulates uploads from historical base plus this session', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..uploadBaseForTest = 800 // 历史上传基数（reconcile 时记录）
-        ..totalUploaded = 800;
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..uploadBaseForTest = 800 // 历史上传基数（reconcile 时记录）
+            ..totalUploaded = 800;
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(id: 1, totalDone: 1000, totalWanted: 1000, totalUploaded: 100),
@@ -620,8 +632,9 @@ void main() {
 
   group('applyTorrentStatus - seeding stop criteria', () {
     test('ratio mode with custom threshold', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..totalUploaded = 400; // 分享率 0.4
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..totalUploaded = 400; // 分享率 0.4
       // 阈值 0.5：0.4 < 0.5 → 做种中
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -655,8 +668,9 @@ void main() {
     });
 
     test('time mode: seeds within duration, completes after', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..seedingStartedAtForTest = now;
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..seedingStartedAtForTest = now;
       // 做种 1 小时后停止；当前未满 → 做种中
       MagnetDownloadService.applyTorrentStatus(
         e,
@@ -690,7 +704,8 @@ void main() {
     });
 
     test('time mode without start time stays seeding until recorded', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000);
+      final e = _entry(
+          totalLength: 1000, completedLength: 1000, verifiedLength: 1000);
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -708,8 +723,9 @@ void main() {
     });
 
     test('none mode never completes automatically', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..totalUploaded = 2000; // 分享率已达标也不停
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..totalUploaded = 2000; // 分享率已达标也不停
       MagnetDownloadService.applyTorrentStatus(
         e,
         _info(
@@ -727,9 +743,10 @@ void main() {
     });
 
     test('seedingStartedAt persists across restart', () {
-      final e = _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
-        ..seedingStartedAtForTest = now
-        ..status = 'seeding';
+      final e =
+          _entry(totalLength: 1000, completedLength: 1000, verifiedLength: 1000)
+            ..seedingStartedAtForTest = now
+            ..status = 'seeding';
       final restored = MagnetDownloadEntry.fromJson(
         Map<String, dynamic>.from(e.toJson()),
       );
@@ -760,12 +777,79 @@ void main() {
       final empty = _entry();
       expect(MagnetDownloadService.isFileIntactForTest(empty), isFalse);
     });
+
+    test('checks every selected file in a multi-file torrent', () {
+      final dir = Directory.systemTemp.createTempSync('kazumi_multi_guard');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final season = Directory('${dir.path}${Platform.pathSeparator}Season 1')
+        ..createSync();
+      File('${season.path}${Platform.pathSeparator}01.mkv')
+          .writeAsBytesSync(List<int>.filled(4, 1));
+      File('${season.path}${Platform.pathSeparator}02.mkv')
+          .writeAsBytesSync(List<int>.filled(8, 1));
+
+      final entry = _entry()
+        ..savePath = dir.path
+        ..fileName = 'Season 1'
+        ..files = const [
+          MagnetDownloadFile(
+            index: 0,
+            name: '01.mkv',
+            path: 'Season 1/01.mkv',
+            size: 4,
+            isStreamable: true,
+          ),
+          MagnetDownloadFile(
+            index: 1,
+            name: '02.mkv',
+            path: 'Season 1/02.mkv',
+            size: 8,
+            isStreamable: true,
+          ),
+        ];
+      expect(MagnetDownloadService.isFileIntactForTest(entry), isTrue);
+
+      File('${season.path}${Platform.pathSeparator}02.mkv').deleteSync();
+      expect(MagnetDownloadService.isFileIntactForTest(entry), isFalse);
+
+      entry.selectedFileIndexes = [0];
+      expect(MagnetDownloadService.isFileIntactForTest(entry), isTrue);
+    });
+  });
+
+  group('MagnetDownloadService state mapping', () {
+    test('uses native libtorrent state values without an offset', () {
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.downloadingMetadata,
+          hasMetadata: false,
+        )),
+        'metadata',
+      );
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.checkingFiles,
+          hasMetadata: true,
+        )),
+        'checking',
+      );
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.downloading,
+          hasMetadata: true,
+        )),
+        'active',
+      );
+    });
   });
 
   group('MagnetDownloadEntry persistence', () {
     test('toJson persists verifiedLength as completedLength for resume', () {
       final entry = MagnetDownloadEntry(
-        gid: '1',
+        sessionGid: '1',
         title: 'Test Episode',
         sourceUri: 'magnet:?xt=urn:btih:abc',
         addedAt: DateTime(2026, 1, 1),
@@ -814,7 +898,7 @@ void main() {
 
     test('restart round-trip keeps progress and total size', () {
       final entry = MagnetDownloadEntry(
-        gid: '3',
+        sessionGid: '3',
         title: 'Episode 5',
         sourceUri: 'magnet:?xt=urn:btih:def',
         addedAt: DateTime(2026, 2, 2, 12),
@@ -827,10 +911,105 @@ void main() {
       final restored = MagnetDownloadEntry.fromJson(
         Map<String, dynamic>.from(entry.toJson()),
       );
-      expect(restored.gid, '3');
+      expect(restored.taskId, entry.taskId);
+      expect(restored.sessionGid, isNull);
       expect(restored.totalLength, entry.totalLength);
       expect(restored.completedLength, entry.verifiedLength);
       expect(restored.progress, closeTo(0.5, 1e-9));
+    });
+
+    test('legacy gid is never restored as a current engine handle', () {
+      final restored = MagnetDownloadEntry.fromJson({
+        'gid': '3',
+        'title': 'Legacy',
+        'sourceUri': 'magnet:?xt=urn:btih:legacy',
+        'addedAt': '2026-01-01T00:00:00.000',
+      });
+      expect(restored.taskId, isNot('3'));
+      expect(restored.sessionGid, isNull);
+      expect(restored.toJson().containsKey('gid'), isFalse);
+    });
+
+    test('file manifest round-trips without persisting session gid', () {
+      final entry = MagnetDownloadEntry(
+        taskId: 'task-stable',
+        sessionGid: '9',
+        title: 'Season',
+        sourceUri: 'magnet:?xt=urn:btih:season',
+        addedAt: DateTime(2026, 2, 2),
+        importedPath: r'D:\Library\Season',
+        files: const [
+          MagnetDownloadFile(
+            index: 0,
+            name: '01.mkv',
+            path: 'Season/01.mkv',
+            size: 42,
+            isStreamable: true,
+          ),
+        ],
+      );
+      final restored = MagnetDownloadEntry.fromJson(entry.toJson());
+      expect(restored.taskId, 'task-stable');
+      expect(restored.sessionGid, isNull);
+      expect(restored.files, hasLength(1));
+      expect(restored.files.single.path, 'Season/01.mkv');
+      expect(restored.files.single.size, 42);
+      expect(restored.importedPath, r'D:\Library\Season');
+    });
+
+    test('file manifest path cannot escape the download directory', () {
+      final entry = MagnetDownloadEntry(
+        taskId: 'task-safe-path',
+        title: 'Season',
+        sourceUri: 'magnet:?xt=urn:btih:safe',
+        savePath: Directory.systemTemp.path,
+        addedAt: DateTime(2026, 2, 2),
+      );
+      const escaped = MagnetDownloadFile(
+        index: 0,
+        name: 'outside.mkv',
+        path: '../outside.mkv',
+        size: 1,
+        isStreamable: true,
+      );
+      expect(entry.absolutePathFor(escaped), isNull);
+    });
+
+    test('scrapeInfo round-trips and marks task as scraped', () {
+      final entry = MagnetDownloadEntry(
+        sessionGid: '4',
+        title: '[Fansub] Anime S2 [01-12]',
+        sourceUri: 'magnet:?xt=urn:btih:def',
+        addedAt: DateTime(2026, 2, 2, 12),
+        scrapeInfo: const MediaScrapeInfo(
+          id: 123,
+          name: 'Anime',
+          nameCn: '动画',
+          summary: 'desc',
+          airDate: '2026-01-01',
+          coverUrl: 'https://example.com/cover.jpg',
+        ),
+      );
+      expect(entry.isScraped, isTrue);
+      final restored = MagnetDownloadEntry.fromJson(
+        Map<String, dynamic>.from(entry.toJson()),
+      );
+      expect(restored.isScraped, isTrue);
+      expect(restored.scrapeInfo!.id, 123);
+      expect(restored.scrapeInfo!.displayName, '动画');
+      expect(restored.scrapeInfo!.coverUrl, 'https://example.com/cover.jpg');
+    });
+
+    test('scrapeInfo stays null for unscraped legacy entries', () {
+      final restored = MagnetDownloadEntry.fromJson({
+        'gid': '5',
+        'title': 'Legacy',
+        'sourceUri': 'magnet:?xt=urn:btih:abc',
+        'addedAt': '2026-01-01T00:00:00.000',
+        'status': 'active',
+      });
+      expect(restored.isScraped, isFalse);
+      expect(restored.scrapeInfo, isNull);
     });
   });
 }

@@ -8,38 +8,16 @@ import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart' show GeneralEmptyState;
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/modules/history/history_module.dart' show kLocalMediaAdapterName;
+import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
+import 'package:kazumi/utils/file_system.dart' show revealInFileManager;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
-
-/// 将本地媒体库的搜刮结果转换为 BangumiItem，用于应用内播放与弹幕关联。
-BangumiItem scrapeInfoToBangumiItem(MediaScrapeInfo info) => BangumiItem(
-      id: info.id,
-      type: 2,
-      name: info.name,
-      nameCn: info.nameCn,
-      summary: info.summary,
-      airDate: info.airDate,
-      airWeekday: 0,
-      rank: 0,
-      images: {
-        'large': info.coverUrl,
-        'common': '',
-        'medium': '',
-        'small': '',
-        'grid': ''
-      },
-      tags: const [],
-      alias: const [],
-      ratingScore: 0,
-      votes: 0,
-      votesCount: const [],
-      info: '',
-    );
 
 /// 未搜刮到番剧时，从文件名/所在目录名推断一个尽量干净的标题，
 /// 作为弹幕标题检索的兜底关键词。
@@ -52,10 +30,13 @@ String _inferLocalTitle(LocalMediaFile file) {
   return folderName.isNotEmpty ? folderName : file.name;
 }
 
-/// 未匹配番剧时使用的占位 BangumiItem（id=0）。
+/// 未匹配番剧时使用的占位 BangumiItem。
 /// 此时 BGM ID 映射不可用，但仍可通过文件哈希匹配与标题检索加载弹幕。
+///
+/// id 使用标题的稳定负值哈希：避免所有未匹配番剧共用 id=0 导致历史记录
+/// 与续播进度互相覆盖（负值同时保证不会误触发 Bangumi 相关查询）。
 BangumiItem _placeholderBangumiItem(String name) => BangumiItem(
-      id: 0,
+      id: _placeholderIdFor(name),
       type: 2,
       name: name,
       nameCn: name,
@@ -77,6 +58,14 @@ BangumiItem _placeholderBangumiItem(String name) => BangumiItem(
       votesCount: const [],
       info: '',
     );
+
+int _placeholderIdFor(String name) {
+  var h = 0;
+  for (final code in name.codeUnits) {
+    h = (h * 31 + code) & 0x7FFFFFFF;
+  }
+  return h == 0 ? -1 : -h;
+}
 
 class MediaLibraryPage extends StatefulWidget {
   const MediaLibraryPage({super.key, required this.controller});
@@ -168,14 +157,15 @@ class _MediaLibraryPageState extends State<MediaLibraryPage> {
       return;
     }
     final bangumiItem = info != null
-        ? scrapeInfoToBangumiItem(info)
+        ? info.toBangumiItem()
         : _placeholderBangumiItem(_inferLocalTitle(file));
     final int index = siblings.indexWhere((f) => f.path == file.path);
     final args = LocalMediaVideoPlaybackArgs(
       bangumiItem: bangumiItem,
       files: siblings,
       selectedIndex: index < 0 ? 0 : index,
-      pluginName: 'local',
+      pluginName: kLocalMediaAdapterName,
+      bangumiSyncId: info?.bangumiId,
     );
     if (!context.mounted) return;
     context.pushNamed('/video/', arguments: args);
@@ -791,6 +781,20 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                   ),
                 ),
                 Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+                if (info != null && info.bangumiId != null)
+                  TextButton(
+                    onPressed: () => context.pushNamed(
+                      '/info/',
+                      arguments: info.toBangumiItem(),
+                    ),
+                    child: const Text('详情'),
+                  ),
+                if (info != null && info.bangumiId != null)
+                  TextButton(
+                    onPressed: () =>
+                        _showMissingEpisodesSheet(context, widget.controller, group),
+                    child: const Text('缺集'),
+                  ),
               ],
             ),
           ),
@@ -1092,6 +1096,109 @@ class _Badge extends StatelessWidget {
 }
 
 /// 点击网格卡片后弹出的剧集列表。
+/// 缺失集数检测底部面板：对比本地集数与 Bangumi 正片集数，
+/// 点击缺失集数跳转磁力搜索（携带番剧信息，下载任务自动关联）。
+Future<void> _showMissingEpisodesSheet(
+  BuildContext context,
+  MediaController controller,
+  AnimeGroup group,
+) async {
+  final info = group.info;
+  if (info == null) return;
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) {
+      final theme = Theme.of(sheetContext);
+      final future = () async {
+        final set = <int>{};
+        for (final folder in group.folders) {
+          set.addAll(await controller.detectMissingEpisodes(folder.path));
+        }
+        return set.toList()..sort();
+      }();
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: FutureBuilder<List<int>>(
+          future: future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const SizedBox(
+                height: 120,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final missing = snapshot.data ?? const <int>[];
+            if (missing.isEmpty) {
+              return SizedBox(
+                height: 160,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_circle_outline_rounded,
+                        size: 40, color: theme.colorScheme.primary),
+                    const SizedBox(height: 8),
+                    const Text('未发现缺集'),
+                    const SizedBox(height: 4),
+                    Text(
+                      '本地集数完整，或无法从 Bangumi 获取集数信息',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              );
+            }
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '「${info.displayName}」缺集（${missing.length}）',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '点击集数前往磁力搜索补集',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final ep in missing)
+                          ActionChip(
+                            label: Text('第$ep话'),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              context.pushNamed(
+                                '/magnet/',
+                                arguments: MagnetSearchRouteArgs(
+                                  query: '${info.displayName} ${ep.toString().padLeft(2, '0')}',
+                                  anime: info.toBangumiItem(),
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    },
+  );
+}
+
 void _showGridItemSheet(
   BuildContext context,
   MediaController controller,
@@ -1155,6 +1262,60 @@ void _showGridItemSheet(
                             '${item.airDate.isNotEmpty ? " · ${item.airDate}" : ""}',
                             style: theme.textTheme.bodySmall,
                           ),
+                          if (item.isMatched &&
+                              item.info != null &&
+                              item.info!.id > 0)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Wrap(
+                                spacing: 16,
+                                children: [
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    onPressed: () {
+                                      final info = item.info;
+                                      if (info == null) return;
+                                      Navigator.pop(context);
+                                      sheetContext.pushNamed(
+                                        '/info/',
+                                        arguments: info.toBangumiItem(),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.info_outline_rounded,
+                                        size: 18),
+                                    label: const Text('番剧详情'),
+                                  ),
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    onPressed: () {
+                                      final info = item.info;
+                                      if (info == null) return;
+                                      final folders = item.folders;
+                                      final group = AnimeGroup(
+                                        info: info,
+                                        folders: folders,
+                                      );
+                                      Navigator.pop(context);
+                                      _showMissingEpisodesSheet(
+                                        sheetContext,
+                                        controller,
+                                        group,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                        Icons.playlist_remove_rounded,
+                                        size: 18),
+                                    label: const Text('缺集检测'),
+                                  ),
+                                ],
+                              ),
+                            ),
                           if (!item.isMatched)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
@@ -1342,6 +1503,19 @@ void _showFileActionSheet(
             onTap: () {
               Navigator.pop(context);
               _showMoveDialog(context, controller, file);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_open_rounded),
+            title: const Text('打开文件所在目录'),
+            onTap: () {
+              Navigator.pop(context);
+              revealInFileManager(file.path).then((ok) {
+                if (!ok) {
+                  KazumiDialog.showToast(
+                      message: '无法打开文件管理器或文件不存在');
+                }
+              });
             },
           ),
           ListTile(
