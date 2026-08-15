@@ -26,6 +26,9 @@ void main() {
       // 破折号分隔
       '[Lilith-Raws] Sousou no Frieren - 18 [Baha][WEB-DL][1080p][AVC AAC][CHT].mp4':
           18,
+      // LoliHouse WebRip 命名（含 ASSx2 双字幕标记）
+      '[smzase&LoliHouse] Otome Kaijuu Carameliser - 06 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv':
+          6,
       // 版本号后缀
       '[Airota][Bokura no Ame-iro Protocol][06v2][1080p][CHS].mkv': 6,
       // CRC32 后缀
@@ -55,6 +58,8 @@ void main() {
       '[ANi] 我推的孩子 2 - 08 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4': '我推的孩子 2',
       '[Sakurato] Bocchi the Rock! [01][AVC-8bit 1080p AAC][CHS].mp4':
           'Bocchi the Rock!',
+      '[smzase&LoliHouse] Otome Kaijuu Carameliser - 06 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv':
+          'Otome Kaijuu Carameliser',
     };
 
     cases.forEach((fileName, expected) {
@@ -65,6 +70,38 @@ void main() {
 
     test('空文件名返回空串', () {
       expect(sanitizeAnimeTitle(''), '');
+    });
+  });
+
+  group('classifyLocalEpisode', () {
+    test('normal episode names', () {
+      expect(classifyLocalEpisode('Anime - 01.mkv'), LocalEpisodeKind.normal);
+      expect(classifyLocalEpisode('[组] 番名 第02话.mkv'), LocalEpisodeKind.normal);
+    });
+
+    test('special / OVA / SP markers', () {
+      expect(classifyLocalEpisode('Anime SP01.mkv'), LocalEpisodeKind.special);
+      expect(classifyLocalEpisode('[组] 番名 特别篇.mkv'), LocalEpisodeKind.special);
+      expect(classifyLocalEpisode('Anime OVA.mkv'), LocalEpisodeKind.special);
+      expect(classifyLocalEpisode('Anime OAD.mkv'), LocalEpisodeKind.special);
+      expect(classifyLocalEpisode('Anime 番外.mkv'), LocalEpisodeKind.special);
+    });
+
+    test('movie / theatrical markers', () {
+      expect(classifyLocalEpisode('剧场版 标题.mkv'), LocalEpisodeKind.movie);
+      expect(classifyLocalEpisode('Anime Movie.mkv'), LocalEpisodeKind.movie);
+    });
+
+    test('extra markers (pv / cm / 特典)', () {
+      expect(classifyLocalEpisode('Anime PV.mkv'), LocalEpisodeKind.extra);
+      expect(classifyLocalEpisode('Anime 特典.mkv'), LocalEpisodeKind.extra);
+    });
+
+    test('kind labels', () {
+      expect(localEpisodeKindLabel(LocalEpisodeKind.normal), '');
+      expect(localEpisodeKindLabel(LocalEpisodeKind.special), 'SP');
+      expect(localEpisodeKindLabel(LocalEpisodeKind.movie), '剧场版');
+      expect(localEpisodeKindLabel(LocalEpisodeKind.extra), '特典');
     });
   });
 }

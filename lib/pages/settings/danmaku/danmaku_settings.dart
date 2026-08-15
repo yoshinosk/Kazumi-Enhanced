@@ -33,6 +33,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   late bool danmakuGamerSource;
   late bool danmakuDanDanSource;
   late bool danmakuFollowSpeed;
+  late bool danmakuAxisAutoCheck;
 
   @override
   void initState() {
@@ -71,6 +72,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
         GStorage.getSetting<bool>(SettingsKeys.danmakuDanDanSource);
     danmakuFollowSpeed =
         GStorage.getSetting<bool>(SettingsKeys.danmakuFollowSpeed);
+    danmakuAxisAutoCheck =
+        GStorage.getSetting<bool>(SettingsKeys.danmakuAxisAutoCheck);
   }
 
   Future<void> resetDanmakuSettings() async {
@@ -263,6 +266,19 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                   title: Text('弹幕跟随视频倍速'),
                   description: Text('开启后弹幕速度会随视频倍速而改变'),
                   initialValue: danmakuFollowSpeed,
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.rule_rounded,
+                  onToggle: (value) async {
+                    danmakuAxisAutoCheck = value ?? !danmakuAxisAutoCheck;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.danmakuAxisAutoCheck,
+                        danmakuAxisAutoCheck);
+                    setState(() {});
+                  },
+                  title: Text('弹幕轴自动对齐检测'),
+                  description: Text('开启后根据弹幕轴与视频时长判断弹幕是否对齐，异常时弹窗提示'),
+                  initialValue: danmakuAxisAutoCheck,
                 ),
                 SettingsTile.switchTile(
                   leading: Icons.vertical_align_top_rounded,

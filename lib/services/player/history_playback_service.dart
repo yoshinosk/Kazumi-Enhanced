@@ -47,6 +47,14 @@ class HistoryPlaybackService {
   }) async {
     if (HistoryEntryKind.normalize(history.entryKind) ==
         HistoryEntryKind.offline) {
+      // 磁力边下边播条目：流 URL 仅在引擎存活期间有效，恢复前校验可达性。
+      if (isStreamHistory(history)) {
+        final args = await _streamArgs(history);
+        return args == null
+            ? const HistoryPlaybackUnavailable(
+                '边下边播源已失效，请从下载页重新开始播放')
+            : HistoryPlaybackReady(args);
+      }
       // 本地媒体库条目：直接按记录的文件路径恢复，不经过下载记录查询。
       if (isLocalMediaHistory(history)) {
         final args = await _localMediaArgs(history);
@@ -64,6 +72,41 @@ class HistoryPlaybackService {
     return args == null
         ? const HistoryPlaybackUnavailable('在线源不可用，请重新选择播放源')
         : HistoryPlaybackReady(args);
+  }
+
+  /// 恢复磁力边下边播：对历史记录中的流 URL 做一次 HEAD 可达性检查
+  /// （超时 2 秒），引擎仍在运行且流地址有效时可直接续播。
+  Future<VideoPlaybackArgs?> _streamArgs(History history) async {
+    final url = history.episodePageUrl;
+    if (url.isEmpty || !url.startsWith('http')) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final request = await client.headUrl(Uri.parse(url)).timeout(
+              const Duration(seconds: 2),
+            );
+        final response = await request.close().timeout(
+              const Duration(seconds: 2),
+            );
+        // 仅 2xx 视为可达：流已删除时服务器典型响应 404（或 403），
+        // 若放行则恢复后进入必定失败的播放页而非引导从下载页重新开始。
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
+        }
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return null;
+    }
+    return MagnetStreamVideoPlaybackArgs(
+      bangumiItem: history.bangumiItem,
+      streamUrl: url,
+      fileName: history.lastWatchEpisodeName.isEmpty
+          ? '流式播放'
+          : history.lastWatchEpisodeName,
+    );
   }
 
   Future<VideoPlaybackArgs?> _onlineArgs(
@@ -148,6 +191,9 @@ class HistoryPlaybackService {
       files: files,
       selectedIndex: index < 0 ? 0 : index,
       pluginName: kLocalMediaAdapterName,
+      // 本地看完联动 Bangumi 进度依赖 bangumiSyncId，历史条目必然来自
+      // Bangumi 详情，直接带 subject ID。
+      bangumiSyncId: history.bangumiItem.id,
     );
   }
 

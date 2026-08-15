@@ -89,6 +89,9 @@ class MagnetSubscription {
   /// 发现新条目时是否自动提交下载（默认 true，兼容旧数据）。
   final bool autoDownload;
 
+  /// 番剧封面图 URL（由 Bangumi 搜索解析，留空时列表显示占位图标）。
+  final String coverUrl;
+
   const MagnetSubscription({
     required this.id,
     required this.name,
@@ -104,12 +107,14 @@ class MagnetSubscription {
     this.maxSizeMb,
     this.downloadPath,
     this.autoDownload = true,
+    this.coverUrl = '',
   });
 
   MagnetSubscription copyWith({
     String? lastGuid,
     DateTime? lastCheckedAt,
     bool? autoDownload,
+    String? coverUrl,
   }) {
     return MagnetSubscription(
       id: id,
@@ -126,6 +131,7 @@ class MagnetSubscription {
       maxSizeMb: maxSizeMb,
       downloadPath: downloadPath,
       autoDownload: autoDownload ?? this.autoDownload,
+      coverUrl: coverUrl ?? this.coverUrl,
     );
   }
 
@@ -154,6 +160,7 @@ class MagnetSubscription {
       maxSizeMb: (json['maxSizeMb'] as num?)?.toDouble(),
       downloadPath: _cleanOptional(json['downloadPath'] as String?),
       autoDownload: json['autoDownload'] as bool? ?? true,
+      coverUrl: json['coverUrl'] as String? ?? '',
     );
   }
 
@@ -179,6 +186,7 @@ class MagnetSubscription {
         if (maxSizeMb != null) 'maxSizeMb': maxSizeMb,
         if (downloadPath != null) 'downloadPath': downloadPath,
         'autoDownload': autoDownload,
+        'coverUrl': coverUrl,
       };
 }
 

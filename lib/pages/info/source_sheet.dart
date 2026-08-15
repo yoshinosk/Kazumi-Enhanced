@@ -18,11 +18,11 @@ import 'package:kazumi/services/plugin/rule_engine_models.dart'
 import 'package:url_launcher/url_launcher.dart';
 import 'package:kazumi/services/plugin/plugin_search_service.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'dart:async';
-import 'dart:convert';
 import 'package:kazumi/services/plugin/captcha_verification_service.dart';
 import 'package:kazumi/plugins/anti_crawler_config.dart';
 import 'package:kazumi/utils/device.dart';
+import 'dart:async';
+import 'dart:convert';
 
 class SourceSheet extends StatefulWidget {
   const SourceSheet({

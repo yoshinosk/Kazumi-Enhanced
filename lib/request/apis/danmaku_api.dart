@@ -83,9 +83,9 @@ class DanmakuApi {
       return DanmakuMatchResponse.empty;
     }
     final fileSize = await readFileSize(filePath);
-    // 弹弹 Play 的 /api/v2/match 期望完整的文件名（含扩展名，与种子文件名
-    // 口径一致）；去掉扩展名会导致 hashAndFileName 模式下的文件名比对失配。
-    final fileName = p.basename(filePath);
+    // 弹弹 Play 官方 API 文档规定 `/api/v2/match` 的 fileName 不包含文件夹名
+    // 与扩展名（扩展名会在服务端的文件名比对中造成失配）；特殊字符需转义。
+    final fileName = p.basenameWithoutExtension(filePath);
 
     final endPoint = ApiEndpoints.dandanAPIDomain + ApiEndpoints.dandanAPIMatch;
     KazumiLogger()
@@ -101,7 +101,15 @@ class DanmakuApi {
     if (jsonData is! Map) {
       return DanmakuMatchResponse.empty;
     }
-    return DanmakuMatchResponse.fromJson(Map<String, dynamic>.from(jsonData));
+    final response = DanmakuMatchResponse.fromJson(
+        Map<String, dynamic>.from(jsonData));
+    // 业务错误（如签名无效、额度受限）会以 200 + success=false 返回，
+    // 不要静默当作「无候选」，便于在日志中定位匹配失败的真实原因。
+    if (!response.success && response.errorCode != 0) {
+      KazumiLogger().w(
+          'Danmaku: match API returned error ${response.errorCode}: ${response.errorMessage}');
+    }
+    return response;
   }
 
   // 从BangumiID获取分集ID

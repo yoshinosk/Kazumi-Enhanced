@@ -5,6 +5,7 @@ import 'package:kazumi/pages/video/video_playback_args.dart';
 import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:kazumi/pages/player/danmaku_axis_dialog.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/history/history_module.dart';
@@ -114,6 +115,10 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   bool isLocalMediaMode = false;
 
+  /// 磁力边下边播模式：播放引擎流媒体服务器提供的 HTTP 流。
+  @observable
+  bool isStreamMode = false;
+
   PlaybackHistoryIdentity? _playbackHistoryIdentity;
   final Map<int, DownloadEpisode> _offlineEpisodesByNumber = {};
   final Map<int, int> _offlineDisplayRoadToOriginalRoad = {};
@@ -132,6 +137,9 @@ abstract class _VideoPageController with Store implements Disposable {
   String _offlinePluginName = '';
 
   String _localMediaPluginName = '';
+
+  /// 边下边播的适配器标识（流 URL 与文件名保存在 roadList 中）。
+  String _streamPluginName = '';
 
   int? _localMediaBangumiSyncId;
 
@@ -178,6 +186,13 @@ abstract class _VideoPageController with Store implements Disposable {
           selectedIndex: args.selectedIndex,
           pluginName: args.pluginName,
           bangumiSyncId: args.bangumiSyncId,
+        );
+      case MagnetStreamVideoPlaybackArgs():
+        _initForStreamPlayback(
+          bangumiItem: args.bangumiItem,
+          streamUrl: args.streamUrl,
+          fileName: args.fileName,
+          pluginName: args.pluginName,
         );
     }
   }
@@ -238,6 +253,10 @@ abstract class _VideoPageController with Store implements Disposable {
 
   String get offlinePluginName => _offlinePluginName;
 
+  /// 本地媒体 / 边下边播模式下的适配器标识（供音频会话等元数据使用）。
+  String get streamOrLocalPluginName =>
+      isStreamMode ? _streamPluginName : _localMediaPluginName;
+
   @action
   void _initForLocalMediaPlayback({
     required BangumiItem bangumiItem,
@@ -256,9 +275,8 @@ abstract class _VideoPageController with Store implements Disposable {
 
     _buildLocalMediaRoadList(files);
 
-    final safeIndex = files.isEmpty
-        ? 0
-        : selectedIndex.clamp(0, files.length - 1);
+    final safeIndex =
+        files.isEmpty ? 0 : selectedIndex.clamp(0, files.length - 1);
     final selected = VideoEpisodeSelection(
       episode: safeIndex + 1,
       road: 0,
@@ -290,11 +308,49 @@ abstract class _VideoPageController with Store implements Disposable {
     ));
   }
 
+  /// 边下边播初始化：单文件 HTTP 流，写入历史（adapterName=magnet-stream）。
+  @action
+  void _initForStreamPlayback({
+    required BangumiItem bangumiItem,
+    required String streamUrl,
+    required String fileName,
+    required String pluginName,
+  }) {
+    this.bangumiItem = bangumiItem;
+    _streamPluginName = pluginName;
+    title =
+        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    isStreamMode = true;
+    _loading = false;
+
+    roadList.clear();
+    roadList.add(Road(
+      name: '边下边播',
+      data: [streamUrl],
+      identifier: [fileName.isEmpty ? '流式播放' : fileName],
+    ));
+
+    selectedEpisode = const VideoEpisodeSelection(episode: 1, road: 0);
+    playingEpisode = null;
+    // 边下边播写入历史（adapterName=magnet-stream）：流 URL 在引擎存活期间
+    // 有效，历史页恢复时校验可达性；应用重启后引擎重建、URL 端口变化，
+    // 历史页会提示从下载页重新开始。
+    final parsed = parseLocalEpisodeNumber(fileName);
+    final episodeNumber = parsed > 0 ? parsed : 1;
+    _playbackHistoryIdentity = PlaybackHistoryIdentity.offline(
+      bangumiItem: bangumiItem,
+      pluginName: _streamPluginName,
+      episodeNumber: episodeNumber,
+      episodeTitle: fileName.isEmpty ? '流式播放' : fileName,
+      road: 0,
+      episodePageUrl: streamUrl,
+    );
+    KazumiLogger().i('VideoPageController: initialized for magnet streaming');
+  }
+
   EpisodeRef? _resolveLocalMediaEpisode(int episode, {int? road}) {
     final targetRoad = road ?? selectedEpisode.road;
-    if (roadList.isEmpty ||
-        targetRoad < 0 ||
-        targetRoad >= roadList.length) {
+    if (roadList.isEmpty || targetRoad < 0 || targetRoad >= roadList.length) {
       return null;
     }
     final roadData = roadList[targetRoad];
@@ -474,7 +530,33 @@ abstract class _VideoPageController with Store implements Disposable {
     if (isLocalMediaMode) {
       return _resolveLocalMediaEpisode(selection.episode, road: selection.road);
     }
+    if (isStreamMode) {
+      return _resolveStreamEpisode(selection.episode, road: selection.road);
+    }
     return _resolveOnlineEpisode(selection.episode, road: selection.road);
+  }
+
+  /// 边下边播集数解析：固定单文件，集数从文件名解析（失败回退 1）。
+  EpisodeRef? _resolveStreamEpisode(int episode, {int? road}) {
+    if (roadList.isEmpty || episode != 1) {
+      return null;
+    }
+    final roadData = roadList.first;
+    if (roadData.data.isEmpty) {
+      return null;
+    }
+    final name =
+        roadData.identifier.isNotEmpty ? roadData.identifier.first : '流式播放';
+    final parsed = parseLocalEpisodeNumber(name);
+    final episodeNumber = parsed > 0 ? parsed : 1;
+    return EpisodeRef.offline(
+      listIndex: 1,
+      roadIndex: 0,
+      displayTitle: name,
+      pageUrl: roadData.data.first,
+      episodeNumber: episodeNumber,
+      originalRoadIndex: 0,
+    );
   }
 
   /// Resets pre-switch state as a single transaction so observers see one
@@ -539,6 +621,16 @@ abstract class _VideoPageController with Store implements Disposable {
 
     if (isLocalMediaMode) {
       await _changeLocalMediaEpisode(
+        selection,
+        offset,
+        session: session,
+        playerController: playerController,
+      );
+      return;
+    }
+
+    if (isStreamMode) {
+      await _changeStreamEpisode(
         selection,
         offset,
         session: session,
@@ -724,6 +816,67 @@ abstract class _VideoPageController with Store implements Disposable {
     }
   }
 
+  Future<void> _changeStreamEpisode(
+    VideoEpisodeSelection selection,
+    int offset, {
+    required AsyncSession session,
+    required PlayerController playerController,
+  }) async {
+    final resolvedEpisode =
+        _resolveStreamEpisode(selection.episode, road: selection.road);
+    if (resolvedEpisode == null) {
+      KazumiLogger().e(
+          'VideoPageController: failed to resolve stream episode. road=${selection.road}, episode=${selection.episode}');
+      _failLoading('流解析失败');
+      return;
+    }
+    _applyResolvedSelection(resolvedEpisode);
+    _playbackHistoryIdentity = PlaybackHistoryIdentity.offline(
+      bangumiItem: bangumiItem,
+      pluginName: _streamPluginName,
+      episodeNumber: resolvedEpisode.historyEpisodeNumber,
+      episodeTitle: resolvedEpisode.displayTitle,
+      road: 0,
+      episodePageUrl: resolvedEpisode.pageUrl,
+    );
+    if (session.isStale) {
+      return;
+    }
+    _finishLoading();
+
+    KazumiLogger().i(
+        'VideoPageController: stream episode changed to ${resolvedEpisode.historyEpisodeNumber}, url: ${resolvedEpisode.pageUrl}');
+
+    final params = PlaybackInitParams(
+      videoUrl: resolvedEpisode.pageUrl,
+      offset: offset,
+      isLocalPlayback: false,
+      bangumiId: bangumiItem.id,
+      pluginName: _streamPluginName,
+      episode: resolvedEpisode.listIndex,
+      danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
+      pageUrl: '',
+      sortNumber: resolvedEpisode.sortNumber,
+      httpHeaders: {},
+      adBlockerEnabled: false,
+      episodeTitle: resolvedEpisode.displayTitle,
+      referer: '',
+      currentRoad: resolvedEpisode.roadIndex,
+      coverUrl: bangumiItem.images['large'],
+      bangumiName:
+          bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
+      bangumiNameAliases: _danmakuTitleAliases(resolvedEpisode.displayTitle),
+    );
+
+    final initialized = await playerController.init(params);
+    if (session.isActive && initialized) {
+      playingEpisode = selection;
+      unawaited(_loadPlaybackDanmaku(playerController, params, session));
+    } else if (session.isActive) {
+      _playbackSessions.cancel();
+    }
+  }
+
   Future<void> _loadPlaybackDanmaku(
     PlayerController playerController,
     PlaybackInitParams params,
@@ -757,6 +910,17 @@ abstract class _VideoPageController with Store implements Disposable {
                 ? result.episodeTitle
                 : '第${params.danmakuEpisodeNumber}集',
           );
+          if (enableDanmaku) {
+            unawaited(
+              checkDanmakuAxisAlignment(
+                playerController: playerController,
+                videoPageController: this as VideoPageController,
+                danmakus: result.danmakus,
+                shouldProceed: () =>
+                    session.isActive && danmakuSession.isActive,
+              ),
+            );
+          }
         } else {
           playerController.danmaku.applyUnavailableDanmakuLoad(result);
           playerController.danmaku.applyDanmakuBinding(
@@ -829,6 +993,7 @@ abstract class _VideoPageController with Store implements Disposable {
         videoUrl: source.url,
         offset: source.offset,
         isLocalPlayback: false,
+        videoSourceFormat: source.format,
         bangumiId: bangumiItem.id,
         pluginName: currentPlugin.name,
         episode: resolvedEpisode.listIndex,

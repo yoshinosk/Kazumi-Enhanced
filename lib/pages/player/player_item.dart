@@ -23,6 +23,8 @@ import 'package:window_manager/window_manager.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/pages/player/video_details_sheet.dart';
+import 'package:kazumi/pages/magnet/magnet_page.dart'
+    show MagnetSearchRouteArgs;
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
@@ -124,6 +126,9 @@ class _PlayerItemState extends State<PlayerItem>
   /// 已触发过 Bangumi 进度同步的 (bangumiId:集数) key，防止 completed
   /// 持续状态下每个计时周期重复请求。
   String? _bangumiSyncFiredKey;
+
+  /// 已提示过「最后一集」的 key（bangumiId:road:episode），每次播完只提示一次。
+  String? _lastEpisodePromptFiredKey;
   final Set<PlayerPanelHold> _playerPanelHolds = <PlayerPanelHold>{};
   int _openPlayerMenuCount = 0;
   PlayerPanelHold? _progressBarDragHold;
@@ -536,7 +541,10 @@ class _PlayerItemState extends State<PlayerItem>
           title: bangumiTitle,
           album: videoPageController.isOfflineMode
               ? videoPageController.offlinePluginName
-              : videoPageController.currentPlugin.name,
+              : (videoPageController.isLocalMediaMode ||
+                      videoPageController.isStreamMode)
+                  ? videoPageController.streamOrLocalPluginName
+                  : videoPageController.currentPlugin.name,
           artist: episodeRef.displayTitle,
           artUri: artworkUri,
           duration: playerController.playback.duration,
@@ -1021,7 +1029,7 @@ class _PlayerItemState extends State<PlayerItem>
       final playingSelection = videoPageController.playbackEpisode;
       final playingRoadData =
           videoPageController.roadList[playingSelection.road];
-      if (playerController.playback.completed && !videoPageController.loading) {
+        if (playerController.playback.completed && !videoPageController.loading) {
         if (playerController.playback.resumedNearEnd) {
           // Completion of a stale near-end resume is not a real watch;
           // replay from the beginning instead of advancing.
@@ -1044,6 +1052,10 @@ class _PlayerItemState extends State<PlayerItem>
             } catch (_) {}
             widget.changeEpisode(playingSelection.episode + 1,
                 currentRoad: playingSelection.road);
+          } else if (playingSelection.episode >=
+              playingRoadData.data.length) {
+            // 最后一集播完：本地媒体库提示去在线 / 磁力补后续，其余仅提示。
+            _maybePromptLastEpisodeFinished(playingSelection);
           }
           // 本地媒体库真·播放完成：可选联动 Bangumi 收藏 EP 进度。
           // completed 是持续状态，这里按 (bangumiId, 集数) 去重，
@@ -1068,6 +1080,70 @@ class _PlayerItemState extends State<PlayerItem>
       }
       playerController.setSyncPlayCurrentPosition();
     });
+  }
+
+  /// 最后一集播完后的引导提示（每个剧集只触发一次）：
+  /// 本地媒体库 → 弹窗提供「详情页在线播放 / 磁力搜索补集」；
+  /// 在线 / 边下边播 → 轻量 toast。
+  void _maybePromptLastEpisodeFinished(VideoEpisodeSelection selection) {
+    final bangumiItem = videoPageController.bangumiItem;
+    final key = '${bangumiItem.id}:${selection.road}:${selection.episode}';
+    if (_lastEpisodePromptFiredKey == key) return;
+    _lastEpisodePromptFiredKey = key;
+
+    if (videoPageController.isLocalMediaMode) {
+      if (!mounted) return;
+      KazumiDialog.show(
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('本地文件已全部播完'),
+          content: Text(
+            '「${bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name}」'
+            '的本地文件已全部看完。\n\n'
+            '后续剧集可回到详情页选择在线播放源，或搜索磁力资源下载补集。',
+            style: Theme.of(dialogContext).textTheme.bodyMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: 'close'),
+              child: Text(
+                '知道了',
+                style: TextStyle(
+                    color: Theme.of(dialogContext).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: 'magnet'),
+              child: const Text('搜索磁力'),
+            ),
+            FilledButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: 'info'),
+              child: const Text('去详情页'),
+            ),
+          ],
+        ),
+      ).then((action) {
+        if (!mounted || action == null || action == 'close') return;
+        if (action == 'info') {
+          context.pushNamed('/info/', arguments: bangumiItem);
+        } else {
+          context.pushNamed(
+            '/magnet/',
+            arguments: MagnetSearchRouteArgs(
+              query: bangumiItem.nameCn.isNotEmpty
+                  ? bangumiItem.nameCn
+                  : bangumiItem.name,
+              anime: bangumiItem,
+            ),
+          );
+        }
+      });
+      return;
+    }
+    if (videoPageController.isStreamMode) {
+      KazumiDialog.showToast(message: '已是最后一个文件');
+      return;
+    }
+    KazumiDialog.showToast(message: '已经是最后一集，可前往详情页搜索其他资源');
   }
 
   void showDanmakuSwitch() {

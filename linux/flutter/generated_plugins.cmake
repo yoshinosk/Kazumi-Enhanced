@@ -3,10 +3,12 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  awesome_notifications
   desktop_webview_window
   dynamic_color
   file_selector_linux
   flutter_volume_controller
+  local_notifier
   media_kit_libs_linux
   media_kit_video
   screen_retriever_linux

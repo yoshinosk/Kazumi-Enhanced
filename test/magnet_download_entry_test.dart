@@ -1011,5 +1011,157 @@ void main() {
       expect(restored.isScraped, isFalse);
       expect(restored.scrapeInfo, isNull);
     });
+
+    test('scrape confidence and attempted flags round-trip', () {
+      final entry = MagnetDownloadEntry(
+        taskId: 'task-scrape-state',
+        title: '[Fansub] Anime',
+        sourceUri: 'magnet:?xt=urn:btih:state',
+        addedAt: DateTime(2026, 2, 2),
+        scrapeAttempted: true,
+        scrapeConfidence: 0.72,
+      );
+      final restored = MagnetDownloadEntry.fromJson(entry.toJson());
+      expect(restored.scrapeAttempted, isTrue);
+      expect(restored.scrapeConfidence, closeTo(0.72, 1e-9));
+      expect(restored.scrapeInfo, isNull);
+      expect(restored.scrapePending, isTrue);
+    });
+
+    test('legacy entries default to unscraped and not attempted', () {
+      final restored = MagnetDownloadEntry.fromJson({
+        'title': 'Legacy',
+        'sourceUri': 'magnet:?xt=urn:btih:abc',
+        'addedAt': '2026-01-01T00:00:00.000',
+      });
+      expect(restored.scrapeAttempted, isFalse);
+      expect(restored.scrapeConfidence, 0);
+      expect(restored.scrapePending, isFalse);
+    });
+
+    test('scraped entry is not pending even when attempted', () {
+      final entry = MagnetDownloadEntry(
+        taskId: 'task-scraped',
+        title: 'Anime',
+        sourceUri: 'magnet:?xt=urn:btih:done',
+        addedAt: DateTime(2026, 2, 2),
+        scrapeAttempted: true,
+        scrapeConfidence: 0.9,
+        scrapeInfo: const MediaScrapeInfo(
+          id: 1,
+          name: 'Anime',
+          nameCn: '动画',
+          summary: '',
+          airDate: '2026-01-01',
+          coverUrl: '',
+        ),
+      );
+      final restored = MagnetDownloadEntry.fromJson(entry.toJson());
+      expect(restored.isScraped, isTrue);
+      expect(restored.scrapePending, isFalse);
+      expect(restored.scrapeConfidence, closeTo(0.9, 1e-9));
+    });
+  });
+
+  group('MagnetDownloadService computeQueueChanges', () {
+    MagnetDownloadEntry mk(String id, String status, DateTime addedAt) {
+      return MagnetDownloadEntry(
+        taskId: id,
+        title: id,
+        sourceUri: 'magnet:?xt=urn:btih:$id',
+        addedAt: addedAt,
+        status: status,
+      );
+    }
+
+    test('no limit leaves queue untouched', () {
+      final entries = [
+        mk('a', 'active', DateTime(2026, 1, 1)),
+        mk('b', 'queued', DateTime(2026, 1, 2)),
+      ];
+      final changes = MagnetDownloadService.computeQueueChanges(entries, 0);
+      expect(changes.promote, isEmpty);
+      expect(changes.demote, isEmpty);
+    });
+
+    test('promotes queued tasks in added order while slots remain', () {
+      final entries = [
+        mk('a', 'active', DateTime(2026, 1, 1)),
+        mk('b', 'queued', DateTime(2026, 1, 2)),
+        mk('c', 'queued', DateTime(2026, 1, 3)),
+      ];
+      final changes = MagnetDownloadService.computeQueueChanges(entries, 2);
+      expect(changes.promote, ['b']);
+      expect(changes.demote, isEmpty);
+    });
+
+    test('demotes newest active tasks when over the limit', () {
+      final entries = [
+        mk('a', 'active', DateTime(2026, 1, 1)),
+        mk('b', 'active', DateTime(2026, 1, 2)),
+        mk('c', 'active', DateTime(2026, 1, 3)),
+      ];
+      final changes = MagnetDownloadService.computeQueueChanges(entries, 2);
+      expect(changes.promote, isEmpty);
+      expect(changes.demote, ['c']);
+    });
+
+    test('paused, seeding, complete and queued tasks do not count as active',
+        () {
+      final entries = [
+        mk('a', 'active', DateTime(2026, 1, 1)),
+        mk('b', 'active', DateTime(2026, 1, 2)),
+        mk('p', 'paused', DateTime(2026, 1, 3)),
+        mk('s', 'seeding', DateTime(2026, 1, 4)),
+        mk('c', 'complete', DateTime(2026, 1, 5)),
+        mk('q', 'queued', DateTime(2026, 1, 6)),
+      ];
+      final changes = MagnetDownloadService.computeQueueChanges(entries, 3);
+      expect(changes.promote, ['q']);
+      expect(changes.demote, isEmpty);
+    });
+
+    test('queued status round-trips through persistence', () {
+      final entry = MagnetDownloadEntry(
+        taskId: 'task-queued',
+        title: 'Queued',
+        sourceUri: 'magnet:?xt=urn:btih:queue',
+        addedAt: DateTime(2026, 2, 2),
+        status: 'queued',
+      );
+      final restored = MagnetDownloadEntry.fromJson(entry.toJson());
+      expect(restored.status, 'queued');
+      expect(restored.isQueued, isTrue);
+      expect(restored.isDownloading, isFalse);
+    });
+  });
+
+  group('MagnetDownloadService scheduled limit window', () {
+    test('parses HH:mm strings', () {
+      expect(MagnetDownloadService.parseHmForTest('23:00'), 23 * 60);
+      expect(MagnetDownloadService.parseHmForTest('08:30'), 8 * 60 + 30);
+      expect(MagnetDownloadService.parseHmForTest('bad'), isNull);
+      expect(MagnetDownloadService.parseHmForTest('25:00'), isNull);
+    });
+
+    test('same-day window', () {
+      expect(MagnetDownloadService.inWindowForTest(8 * 60, 8 * 60, 18 * 60),
+          isTrue);
+      expect(MagnetDownloadService.inWindowForTest(18 * 60, 8 * 60, 18 * 60),
+          isFalse);
+      expect(MagnetDownloadService.inWindowForTest(7 * 60, 8 * 60, 18 * 60),
+          isFalse);
+    });
+
+    test('overnight window', () {
+      expect(
+          MagnetDownloadService.inWindowForTest(
+              23 * 60 + 30, 23 * 60, 8 * 60),
+          isTrue);
+      expect(MagnetDownloadService.inWindowForTest(3 * 60, 23 * 60, 8 * 60),
+          isTrue);
+      expect(MagnetDownloadService.inWindowForTest(12 * 60, 23 * 60, 8 * 60),
+          isFalse);
+    });
   });
 }

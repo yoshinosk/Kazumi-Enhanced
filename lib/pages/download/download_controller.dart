@@ -177,11 +177,13 @@ abstract class _DownloadController with Store {
   }
 
   Future<void> _updateBackgroundNotification() async {
-    if (!_backgroundService.isRunning) return;
+    if (!_backgroundService.isHeldBy(BackgroundDownloadService.httpLease)) {
+      return;
+    }
 
     final stats = _getDownloadStats();
     if (!stats.hasWork) {
-      await _backgroundService.stopService();
+      await _backgroundService.release(BackgroundDownloadService.httpLease);
       return;
     }
 
@@ -199,9 +201,13 @@ abstract class _DownloadController with Store {
   }
 
   Future<void> _startBackgroundServiceIfNeeded() async {
-    if (!_backgroundService.isSupported || _backgroundService.isRunning) return;
+    if (!_backgroundService.isSupported ||
+        _backgroundService.isHeldBy(BackgroundDownloadService.httpLease)) {
+      return;
+    }
 
-    final started = await _backgroundService.startService();
+    final started =
+        await _backgroundService.acquire(BackgroundDownloadService.httpLease);
     if (started) {
       KazumiLogger().i('DownloadController: background service started');
     }
@@ -864,7 +870,7 @@ abstract class _DownloadController with Store {
 
     refreshRecords();
 
-    await _backgroundService.stopService();
+    await _backgroundService.release(BackgroundDownloadService.httpLease);
   }
 
   Future<void> retryDownload({

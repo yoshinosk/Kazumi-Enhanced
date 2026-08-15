@@ -303,12 +303,29 @@ class MediaScrapeInfo {
   }
 }
 
-/// 搜刮结果仓库：以 JSON 字符串形式持久化「文件夹路径 → 番剧信息」映射。
+/// 搜刮结果仓库：以 JSON 字符串形式持久化「路径 → 番剧信息」映射。
+///
+/// 文件夹级结果以 `localMediaScrapeResults` 保存，单文件级结果以
+/// `localMediaFileScrapeResults` 保存（播放时优先使用文件级结果）。
 class MediaScrapeStore {
   MediaScrapeStore._();
 
-  static Map<String, MediaScrapeInfo> load() {
-    final raw = GStorage.getSetting(SettingsKeys.localMediaScrapeResults);
+  static Map<String, MediaScrapeInfo> load() =>
+      _decode(GStorage.getSetting(SettingsKeys.localMediaScrapeResults));
+
+  static Future<void> save(Map<String, MediaScrapeInfo> results) =>
+      GStorage.putSetting(
+          SettingsKeys.localMediaScrapeResults, _encode(results));
+
+  static Map<String, MediaScrapeInfo> loadFileResults() =>
+      _decode(GStorage.getSetting(SettingsKeys.localMediaFileScrapeResults));
+
+  static Future<void> saveFileResults(
+          Map<String, MediaScrapeInfo> results) =>
+      GStorage.putSetting(
+          SettingsKeys.localMediaFileScrapeResults, _encode(results));
+
+  static Map<String, MediaScrapeInfo> _decode(String raw) {
     if (raw.isEmpty) return const {};
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
@@ -323,13 +340,8 @@ class MediaScrapeStore {
     }
   }
 
-  static Future<void> save(Map<String, MediaScrapeInfo> results) async {
-    final map = results.map(
-      (key, value) => MapEntry(key, value.toJson()),
-    );
-    await GStorage.putSetting(
-      SettingsKeys.localMediaScrapeResults,
-      jsonEncode(map),
-    );
-  }
+  static String _encode(Map<String, MediaScrapeInfo> results) =>
+      jsonEncode(results.map(
+        (key, value) => MapEntry(key, value.toJson()),
+      ));
 }

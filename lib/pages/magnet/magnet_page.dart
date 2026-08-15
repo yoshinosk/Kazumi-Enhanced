@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:file_picker/file_picker.dart';
@@ -9,11 +12,18 @@ import 'package:kazumi/bean/widget/empty_state_widget.dart'
     show GeneralEmptyState;
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
+import 'package:kazumi/pages/video/video_playback_args.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/services/magnet/animes_garden_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
+import 'package:kazumi/services/media/media_scraper.dart';
+import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/local_episode_parser.dart';
+import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 
 /// 番剧详情页发起的磁力搜索路由参数：搜索关键词 + 关联的番剧信息。
 ///
@@ -67,6 +77,72 @@ class _MagnetPageState extends State<MagnetPage>
     } else {
       _searchController.text = controller.query;
     }
+    _checkClipboardForMagnetLink();
+  }
+
+  /// 检测剪贴板中的磁力 / 种子链接，弹窗一键添加下载。
+  ///
+  /// 仅在进入磁力页时检查一次；与已有任务同源（磁力链相同）时跳过。
+  Future<void> _checkClipboardForMagnetLink() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (!_isMagnetLikeLink(text)) return;
+      if (controller.downloadTasks.any((t) => t.sourceUri == text)) return;
+      if (!mounted) return;
+      final theme = Theme.of(context);
+      final confirmed = await KazumiDialog.show<bool>(
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('检测到磁力链接'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '是否添加到下载队列？',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: true),
+              child: const Text('添加下载'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      final item = MagnetSearchItem(
+        title: '剪贴板链接的任务',
+        magnetLink: text.startsWith('magnet:') ? text : '',
+        torrentUrl: text.startsWith('magnet:') ? '' : text,
+        size: '',
+        publishDate: DateTime.now(),
+      );
+      controller.addDownload(item);
+    } catch (e) {
+      // 剪贴板不可用（权限等）时静默跳过。
+      KazumiLogger().w('MagnetPage: clipboard check failed', error: e);
+    }
+  }
+
+  bool _isMagnetLikeLink(String text) {
+    if (text.toLowerCase().startsWith('magnet:?xt=urn:btih:')) return true;
+    final lower = text.toLowerCase();
+    return (lower.startsWith('http://') || lower.startsWith('https://')) &&
+        lower.endsWith('.torrent');
   }
 
   @override
@@ -158,32 +234,24 @@ class MagnetSearchTab extends StatefulWidget {
 
 class _MagnetSearchTabState extends State<MagnetSearchTab> {
   MagnetController get controller => widget.controller;
-  List<AnimesGardenTeam> _teams = const [];
-  bool _loadingTeams = false;
   bool _autoLoading = false;
+
+  /// 当前搜索结果中出现过的字幕组（去重排序），用于筛选选择器。
+  List<String> get _resultFansubs {
+    final set = <String>{};
+    for (final item in controller.searchResults) {
+      final f = item.publisher?.trim();
+      if (f != null && f.isNotEmpty) set.add(f);
+    }
+    final list = set.toList()..sort();
+    return list;
+  }
 
   /// 详情页传入的番剧转换出的搜刮信息，非空时本次会话下载的任务
   /// 默认为「已搜刮」的番剧。
   MediaScrapeInfo? get _animeScrapeInfo {
     final anime = widget.anime;
     return anime == null ? null : MediaScrapeInfo.fromBangumiItem(anime);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadTeams();
-  }
-
-  Future<void> _loadTeams() async {
-    setState(() => _loadingTeams = true);
-    final teams = await controller.fetchAnimesGardenTeams();
-    if (mounted) {
-      setState(() {
-        _teams = teams;
-        _loadingTeams = false;
-      });
-    }
   }
 
   bool _onScroll(ScrollNotification n) {
@@ -247,49 +315,50 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                   ),
                   const Divider(height: 8),
                   Flexible(
-                    child: _loadingTeams
-                        ? const Padding(
-                            padding: EdgeInsets.all(24),
-                            child: Center(child: CircularProgressIndicator()),
-                          )
-                        : ListView(
-                            shrinkWrap: true,
-                            children: [
-                              if (controller.searchFansub != null)
-                                ListTile(
-                                  leading:
-                                      const Icon(Icons.clear_rounded, size: 20),
-                                  title: const Text('清除（不限字幕组）'),
-                                  onTap: () =>
-                                      Navigator.pop(innerCtx, '__clear__'),
-                                ),
-                              ..._teams
-                                  .where(
-                                      (t) => t.name.toLowerCase().contains(q))
-                                  .map((t) => ListTile(
-                                        dense: true,
-                                        title: Text(t.name),
-                                        trailing: t.name ==
-                                                controller.searchFansub
-                                            ? const Icon(Icons.check_rounded,
-                                                size: 20)
-                                            : null,
-                                        onTap: () =>
-                                            Navigator.pop(innerCtx, t.name),
-                                      )),
-                              if (searchCtrl.text.trim().isNotEmpty &&
-                                  !_teams.any(
-                                      (t) => t.name == searchCtrl.text.trim()))
-                                ListTile(
-                                  dense: true,
-                                  leading:
-                                      const Icon(Icons.add_rounded, size: 20),
-                                  title: Text('使用「${searchCtrl.text.trim()}」'),
-                                  onTap: () => Navigator.pop(
-                                      innerCtx, searchCtrl.text.trim()),
-                                ),
-                            ],
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        if (controller.searchFansub != null)
+                          ListTile(
+                            leading:
+                                const Icon(Icons.clear_rounded, size: 20),
+                            title: const Text('清除（不限字幕组）'),
+                            onTap: () =>
+                                Navigator.pop(innerCtx, '__clear__'),
                           ),
+                        ..._resultFansubs
+                            .where((name) => name.toLowerCase().contains(q))
+                            .map((name) => ListTile(
+                                  dense: true,
+                                  title: Text(name),
+                                  trailing:
+                                      name == controller.searchFansub
+                                          ? const Icon(Icons.check_rounded,
+                                              size: 20)
+                                          : null,
+                                  onTap: () =>
+                                      Navigator.pop(innerCtx, name),
+                                )),
+                        if (_resultFansubs.isEmpty &&
+                            searchCtrl.text.trim().isEmpty)
+                          const ListTile(
+                            dense: true,
+                            enabled: false,
+                            title: Text('当前搜索结果中没有字幕组信息'),
+                          ),
+                        if (searchCtrl.text.trim().isNotEmpty &&
+                            !_resultFansubs
+                                .contains(searchCtrl.text.trim()))
+                          ListTile(
+                            dense: true,
+                            leading:
+                                const Icon(Icons.add_rounded, size: 20),
+                            title: Text('使用「${searchCtrl.text.trim()}」'),
+                            onTap: () => Navigator.pop(
+                                innerCtx, searchCtrl.text.trim()),
+                          ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -747,6 +816,37 @@ class _SubscriptionTile extends StatefulWidget {
 class _SubscriptionTileState extends State<_SubscriptionTile> {
   bool _expanded = false;
 
+  /// 封面懒加载回填去重（避免列表重建时重复请求）。
+  static final Set<String> _coverBackfilling = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeBackfillCover();
+  }
+
+  /// 旧订阅没有封面：进入列表时按名称搜索一次并回填持久化。
+  Future<void> _maybeBackfillCover() async {
+    final sub = widget.subscription;
+    if (sub.coverUrl.isNotEmpty || _coverBackfilling.contains(sub.id)) return;
+    _coverBackfilling.add(sub.id);
+    try {
+      final keyword = sub.name.isNotEmpty ? sub.name : sub.feedUrl;
+      if (keyword.isEmpty) return;
+      final page = await BangumiApi.bangumiSearch(keyword, limit: 5);
+      if (!mounted || page == null || page.items.isEmpty) return;
+      final cover =
+          page.items.first.images['large'] ?? page.items.first.images['common'];
+      if (cover != null && cover.isNotEmpty) {
+        await widget.controller.updateSubscriptionCover(sub.id, cover);
+      }
+    } catch (e) {
+      KazumiLogger().w('MagnetSubscription: backfill cover failed', error: e);
+    } finally {
+      _coverBackfilling.remove(sub.id);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final sub = widget.subscription;
@@ -754,9 +854,16 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
     return Column(
       children: [
         ListTile(
-          leading: Icon(sub.kind == SubscriptionKind.animesGarden
-              ? Icons.cloud_circle_rounded
-              : Icons.rss_feed_rounded),
+          leading: sub.coverUrl.isNotEmpty
+              ? SizedBox(
+                  width: 44,
+                  height: 60,
+                  child:
+                      NetworkImgLayer(src: sub.coverUrl, width: 44, height: 60),
+                )
+              : Icon(sub.kind == SubscriptionKind.animesGarden
+                  ? Icons.cloud_circle_rounded
+                  : Icons.rss_feed_rounded),
           title: Text(sub.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             _subscriptionSummary(sub),
@@ -889,6 +996,23 @@ class MagnetDownloadsTab extends StatefulWidget {
 
 class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   _DownloadsFilter _filter = _DownloadsFilter.all;
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  /// 是否按番剧分组展示（持久化在设置中，下载中心与磁力页共享）。
+  bool get _grouped =>
+      GStorage.getSetting(SettingsKeys.magnetGroupDownloads);
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setGrouped(bool value) async {
+    await GStorage.putSetting(SettingsKeys.magnetGroupDownloads, value);
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -902,7 +1026,8 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
           ),
         );
       }
-      final tasks = switch (_filter) {
+      final query = _searchQuery.trim().toLowerCase();
+      Iterable<MagnetDownloadEntry> base = switch (_filter) {
         _DownloadsFilter.all => controller.downloadTasks,
         _DownloadsFilter.active => controller.downloadTasks
             .where((t) => t.isDownloading || t.isSeeding)
@@ -910,6 +1035,15 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
         _DownloadsFilter.completed =>
           controller.downloadTasks.where((t) => t.isCompleted).toList(),
       };
+      if (query.isNotEmpty) {
+        base = base.where((t) =>
+            t.title.toLowerCase().contains(query) ||
+            t.fileName.toLowerCase().contains(query) ||
+            (t.scrapeInfo?.displayName.toLowerCase().contains(query) ?? false));
+      }
+      final tasks = base.toList();
+      final hasCompleted =
+          controller.downloadTasks.any((t) => t.isCompleted);
       final (icon, emptyTitle) = switch (_filter) {
         _DownloadsFilter.all => (Icons.download_done_rounded, '暂无下载任务'),
         _DownloadsFilter.active => (Icons.downloading_rounded, '没有进行中的任务'),
@@ -943,12 +1077,40 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                     showSelectedIcon: false,
                   ),
                 ),
+                if (_filter == _DownloadsFilter.completed && hasCompleted)
+                  IconButton(
+                    tooltip: '清除已完成记录（保留文件）',
+                    icon: const Icon(Icons.delete_sweep_outlined),
+                    onPressed: () => _confirmClearCompleted(context),
+                  ),
+                IconButton(
+                  tooltip: _grouped ? '已按番剧分组' : '按番剧分组',
+                  icon: Icon(
+                    _grouped
+                        ? Icons.library_books_rounded
+                        : Icons.library_books_outlined,
+                  ),
+                  onPressed: () => _setGrouped(!_grouped),
+                ),
                 IconButton(
                   tooltip: '手动添加磁力链接',
                   icon: const Icon(Icons.add_link_rounded),
                   onPressed: () => _showAddMagnetDialog(context),
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: const InputDecoration(
+                hintText: '搜索任务',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) => setState(() => _searchQuery = value),
             ),
           ),
           Expanded(
@@ -958,30 +1120,257 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                   )
                 : RefreshIndicator(
                     onRefresh: () => controller.refreshDownloads(),
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      itemCount: tasks.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final task = tasks[index];
-                        return _DownloadTaskTile(
-                          task: task,
-                          onPause: () => controller.pauseDownload(task.taskId),
-                          onResume: () =>
-                              controller.resumeDownload(task.taskId),
-                          onRemove: () => _confirmRemove(context, task),
-                          onSelectFiles: task.totalLength > 0
-                              ? () => _showFileSelection(task)
-                              : null,
-                        );
-                      },
-                    ),
+                    child: _grouped
+                        ? _buildGroupedList(context, tasks)
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            itemCount: tasks.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final task = tasks[index];
+                              return _buildTaskTile(context, task);
+                            },
+                          ),
                   ),
           ),
         ],
       );
     });
+  }
+
+  /// 按番剧聚合的任务列表：每组一个头部（封面 / 标题 / 缺集检测）+ 任务条目。
+  Widget _buildGroupedList(BuildContext context, List<MagnetDownloadEntry> tasks) {
+    final byKey = <String, _DownloadGroup>{};
+    for (final task in tasks) {
+      final info = task.scrapeInfo;
+      final key = info?.identityKey ?? 'raw:${task.title.isEmpty ? task.fileName : task.title}';
+      final title = info?.displayName ??
+          (task.title.isNotEmpty ? task.title : task.fileName);
+      final group = byKey.putIfAbsent(
+        key,
+        () => _DownloadGroup(
+          title: title,
+          coverUrl: info?.coverUrl ?? '',
+          bangumiId: info?.bangumiId,
+          tasks: [],
+        ),
+      );
+      group.tasks.add(task);
+    }
+    for (final group in byKey.values) {
+      group.tasks.sort(_compareTasksForDisplay);
+    }
+    final sortedGroups = byKey.values.toList()
+      ..sort((a, b) => _groupPriority(a).compareTo(_groupPriority(b)));
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      itemCount: sortedGroups.length,
+      itemBuilder: (context, index) {
+        final group = sortedGroups[index];
+        return _DownloadGroupSection(
+          key: ValueKey('group-${group.key}'),
+          group: group,
+          buildTaskTile: _buildTaskTile,
+          onMissingEpisodes: (g) => _showGroupMissingEpisodes(context, g),
+        );
+      },
+    );
+  }
+
+  /// 任务展示排序：进行中 > 排队 > 做种 > 暂停 > 错误 > 已完成。
+  static int _taskPriority(MagnetDownloadEntry task) {
+    if (task.isDownloading) return 0;
+    if (task.isQueued) return 1;
+    if (task.isSeeding) return 2;
+    if (task.isPaused) return 3;
+    if (task.isError) return 4;
+    return 5;
+  }
+
+  static int _compareTasksForDisplay(
+      MagnetDownloadEntry a, MagnetDownloadEntry b) {
+    final pa = _taskPriority(a);
+    final pb = _taskPriority(b);
+    if (pa != pb) return pa.compareTo(pb);
+    return a.title.compareTo(b.title);
+  }
+
+  /// 分组优先级：组内有进行中 / 排队任务时排前面。
+  static int _groupPriority(_DownloadGroup group) {
+    var priority = 5;
+    for (final task in group.tasks) {
+      priority = priority < _taskPriority(task) ? priority : _taskPriority(task);
+    }
+    return priority;
+  }
+
+  Widget _buildTaskTile(BuildContext context, MagnetDownloadEntry task) {
+    return _DownloadTaskTile(
+      task: task,
+      onPause: () => widget.controller.pauseDownload(task.taskId),
+      onResume: () => widget.controller.resumeDownload(task.taskId),
+      onRemove: () => _confirmRemove(context, task),
+      onSelectFiles: task.totalLength > 0
+          ? () => _showFileSelection(task)
+          : null,
+      onMatchAnime: task.scrapePending
+          ? () => _showMatchAnimeDialog(context, task)
+          : null,
+      onRescrape: task.scrapePending
+          ? () => widget.controller.rescrapeDownload(task.taskId)
+          : null,
+      onStream: task.files.any((f) => f.isStreamable)
+          ? () => _showStreamSelection(context, task)
+          : null,
+      onRetry: task.isError
+          ? () => widget.controller.retryDownload(task.taskId)
+          : null,
+      onRecheck: (task.isActive || task.isPaused) && task.totalLength > 0
+          ? () => _recheckTask(context, task)
+          : null,
+    );
+  }
+
+  /// 分组「缺集检测」：对比组内已下载集数与 Bangumi 正片集数，
+  /// 点击缺失集数跳转磁力搜索补集。
+  Future<void> _showGroupMissingEpisodes(
+      BuildContext context, _DownloadGroup group) async {
+    final bangumiId = group.bangumiId;
+    if (bangumiId == null) return;
+    final downloaded = <int>{};
+    for (final task in group.tasks) {
+      final selected = task.selectedFileIndexes?.toSet();
+      if (task.importedPath.isNotEmpty) {
+        // 已入库：文件被移入媒体库，原下载路径不再存在，所选文件视为已有。
+        for (final file in task.files) {
+          if (selected != null && !selected.contains(file.index)) continue;
+          final ep = parseLocalEpisodeNumber(file.name);
+          if (ep > 0) downloaded.add(ep);
+        }
+        continue;
+      }
+      for (final file in task.files) {
+        if (selected != null && !selected.contains(file.index)) continue;
+        final ep = parseLocalEpisodeNumber(file.name);
+        if (ep <= 0) continue;
+        // 只统计真实落盘的文件：种子文件清单 ≠ 已下载文件（全集包只勾选
+        // 下载前几集时，全量清单会让「缺集检测」误报为无缺集）。
+        final absolutePath = task.absolutePathFor(file);
+        if (absolutePath == null || !File(absolutePath).existsSync()) {
+          continue;
+        }
+        downloaded.add(ep);
+      }
+    }
+    List<int> missing;
+    try {
+      final episodes = await BangumiApi.getBangumiEpisodesByID(bangumiId);
+      final maxHave = downloaded.isEmpty ? 0 : downloaded.reduce((a, b) => a > b ? a : b);
+      missing = [
+        for (final e in episodes)
+          if (e.type == 0 &&
+              e.episode.toInt() > 0 &&
+              !downloaded.contains(e.episode.toInt()) &&
+              (maxHave == 0 || e.episode.toInt() <= maxHave + 12))
+            e.episode.toInt(),
+      ]..sort();
+    } catch (e) {
+      KazumiLogger().w('MagnetDownloadsTab: missing episodes query failed', error: e);
+      KazumiDialog.showToast(message: '获取集数信息失败，请检查网络');
+      return;
+    }
+    if (!mounted || !context.mounted) return;
+    final theme = Theme.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('「${group.title}」缺集（${missing.length}）',
+                  style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text('点击集数前往磁力搜索补集', style: theme.textTheme.bodySmall),
+              const SizedBox(height: 12),
+              if (missing.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle_outline_rounded,
+                          color: theme.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      const Text('未发现缺集'),
+                    ],
+                  ),
+                )
+              else
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final ep in missing)
+                          ActionChip(
+                            label: Text('第$ep话'),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              context.pushNamed(
+                                '/magnet/',
+                                arguments: MagnetSearchRouteArgs(
+                                  query: '${group.title} ${ep.toString().padLeft(2, '0')}',
+                                  anime: group.toBangumiItem(),
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 清除全部已完成记录的确认对话框。
+  Future<void> _confirmClearCompleted(BuildContext context) async {
+    final theme = Theme.of(context);
+    final confirmed = await KazumiDialog.show<bool>(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('清除已完成记录'),
+        content: Text(
+          '将移除所有已完成任务的历史记录，磁盘上的文件会保留。',
+          style: theme.textTheme.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: theme.colorScheme.error,
+            ),
+            onPressed: () => KazumiDialog.dismiss(popWith: true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final count = await widget.controller.clearCompletedDownloads();
+    if (mounted) {
+      KazumiDialog.showToast(message: '已清除 $count 条已完成记录');
+    }
   }
 
   /// 手动添加磁力链接 / .torrent（URL 或本地文件）。
@@ -1093,6 +1482,32 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 12),
+              if (task.importedPath.isNotEmpty) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogContext)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.folder_open_rounded, size: 16),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '该任务文件已自动移入媒体库，删除任务不会影响已入库的文件。',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               CheckboxListTile(
                 value: deleteFiles,
                 onChanged: (v) =>
@@ -1128,6 +1543,138 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
           ],
         ),
       ),
+    );
+  }
+
+  /// 手动校验任务文件。
+  Future<void> _recheckTask(BuildContext context, MagnetDownloadEntry task) async {
+    final ok = await widget.controller.recheckDownload(task.taskId);
+    if (!mounted) return;
+    KazumiDialog.showToast(
+      message: ok ? '已提交校验，请稍候查看进度' : '校验失败：任务未挂载到引擎',
+    );
+  }
+
+  /// 「待确认」任务手动匹配番剧：搜索 Bangumi 并写入任务。
+  Future<void> _showMatchAnimeDialog(
+      BuildContext context, MagnetDownloadEntry task) async {
+    final scraper = MediaScraper();
+    final initial =
+        scraper.cleanName(task.fileName.isNotEmpty ? task.fileName : task.title);
+    final item = await showModalBottomSheet<BangumiItem>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _MatchAnimeSheet(
+        controller: widget.controller,
+        initialKeyword: initial,
+      ),
+    );
+    if (item == null || !mounted) return;
+    await widget.controller.matchDownloadToBangumi(task.taskId, item);
+  }
+
+  /// 边下边播：选择种子内可流式播放的文件，启动引擎流后跳转播放页。
+  Future<void> _showStreamSelection(
+      BuildContext context, MagnetDownloadEntry task) async {
+    final files = await widget.controller.listDownloadFiles(task.taskId);
+    if (!context.mounted) return;
+    final streamable = files.where((f) => f.isStreamable).toList();
+    if (streamable.isEmpty) {
+      KazumiDialog.showToast(message: '没有可流式播放的文件（元数据可能未就绪）');
+      return;
+    }
+    FileInfo target;
+    if (streamable.length == 1) {
+      target = streamable.first;
+    } else {
+      final picked = await showModalBottomSheet<FileInfo>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '选择要边下边播的文件',
+                    style: Theme.of(sheetContext).textTheme.titleSmall,
+                  ),
+                ),
+              ),
+              ...streamable.map(
+                (f) => ListTile(
+                  leading: const Icon(Icons.ondemand_video_rounded),
+                  title: Text(f.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.pop(sheetContext, f),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      );
+      if (picked == null || !context.mounted) return;
+      target = picked;
+    }
+    final url = await widget.controller.startStream(task.taskId, target.index);
+    if (!context.mounted) return;
+    if (url == null) {
+      KazumiDialog.showToast(message: '启动边下边播失败，请检查引擎状态');
+      return;
+    }
+    final bangumiItem = task.scrapeInfo != null
+        ? task.scrapeInfo!.toBangumiItem()
+        : _magnetPlaceholderBangumiItem(task);
+    await context.pushNamed(
+      '/video/',
+      arguments: MagnetStreamVideoPlaybackArgs(
+        bangumiItem: bangumiItem,
+        streamUrl: url,
+        fileName: target.name,
+      ),
+    );
+    // 播放页退出后停止该任务的流服务器（HTTP 端口 / 预读缓存随之释放），
+    // 否则每个流会话永久驻留直至任务删除。
+    if (context.mounted) {
+      widget.controller.stopStreams(task.taskId);
+    }
+  }
+
+  /// 未搜刮任务边下边播时使用的占位 BangumiItem：
+  /// 负值哈希 ID 保证不触发 Bangumi 远端查询，仍可按标题检索弹幕。
+  BangumiItem _magnetPlaceholderBangumiItem(MagnetDownloadEntry task) {
+    final name = task.title.isNotEmpty ? task.title : task.fileName;
+    var h = 0;
+    for (final code in name.codeUnits) {
+      h = (h * 31 + code) & 0x7FFFFFFF;
+    }
+    final id = h == 0 ? -1 : -h;
+    return BangumiItem(
+      id: id,
+      type: 2,
+      name: name,
+      nameCn: name,
+      summary: '',
+      airDate: '',
+      airWeekday: 0,
+      rank: 0,
+      images: {
+        'large': '',
+        'common': '',
+        'medium': '',
+        'small': '',
+        'grid': '',
+      },
+      tags: const [],
+      alias: const [],
+      ratingScore: 0,
+      votes: 0,
+      votesCount: const [],
+      info: '',
     );
   }
 
@@ -1241,6 +1788,263 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   }
 }
 
+/// 一个按番剧聚合的下载任务分组。
+class _DownloadGroup {
+  _DownloadGroup({
+    required this.title,
+    required this.coverUrl,
+    required this.bangumiId,
+    required this.tasks,
+  });
+
+  final String title;
+  final String coverUrl;
+  final int? bangumiId;
+  final List<MagnetDownloadEntry> tasks;
+
+  /// 分组的稳定键（用于 State 复用与折叠状态记忆）。
+  String get key =>
+      bangumiId != null ? 'bgm:$bangumiId' : 'raw:${title.toLowerCase()}';
+
+  int get count => tasks.length;
+
+  bool get hasActive =>
+      tasks.any((t) => t.isDownloading || t.isQueued || t.isSeeding);
+
+  BangumiItem? toBangumiItem() {
+    for (final task in tasks) {
+      final info = task.scrapeInfo;
+      if (info != null) return info.toBangumiItem();
+    }
+    return null;
+  }
+}
+
+/// 分组头部 + 折叠的任务条目列表。
+class _DownloadGroupSection extends StatefulWidget {
+  const _DownloadGroupSection({
+    super.key,
+    required this.group,
+    required this.buildTaskTile,
+    required this.onMissingEpisodes,
+  });
+
+  final _DownloadGroup group;
+  final Widget Function(BuildContext context, MagnetDownloadEntry task)
+      buildTaskTile;
+
+  /// 点击「缺集」时触发（由外层 Tab 执行 Bangumi 查询与跳转）。
+  final void Function(_DownloadGroup group) onMissingEpisodes;
+
+  @override
+  State<_DownloadGroupSection> createState() => _DownloadGroupSectionState();
+}
+
+class _DownloadGroupSectionState extends State<_DownloadGroupSection> {
+  late bool _expanded = widget.group.hasActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final group = widget.group;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          onTap: () => setState(() => _expanded = !_expanded),
+          leading: group.coverUrl.isNotEmpty
+              ? SizedBox(
+                  width: 36,
+                  height: 50,
+                  child: NetworkImgLayer(
+                      src: group.coverUrl, width: 36, height: 50),
+                )
+              : const Icon(Icons.movie_outlined),
+          title: Text(
+            group.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall,
+          ),
+          subtitle: Text(
+            '${group.count} 个任务',
+            style: theme.textTheme.bodySmall,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (group.bangumiId != null)
+                TextButton(
+                  onPressed: () => widget.onMissingEpisodes(group),
+                  child: const Text('缺集'),
+                ),
+              Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+            ],
+          ),
+        ),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Column(
+              children: [
+                for (final task in group.tasks)
+                  widget.buildTaskTile(context, task),
+              ],
+            ),
+          ),
+        const Divider(height: 1),
+      ],
+    );
+  }
+}
+
+/// 「待确认」下载任务的手动匹配面板：搜索 Bangumi 番剧并返回选中条目。
+class _MatchAnimeSheet extends StatefulWidget {
+  const _MatchAnimeSheet({
+    required this.controller,
+    required this.initialKeyword,
+  });
+
+  final MagnetController controller;
+  final String initialKeyword;
+
+  @override
+  State<_MatchAnimeSheet> createState() => _MatchAnimeSheetState();
+}
+
+class _MatchAnimeSheetState extends State<_MatchAnimeSheet> {
+  late final TextEditingController _keywordCtrl;
+  List<BangumiItem> _results = const [];
+  bool _searching = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _keywordCtrl = TextEditingController(text: widget.initialKeyword);
+    _search();
+  }
+
+  @override
+  void dispose() {
+    _keywordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final keyword = _keywordCtrl.text.trim();
+    if (keyword.isEmpty) return;
+    setState(() {
+      _searching = true;
+      _error = null;
+    });
+    final items = await widget.controller.searchBangumi(keyword);
+    if (!mounted) return;
+    setState(() {
+      _searching = false;
+      _results = items;
+      if (items.isEmpty) {
+        _error = '没有找到相关番剧，试试更换关键词';
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text('匹配番剧', style: theme.textTheme.titleMedium),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _keywordCtrl,
+                      decoration: const InputDecoration(
+                        hintText: '搜索番剧关键词',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => _search(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    onPressed: _searching ? null : _search,
+                    icon: const Icon(Icons.search_rounded),
+                    tooltip: '搜索',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _searching
+                  ? const Center(child: CircularProgressIndicator())
+                  : _results.isEmpty
+                      ? Center(
+                          child: Text(
+                            _error ?? '输入关键词搜索 Bangumi',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: _results.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final item = _results[index];
+                            final cover =
+                                item.images['large'] ?? item.images['common'];
+                            return ListTile(
+                              onTap: () => Navigator.pop(context, item),
+                              leading: (cover != null && cover.isNotEmpty)
+                                  ? SizedBox(
+                                      width: 36,
+                                      height: 48,
+                                      child: NetworkImgLayer(
+                                        src: cover,
+                                        width: 36,
+                                        height: 48,
+                                      ),
+                                    )
+                                  : null,
+                              title: Text(
+                                item.nameCn.isNotEmpty
+                                    ? item.nameCn
+                                    : item.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: item.airDate.isNotEmpty
+                                  ? Text(item.airDate)
+                                  : null,
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DownloadTaskTile extends StatelessWidget {
   const _DownloadTaskTile({
     required this.task,
@@ -1248,6 +2052,11 @@ class _DownloadTaskTile extends StatelessWidget {
     required this.onResume,
     required this.onRemove,
     this.onSelectFiles,
+    this.onMatchAnime,
+    this.onRescrape,
+    this.onStream,
+    this.onRetry,
+    this.onRecheck,
   });
 
   final MagnetDownloadEntry task;
@@ -1257,6 +2066,21 @@ class _DownloadTaskTile extends StatelessWidget {
 
   /// 元数据就绪后可用的「选择下载文件」回调。
   final VoidCallback? onSelectFiles;
+
+  /// 「待确认」任务可用的「匹配番剧」回调。
+  final VoidCallback? onMatchAnime;
+
+  /// 「待确认」任务可用的「重新搜刮」回调。
+  final VoidCallback? onRescrape;
+
+  /// 元数据就绪后可用的「边下边播」回调。
+  final VoidCallback? onStream;
+
+  /// 错误任务可用的「重试」回调。
+  final VoidCallback? onRetry;
+
+  /// 元数据就绪后可用的「校验文件」回调。
+  final VoidCallback? onRecheck;
 
   void _openAnimePage(BuildContext context) {
     final info = task.scrapeInfo;
@@ -1305,6 +2129,37 @@ class _DownloadTaskTile extends StatelessWidget {
                 '已搜刮',
                 style: theme.textTheme.labelSmall
                     ?.copyWith(color: theme.colorScheme.primary),
+              ),
+            ),
+          ] else if (task.scrapePending) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.tertiary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '待确认',
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: theme.colorScheme.tertiary),
+              ),
+            ),
+          ],
+          if (task.importedPath.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '已入库',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: Colors.green.shade700,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -1410,15 +2265,42 @@ class _DownloadTaskTile extends StatelessWidget {
             case 'files':
               onSelectFiles?.call();
               break;
+            case 'match':
+              onMatchAnime?.call();
+              break;
+            case 'rescrape':
+              onRescrape?.call();
+              break;
+            case 'stream':
+              onStream?.call();
+              break;
+            case 'retry':
+              onRetry?.call();
+              break;
+            case 'recheck':
+              onRecheck?.call();
+              break;
           }
         },
         itemBuilder: (context) => [
+          if (onStream != null)
+            const PopupMenuItem(value: 'stream', child: Text('边下边播')),
           if (task.isActive)
             const PopupMenuItem(value: 'pause', child: Text('暂停')),
           if (task.isPaused)
             const PopupMenuItem(value: 'resume', child: Text('继续')),
+          if (task.isQueued)
+            const PopupMenuItem(value: 'resume', child: Text('立即开始')),
+          if (task.isError)
+            const PopupMenuItem(value: 'retry', child: Text('重试')),
+          if (onRecheck != null)
+            const PopupMenuItem(value: 'recheck', child: Text('校验文件')),
           if (onSelectFiles != null)
             const PopupMenuItem(value: 'files', child: Text('选择下载文件')),
+          if (onMatchAnime != null)
+            const PopupMenuItem(value: 'match', child: Text('匹配番剧')),
+          if (onRescrape != null)
+            const PopupMenuItem(value: 'rescrape', child: Text('重新搜刮')),
           const PopupMenuItem(value: 'remove', child: Text('删除')),
         ],
       ),
@@ -1437,6 +2319,7 @@ class _StatusChip extends StatelessWidget {
     final (label, color) = switch (status) {
       'active' => ('下载中', theme.colorScheme.primary),
       'waiting' => ('等待中', theme.colorScheme.tertiary),
+      'queued' => ('排队中', theme.colorScheme.tertiary),
       'metadata' => ('获取元数据中', theme.colorScheme.tertiary),
       'checking' => ('校验进度中', theme.colorScheme.tertiary),
       'seeding' => ('做种中', theme.colorScheme.tertiary),
@@ -1612,7 +2495,7 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
       return (s.trim().isEmpty || v == null) ? null : v;
     }
 
-    final sub = MagnetSubscription(
+    var sub = MagnetSubscription(
       id: widget.existing?.id ?? '',
       name: _nameCtrl.text.trim(),
       feedUrl: _feedCtrl.text.trim(),
@@ -1626,13 +2509,34 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
       maxSizeMb: parseMb(_maxSizeCtrl.text),
       downloadPath:
           _pathCtrl.text.trim().isEmpty ? null : _pathCtrl.text.trim(),
+      coverUrl: widget.existing?.coverUrl ?? '',
     );
+    if (sub.coverUrl.isEmpty) {
+      final cover = await _resolveCover(sub);
+      if (cover != null) sub = sub.copyWith(coverUrl: cover);
+    }
     if (widget.existing == null) {
       await widget.controller.addSubscription(sub);
     } else {
       await widget.controller.updateSubscription(sub);
     }
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// 通过 Bangumi 搜索解析订阅的番剧封面，失败时返回 null。
+  Future<String?> _resolveCover(MagnetSubscription sub) async {
+    final keyword = sub.name.isNotEmpty ? sub.name : sub.feedUrl;
+    if (keyword.isEmpty) return null;
+    try {
+      final page = await BangumiApi.bangumiSearch(keyword, limit: 5);
+      if (page == null || page.items.isEmpty) return null;
+      final item = page.items.first;
+      final cover = item.images['large'] ?? item.images['common'] ?? '';
+      return cover.isEmpty ? null : cover;
+    } catch (e) {
+      KazumiLogger().w('MagnetSubscription: resolve cover failed', error: e);
+      return null;
+    }
   }
 
   @override
@@ -1645,9 +2549,6 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        actions: [
-          TextButton(onPressed: _save, child: const Text('保存')),
-        ],
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1799,6 +2700,23 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
             ),
           ],
           const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _save,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                child: const Text('保存'),
+              ),
+            ),
+          ),
         ],
       ),
     );

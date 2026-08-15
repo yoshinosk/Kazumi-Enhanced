@@ -135,7 +135,9 @@ dependencies:
       path: ./libs/universal/media_kit_libs_video
   macos_secure_bookmarks: ^0.2.1
   libtorrent_flutter: ^1.9.2
-
+  awesome_notifications: ^0.12.1
+  local_notifier: ^0.1.6
+  watcher: ^1.2.1
 dependency_overrides:
   # Kazumi 本地 vendor：续做种修复（原生层 no_recheck_incomplete_resume 翻转，
   # 见 third_party/libtorrent_flutter/README 与「重启续做种实施方案」）。

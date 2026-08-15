@@ -6,6 +6,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/storage/storage.dart';
@@ -27,6 +28,12 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late int maxPeers;
   late int maxUploadLimitKb;
   late int maxDownloadLimitKb;
+  late int maxActiveDownloads;
+  late bool scheduledLimitEnabled;
+  late String scheduledLimitStart;
+  late String scheduledLimitEnd;
+  late int scheduledLimitKb;
+  late bool wifiOnly;
   late String seedingStopMode;
   late int seedingStopHours;
   late double seedingStopRatio;
@@ -39,10 +46,18 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late String trackerSources;
   late bool autoImportToLibrary;
   late String autoImportRoot;
+  late bool autoScrapeOnComplete;
+  late double autoImportConfidence;
   late bool syncBangumiProgress;
+  late bool thumbnailsEnabled;
+  late bool watchFolderEnabled;
+  late bool diskSpaceCheck;
+  late bool groupDownloads;
   bool isPickingDir = false;
 
   MagnetController get _controller => inject<MagnetController>();
+
+  MediaController get _mediaController => inject<MediaController>();
 
   @override
   void initState() {
@@ -64,6 +79,17 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     maxUploadLimitKb = GStorage.getSetting(SettingsKeys.magnetMaxUploadLimitKb);
     maxDownloadLimitKb =
         GStorage.getSetting(SettingsKeys.magnetMaxDownloadLimitKb);
+    maxActiveDownloads =
+        GStorage.getSetting(SettingsKeys.magnetMaxActiveDownloads);
+    scheduledLimitEnabled =
+        GStorage.getSetting(SettingsKeys.magnetScheduledLimitEnabled);
+    scheduledLimitStart =
+        GStorage.getSetting(SettingsKeys.magnetScheduledLimitStart);
+    scheduledLimitEnd =
+        GStorage.getSetting(SettingsKeys.magnetScheduledLimitEnd);
+    scheduledLimitKb =
+        GStorage.getSetting(SettingsKeys.magnetScheduledLimitKb);
+    wifiOnly = GStorage.getSetting(SettingsKeys.magnetWifiOnly);
     seedingStopMode = GStorage.getSetting(SettingsKeys.magnetSeedingStopMode);
     seedingStopHours = GStorage.getSetting(SettingsKeys.magnetSeedingStopHours);
     seedingStopRatio = GStorage.getSetting(SettingsKeys.magnetSeedingStopRatio);
@@ -77,8 +103,18 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     autoImportToLibrary =
         GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary);
     autoImportRoot = GStorage.getSetting(SettingsKeys.magnetAutoImportRoot);
+    autoScrapeOnComplete =
+        GStorage.getSetting(SettingsKeys.magnetAutoScrapeOnComplete);
+    autoImportConfidence =
+        GStorage.getSetting(SettingsKeys.magnetAutoImportConfidence);
     syncBangumiProgress =
         GStorage.getSetting(SettingsKeys.localMediaSyncBangumiProgress);
+    thumbnailsEnabled =
+        GStorage.getSetting(SettingsKeys.localMediaThumbnails);
+    watchFolderEnabled =
+        GStorage.getSetting(SettingsKeys.localMediaWatchFolder);
+    diskSpaceCheck = GStorage.getSetting(SettingsKeys.magnetDiskSpaceCheck);
+    groupDownloads = GStorage.getSetting(SettingsKeys.magnetGroupDownloads);
   }
 
   @override
@@ -92,6 +128,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
           if (engineEnabled) ...[
             _connectionSection(),
             _trackerSection(),
+            _downloadManageSection(),
             _libraryLinkSection(),
           ],
           _infoSection(),
@@ -250,6 +287,30 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             },
           ),
         ),
+        SettingsTile(
+          leading: Icons.format_list_numbered_rounded,
+          title: const Text('同时下载任务数'),
+          description: const Text('超出的任务自动排队，有任务完成时按添加顺序开始'),
+          value: DropdownButton<int>(
+            value: maxActiveDownloads,
+            underline: const SizedBox.shrink(),
+            isDense: true,
+            items: const [
+              DropdownMenuItem(value: 1, child: Text('1')),
+              DropdownMenuItem(value: 2, child: Text('2')),
+              DropdownMenuItem(value: 3, child: Text('3')),
+              DropdownMenuItem(value: 5, child: Text('5')),
+              DropdownMenuItem(value: 0, child: Text('不限')),
+            ],
+            onChanged: (value) async {
+              if (value == null) return;
+              setState(() => maxActiveDownloads = value);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetMaxActiveDownloads, value);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        ),
         SettingsSliderTile(
           title: const Text('全局上传限速'),
           description: const Text('0 表示不限制上传速度'),
@@ -283,6 +344,58 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             setState(() => maxDownloadLimitKb = rounded);
             await GStorage.putSetting(
                 SettingsKeys.magnetMaxDownloadLimitKb, rounded);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.schedule_rounded,
+          title: const Text('限速时段'),
+          description: const Text('在指定时间段内自动套用较低的下载限速（如白天限速、夜间全速）'),
+          initialValue: scheduledLimitEnabled,
+          onToggle: (value) async {
+            final v = value ?? scheduledLimitEnabled;
+            setState(() => scheduledLimitEnabled = v);
+            await GStorage.putSetting(
+                SettingsKeys.magnetScheduledLimitEnabled, v);
+            await _controller.applyMagnetSettingsChanged();
+          },
+        ),
+        if (scheduledLimitEnabled) ...[
+          SettingsTile(
+            leading: Icons.timer_outlined,
+            title: const Text('限速时段'),
+            description: Text('$scheduledLimitStart ～ $scheduledLimitEnd'
+                '（支持跨天，如 23:00 ～ 08:00）'),
+            onPressed: (_) => _pickLimitWindow(),
+          ),
+          SettingsSliderTile(
+            title: const Text('时段限速'),
+            description: const Text('时段内下载速度上限，0 表示不限'),
+            value: scheduledLimitKb.toDouble(),
+            valueLabel: scheduledLimitKb == 0
+                ? '不限'
+                : '$scheduledLimitKb KiB/s',
+            min: 0,
+            max: 8192,
+            divisions: 64,
+            onChanged: (v) async {
+              final rounded = v.round();
+              setState(() => scheduledLimitKb = rounded);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetScheduledLimitKb, rounded);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        ],
+        SettingsTile.switchTile(
+          leading: Icons.wifi_rounded,
+          title: const Text('仅 WiFi 下载'),
+          description: const Text('非 WiFi 网络下自动暂停磁力下载，恢复 WiFi 后自动继续'),
+          initialValue: wifiOnly,
+          onToggle: (value) async {
+            final v = value ?? wifiOnly;
+            setState(() => wifiOnly = v);
+            await GStorage.putSetting(SettingsKeys.magnetWifiOnly, v);
             await _controller.applyMagnetSettingsChanged();
           },
         ),
@@ -403,6 +516,37 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     );
   }
 
+  // ---------------- 下载管理 ----------------
+  Widget _downloadManageSection() {
+    return SettingsSection(
+      title: const Text('下载管理'),
+      tiles: [
+        SettingsTile.switchTile(
+          leading: Icons.group_work_outlined,
+          title: const Text('按番剧分组展示任务'),
+          description: const Text('下载页把同一部番的多个任务聚合为一组，方便查看缺集'),
+          initialValue: groupDownloads,
+          onToggle: (value) async {
+            final v = value ?? groupDownloads;
+            setState(() => groupDownloads = v);
+            await GStorage.putSetting(SettingsKeys.magnetGroupDownloads, v);
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.storage_outlined,
+          title: const Text('提交下载前检查磁盘空间'),
+          description: const Text('目标分区剩余空间不足时弹出确认，避免下载到一半失败'),
+          initialValue: diskSpaceCheck,
+          onToggle: (value) async {
+            final v = value ?? diskSpaceCheck;
+            setState(() => diskSpaceCheck = v);
+            await GStorage.putSetting(SettingsKeys.magnetDiskSpaceCheck, v);
+          },
+        ),
+      ],
+    );
+  }
+
   // ---------------- 媒体库联动 ----------------
   Widget _libraryLinkSection() {
     return SettingsSection(
@@ -434,6 +578,36 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             onPressed: (_) => _pickAutoImportRoot(),
           ),
         SettingsTile.switchTile(
+          leading: Icons.auto_awesome_rounded,
+          title: const Text('完成后自动搜刮番剧信息'),
+          description: const Text('未携带番剧信息的任务（订阅自动下载 / 手动添加）完成后按标题自动匹配，'
+              '未命中时标记「待确认」可在下载页手动匹配'),
+          initialValue: autoScrapeOnComplete,
+          onToggle: (value) async {
+            final v = value ?? autoScrapeOnComplete;
+            setState(() => autoScrapeOnComplete = v);
+            await GStorage.putSetting(
+                SettingsKeys.magnetAutoScrapeOnComplete, v);
+          },
+        ),
+        if (autoScrapeOnComplete)
+          SettingsSliderTile(
+            title: const Text('自动入库置信度阈值'),
+            description: const Text('自动搜刮匹配置信度达到该值才自动入库；'
+                '低于阈值只同步搜刮结果、不移动文件'),
+            value: autoImportConfidence,
+            valueLabel: autoImportConfidence.toStringAsFixed(1),
+            min: 0.5,
+            max: 1.0,
+            divisions: 10,
+            onChanged: (v) async {
+              final rounded = (v * 10).round() / 10.0;
+              setState(() => autoImportConfidence = rounded);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetAutoImportConfidence, rounded);
+            },
+          ),
+        SettingsTile.switchTile(
           leading: Icons.cloud_sync_rounded,
           title: const Text('本地看完联动 Bangumi 进度'),
           description: const Text('媒体库播完一集后，把 Bangumi 收藏的 EP 进度更新为该集数'),
@@ -443,6 +617,30 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             setState(() => syncBangumiProgress = v);
             await GStorage.putSetting(
                 SettingsKeys.localMediaSyncBangumiProgress, v);
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.image_outlined,
+          title: const Text('未匹配卡片视频缩略图'),
+          description: const Text('用 ffmpeg 为未匹配番剧的文件夹生成视频首帧缩略图，替代默认占位图标'),
+          initialValue: thumbnailsEnabled,
+          onToggle: (value) async {
+            final v = value ?? thumbnailsEnabled;
+            setState(() => thumbnailsEnabled = v);
+            await GStorage.putSetting(SettingsKeys.localMediaThumbnails, v);
+            await _mediaController.setThumbnailsEnabled(v);
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.watch_outlined,
+          title: const Text('监听媒体库目录变化'),
+          description: const Text('Windows 下实时感知文件新增 / 删除并自动重扫（Android 使用定时轮询）'),
+          initialValue: watchFolderEnabled,
+          onToggle: (value) async {
+            final v = value ?? watchFolderEnabled;
+            setState(() => watchFolderEnabled = v);
+            await GStorage.putSetting(SettingsKeys.localMediaWatchFolder, v);
+            await _mediaController.setWatchFolder(v);
           },
         ),
       ],
@@ -634,8 +832,43 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     await _controller.applyMagnetSettingsChanged();
   }
 
-  Future<void> _pickDownloadDir() async {
-    if (mounted) setState(() => isPickingDir = true);
+  /// 选择限速时段的起止时间。
+  Future<void> _pickLimitWindow() async {
+    TimeOfDay parse(String value) {
+      final parts = value.split(':');
+      final h = int.tryParse(parts.isNotEmpty ? parts[0] : '') ?? 0;
+      final m = int.tryParse(parts.length > 1 ? parts[1] : '') ?? 0;
+      return TimeOfDay(hour: h.clamp(0, 23), minute: m.clamp(0, 59));
+    }
+
+    final start = parse(scheduledLimitStart);
+    final end = parse(scheduledLimitEnd);
+    final pickedStart = await showTimePicker(
+      context: context,
+      initialTime: start,
+      helpText: '限速时段开始',
+    );
+    if (pickedStart == null || !mounted) return;
+    final pickedEnd = await showTimePicker(
+      context: context,
+      initialTime: end,
+      helpText: '限速时段结束',
+    );
+    if (pickedEnd == null || !mounted) return;
+    String fmt(TimeOfDay t) =>
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    setState(() {
+      scheduledLimitStart = fmt(pickedStart);
+      scheduledLimitEnd = fmt(pickedEnd);
+    });
+    await GStorage.putSetting(
+        SettingsKeys.magnetScheduledLimitStart, scheduledLimitStart);
+    await GStorage.putSetting(
+        SettingsKeys.magnetScheduledLimitEnd, scheduledLimitEnd);
+    await _controller.applyMagnetSettingsChanged();
+  }
+
+  Future<void> _pickDownloadDir() async {    if (mounted) setState(() => isPickingDir = true);
     try {
       final dir = await FilePicker.platform.getDirectoryPath(
         dialogTitle: '选择默认下载目录',

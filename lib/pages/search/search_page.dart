@@ -9,6 +9,7 @@ import 'package:kazumi/bean/widget/error_widget.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/search/search_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/media/local_availability_service.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/date_time.dart';
 import 'package:kazumi/utils/search_parser.dart';
@@ -386,26 +387,92 @@ class _SearchPageState extends State<SearchPage> {
                     .toList();
               }
 
-              return GridView.builder(
-                controller: scrollController,
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  mainAxisSpacing: StyleString.cardSpace - 2,
-                  crossAxisSpacing: StyleString.cardSpace,
-                  crossAxisCount: crossCount,
-                  mainAxisExtent:
-                      MediaQuery.of(context).size.width / crossCount / 0.65 +
-                          MediaQuery.textScalerOf(context).scale(32.0),
-                ),
-                itemCount: filteredList.isNotEmpty ? filteredList.length : 10,
-                itemBuilder: (context, index) {
-                  return filteredList.isNotEmpty
-                      ? BangumiCardV(
-                          enableHero: false,
-                          bangumiItem: filteredList[index],
-                        )
-                      : Container();
-                },
+              // 本地媒体库整合提示：结果中命中本地内容的番剧数。
+              // 批量统计一次遍历全库，避免逐结果重复线性扫描。
+              int localMatchedCount = 0;
+              if (filteredList.isNotEmpty) {
+                final availabilityService =
+                    inject<LocalAvailabilityService>();
+                final counts = availabilityService.availabilityCountsFor(
+                  filteredList.map((item) => item.id),
+                );
+                localMatchedCount = counts.values
+                    .where((count) => count > 0)
+                    .length;
+              }
+
+              return Column(
+                children: [
+                  if (localMatchedCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                      child: Material(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer
+                            .withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(10),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => context.pushNamed('/tab/media/'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.video_library_rounded,
+                                  size: 18,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '本地媒体库中有 $localMatchedCount 部匹配番剧，可直接离线播放',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color:
+                                      Theme.of(context).colorScheme.primary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: GridView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        mainAxisSpacing: StyleString.cardSpace - 2,
+                        crossAxisSpacing: StyleString.cardSpace,
+                        crossAxisCount: crossCount,
+                        mainAxisExtent:
+                            MediaQuery.of(context).size.width / crossCount / 0.65 +
+                                MediaQuery.textScalerOf(context).scale(32.0),
+                      ),
+                      itemCount:
+                          filteredList.isNotEmpty ? filteredList.length : 10,
+                      itemBuilder: (context, index) {
+                        return filteredList.isNotEmpty
+                            ? BangumiCardV(
+                                enableHero: false,
+                                bangumiItem: filteredList[index],
+                              )
+                            : Container();
+                      },
+                    ),
+                  ),
+                ],
               );
             }),
           ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
+import 'package:kazumi/modules/danmaku/danmaku_module.dart';
+import 'package:kazumi/pages/player/danmaku_offset_menu.dart';
 import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
@@ -8,8 +10,8 @@ import 'package:kazumi/request/apis/danmaku_api.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:mobx/mobx.dart' as mobx;
 
-/// 播放器侧边「弹幕」面板：展示当前弹幕绑定到哪部番剧的哪一集，
-/// 并列出当前番剧的所有弹幕分集供切换。
+/// 播放器侧边「弹幕」面板：展示当前弹幕池的弹幕列表（含弹幕时间轴
+/// 快速调整），并可查看/切换当前番剧的弹幕分集。
 class EpisodeDanmakuSheet extends StatefulWidget {
   const EpisodeDanmakuSheet({
     super.key,
@@ -28,6 +30,8 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
   List<DanmakuEpisode> _episodes = [];
   bool _episodesLoading = false;
   bool _episodesFailed = false;
+
+  int _bodyIndex = 0;
 
   PlayerController get playerController => widget.playerController;
 
@@ -185,6 +189,11 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
             ),
           ),
           const SizedBox(width: 10),
+          DanmakuOffsetMenu(
+            onChanged:
+                playerController.danmaku.clearAndInvalidateScheduledDanmakus,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
           SizedBox(
             height: 34,
             child: TextButton(
@@ -299,6 +308,192 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
     );
   }
 
+  Widget _buildSubTab(int index, String label) {
+    final bool selected = _bodyIndex == index;
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () {
+        if (selected) {
+          return;
+        }
+        setState(() {
+          _bodyIndex = index;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? colorScheme.secondaryContainer : null,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : null,
+            color: selected
+                ? colorScheme.onSecondaryContainer
+                : colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget get _subTabBar {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          _buildSubTab(0, '弹幕池'),
+          const SizedBox(width: 8),
+          _buildSubTab(1, '切换分集'),
+        ],
+      ),
+    );
+  }
+
+  Widget get _danmakuPoolBody {
+    final danmaku = playerController.danmaku;
+    if (danmaku.bangumiID <= 0 || danmaku.danDanmakus.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              danmaku.bangumiID <= 0
+                  ? Icons.subtitles_off_rounded
+                  : Icons.inbox_rounded,
+              size: 48,
+            ),
+            const SizedBox(height: 12),
+            Text(danmaku.bangumiID <= 0 ? '当前未绑定弹幕' : '当前弹幕池为空'),
+            const SizedBox(height: 4),
+            Text(
+              '弹幕加载完成后可在此查看弹幕池内容',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final offset = danmaku.timelineOffsetSeconds;
+    final items = <_DanmakuPoolItem>[];
+    danmaku.danDanmakus.forEach((second, list) {
+      for (final entry in list) {
+        items.add(_DanmakuPoolItem(second: second, entry: entry));
+      }
+    });
+    items.sort((a, b) {
+      final timeCompare = a.second.compareTo(b.second);
+      if (timeCompare != 0) {
+        return timeCompare;
+      }
+      return a.entry.message.compareTo(b.entry.message);
+    });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Text(
+            '共 ${items.length} 条弹幕',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          ),
+        ),
+        Divider(height: isDesktop() ? 0.5 : 0.2),
+        Expanded(
+          child: ListView.builder(
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              final colorScheme = Theme.of(context).colorScheme;
+              return ListTile(
+                dense: true,
+                leading: SizedBox(
+                  width: 52,
+                  child: Text(
+                    _formatPoolTime(item.second + offset),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: colorScheme.outline,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  item.entry.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                trailing: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _typeColor(colorScheme, item.entry.type)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _typeLabel(item.entry.type),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _typeColor(colorScheme, item.entry.type),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _typeLabel(int type) {
+    switch (type) {
+      case 4:
+        return '底部';
+      case 5:
+        return '顶部';
+      default:
+        return '滚动';
+    }
+  }
+
+  Color _typeColor(ColorScheme colorScheme, int type) {
+    switch (type) {
+      case 4:
+        return colorScheme.secondary;
+      case 5:
+        return colorScheme.tertiary;
+      default:
+        return colorScheme.primary;
+    }
+  }
+
+  String _formatPoolTime(double seconds) {
+    final total = seconds.round().clamp(0, 1 << 31);
+    final hours = total ~/ Duration.secondsPerHour;
+    final minutes =
+        (total % Duration.secondsPerHour) ~/ Duration.secondsPerMinute;
+    final rest = total % Duration.secondsPerMinute;
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = rest.toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -307,9 +502,23 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
         children: [
           _bindingInfo,
           Divider(height: isDesktop() ? 0.5 : 0.2),
-          Expanded(child: _episodeListBody),
+          _subTabBar,
+          const SizedBox(height: 4),
+          Expanded(
+            child: _bodyIndex == 0 ? _danmakuPoolBody : _episodeListBody,
+          ),
         ],
       ),
     );
   }
+}
+
+class _DanmakuPoolItem {
+  const _DanmakuPoolItem({
+    required this.second,
+    required this.entry,
+  });
+
+  final int second;
+  final DanmakuEntry entry;
 }

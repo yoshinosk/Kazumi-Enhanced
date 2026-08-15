@@ -81,6 +81,7 @@ class MagnetSubscriptionService {
       maxSizeMb: subscription.maxSizeMb,
       downloadPath: subscription.downloadPath,
       autoDownload: subscription.autoDownload,
+      coverUrl: subscription.coverUrl,
     );
     final items = await _fetchFeed(base);
     final newSub = base.copyWith(
@@ -129,6 +130,7 @@ class MagnetSubscriptionService {
           maxSizeMb: updated.maxSizeMb,
           downloadPath: updated.downloadPath,
           autoDownload: updated.autoDownload,
+          coverUrl: updated.coverUrl,
         );
       }
       return s;

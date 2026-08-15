@@ -16,6 +16,7 @@ import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
 import 'package:kazumi/services/download/background_download_service.dart';
+import 'package:kazumi/services/notification/app_notifications.dart';
 import 'package:kazumi/services/platform/windows_shortcut.dart';
 import 'package:kazumi/services/platform/platform_environment_service.dart';
 import 'package:kazumi/services/update/startup_update_check.dart';
@@ -61,6 +62,7 @@ class _InitPageState extends State<InitPage> {
   }
 
   Future<void> _initializeApp() async {
+    unawaited(AppNotifications.init());
     _migrateStorage();
     _loadShaders();
     _loadDanmakuShield();

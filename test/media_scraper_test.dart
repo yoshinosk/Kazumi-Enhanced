@@ -58,4 +58,35 @@ void main() {
       expect(scraper.parseYear('No year here'), isNull);
     });
   });
+
+  group('MediaScraper.isGenericTitle', () {
+    test('rejects placeholder names', () {
+      expect(scraper.isGenericTitle('test'), isTrue);
+      expect(scraper.isGenericTitle('Test'), isTrue);
+      expect(scraper.isGenericTitle('sample'), isTrue);
+      expect(scraper.isGenericTitle('download'), isTrue);
+      expect(scraper.isGenericTitle('新建文件夹'), isTrue);
+      expect(scraper.isGenericTitle('测试'), isTrue);
+      expect(scraper.isGenericTitle('未命名'), isTrue);
+    });
+
+    test('tolerates numeric and parenthesized suffixes', () {
+      expect(scraper.isGenericTitle('test1'), isTrue);
+      expect(scraper.isGenericTitle('test_01'), isTrue);
+      expect(scraper.isGenericTitle('测试2'), isTrue);
+      expect(scraper.isGenericTitle('新建文件夹(3)'), isTrue);
+    });
+
+    test('keeps real titles intact', () {
+      expect(scraper.isGenericTitle('86'), isFalse);
+      expect(scraper.isGenericTitle('Steins;Gate'), isFalse);
+      expect(scraper.isGenericTitle('命运石之门'), isFalse);
+      expect(scraper.isGenericTitle('铃芽之旅'), isFalse);
+      expect(scraper.isGenericTitle('BOCCHI THE ROCK! Season 1'), isFalse);
+    });
+
+    test('empty title is generic', () {
+      expect(scraper.isGenericTitle(''), isTrue);
+    });
+  });
 }

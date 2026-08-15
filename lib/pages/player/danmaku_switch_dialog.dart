@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
+import 'package:kazumi/pages/player/danmaku_axis_dialog.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/request/apis/danmaku_api.dart';
@@ -118,11 +119,10 @@ Future<void> showDanmakuEpisodePickerDialog({
                 itemCount: danmakuEpisodeResponse.episodes.length,
                 itemBuilder: (context, index) {
                   final episode = danmakuEpisodeResponse.episodes[index];
-                  final bool isCurrent =
-                      episode.episodeId ==
-                              playerController.danmaku.danmakuEpisodeId ||
-                          episode.episodeTitle ==
-                              playerController.danmaku.danmakuEpisodeTitle;
+                  final bool isCurrent = episode.episodeId ==
+                          playerController.danmaku.danmakuEpisodeId ||
+                      episode.episodeTitle ==
+                          playerController.danmaku.danmakuEpisodeTitle;
                   return ListTile(
                     selected: isCurrent,
                     title: Text(
@@ -182,14 +182,22 @@ Future<void> bindDanmakuToEpisode({
 }) async {
   try {
     videoPageController.cancelAutomaticDanmakuLoad();
-    final hasDanmakus = await playerController.danmaku
-        .getDanDanmakuByEpisodeID(
-            episode.episodeId,
-            animeTitle: animeTitle,
-            episodeTitle: episode.episodeTitle);
+    final hasDanmakus = await playerController.danmaku.getDanDanmakuByEpisodeID(
+        episode.episodeId,
+        animeTitle: animeTitle,
+        episodeTitle: episode.episodeTitle);
     if (hasDanmakus) {
       playerController.danmaku.setDanmakuEnabled(true);
       KazumiDialog.showToast(message: '弹幕切换成功');
+      await checkDanmakuAxisAlignment(
+        playerController: playerController,
+        videoPageController: videoPageController,
+        danmakus: playerController.danmaku.danDanmakus.values
+            .expand((danmakus) => danmakus)
+            .toList(),
+        shouldProceed: () =>
+            playerController.danmaku.danmakuEpisodeId == episode.episodeId,
+      );
     } else {
       playerController.danmaku.setDanmakuEnabled(false);
       KazumiDialog.showToast(message: '未找到弹幕内容');
@@ -208,8 +216,7 @@ Future<void> _searchDanmakuAndShowResult({
   KazumiDialog.showLoading(msg: '弹幕检索中');
   DanmakuSearchResponse danmakuSearchResponse;
   try {
-    danmakuSearchResponse =
-        await DanmakuApi.getDanmakuSearchResponse(keyword);
+    danmakuSearchResponse = await DanmakuApi.getDanmakuSearchResponse(keyword);
   } catch (e) {
     KazumiDialog.dismiss();
     KazumiDialog.showToast(message: '弹幕检索错误: ${e.toString()}');

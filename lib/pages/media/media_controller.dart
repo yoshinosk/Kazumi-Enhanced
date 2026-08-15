@@ -1,17 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:kazumi/repositories/history_repository.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/local_media_scanner.dart';
+import 'package:kazumi/services/media/media_folder_watcher.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
+import 'package:kazumi/services/media/video_frame_extractor.dart';
+import 'package:kazumi/services/platform/android_storage_access.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:mobx/mobx.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 part 'media_controller.g.dart';
 
@@ -33,8 +40,7 @@ class AnimeGroup {
 /// 与 [AnimeGroup] 的区别：已匹配番剧仍按番剧聚合成一张卡片，
 /// 但未匹配的文件夹会**逐个**拆成独立卡片 —— 网格是海报墙，
 /// 把上百个未匹配文件夹塞进同一张「未匹配」卡片毫无意义。
-class MediaGridItem {
-  const MediaGridItem({
+class MediaGridItem {  const MediaGridItem({
     this.info,
     required this.title,
     required this.folders,
@@ -62,6 +68,65 @@ class MediaGridItem {
       ];
 }
 
+/// 媒体库中一个文件的续播点：来自本地播放历史（adapterName='local'，
+/// episodePageUrl 精确匹配文件路径）。
+class MediaResumePoint {
+  const MediaResumePoint({
+    required this.folder,
+    required this.file,
+    required this.position,
+    required this.updatedAt,
+  });
+
+  /// 文件所在的媒体库文件夹（用于取选集列表）。
+  final LocalMediaFolder folder;
+
+  /// 上次播放的文件。
+  final LocalMediaFile file;
+
+  /// 上次播放位置（已看完时归零）。
+  final Duration position;
+
+  /// 最近一次进度更新时间。
+  final DateTime updatedAt;
+
+  /// 从文件名解析的集数（失败为 0）。
+  int get episode => parseLocalEpisodeNumber(file.name);
+
+  /// 内容相等判定：mapEquals 依赖它判断续播点缓存是否需要写回，
+  /// 缺失时内容相同的新实例恒不相等，observable 每帧重建触发观察者。
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MediaResumePoint &&
+          localMediaPathKey(other.folder.path) ==
+              localMediaPathKey(folder.path) &&
+          localMediaPathKey(other.file.path) ==
+              localMediaPathKey(file.path) &&
+          other.position == position &&
+          other.updatedAt == updatedAt;
+
+  @override
+  int get hashCode => Object.hash(
+        localMediaPathKey(folder.path),
+        localMediaPathKey(file.path),
+        position,
+        updatedAt,
+      );
+
+  /// 播放位置的可读展示（如 `12:34` / `1:02:03`）。
+  String get positionLabel {
+    final total = position.inSeconds;
+    if (total <= 0) return '';
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+  }
+}
+
 /// 从 `YYYY-MM-DD` / `YYYY-MM` / `YYYY` 形式的首播日期解析出可比较的整数键。
 ///
 /// 解析失败（空串或非法格式）返回 null，调用方需把这类条目排到末尾 ——
@@ -85,6 +150,18 @@ abstract class _MediaController with Store {
 
   final LocalMediaScanner _scanner;
   final MediaScraper _scraper;
+  final HistoryRepository _historyRepository = HistoryRepository();
+
+  /// Windows 目录监听（Android 走页面定时轮询），变化后自动重扫。
+  late final MediaFolderWatcher _folderWatcher =
+      MediaFolderWatcher(onChanged: () => unawaited(scan()));
+
+  /// 历史记录变化订阅（用于刷新续播点）。
+  StreamSubscription<void>? _historyChangesSub;
+
+  /// 未匹配文件夹的视频首帧缩略图缓存（文件夹路径 → JPEG 路径）。
+  @observable
+  ObservableMap<String, String> thumbnails = ObservableMap();
 
   @observable
   ObservableList<String> folders = ObservableList();
@@ -97,6 +174,13 @@ abstract class _MediaController with Store {
 
   @observable
   ObservableMap<String, MediaScrapeInfo> scrapeResults = ObservableMap();
+
+  /// 单个文件的搜刮结果（文件路径 → 番剧信息），优先级高于文件夹级结果。
+  ///
+  /// 混合目录中单个文件（如 SP / 特典）与文件夹匹配的番剧不同时，
+  /// 用户可只对该文件重新匹配，播放时以文件级结果为准。
+  @observable
+  ObservableMap<String, MediaScrapeInfo> fileScrapeResults = ObservableMap();
 
   @observable
   bool isScraping = false;
@@ -122,6 +206,11 @@ abstract class _MediaController with Store {
   /// 当前正在使用的搜索关键词。
   @observable
   String scrapeKeyword = '';
+
+  /// 续播点缓存：文件夹路径键 → 该文件夹内最新的续播点。
+  /// 随本地播放历史变化自动刷新，驱动卡片「续播」角标。
+  @observable
+  ObservableMap<String, MediaResumePoint> resumePoints = ObservableMap();
 
   /// 是否请求取消当前搜刮。
   bool _scrapeCancelRequested = false;
@@ -184,10 +273,163 @@ abstract class _MediaController with Store {
   Future<void> init() async {
     folders = ObservableList.of(LocalMediaFolderStore.load());
     scrapeResults = ObservableMap.of(MediaScrapeStore.load());
+    fileScrapeResults = ObservableMap.of(MediaScrapeStore.loadFileResults());
+    _historyChangesSub ??= _historyRepository.changes.listen((_) {
+      _refreshResumePoints();
+    });
+    _refreshResumePoints();
     if (folders.isNotEmpty) {
+      // Android 需要读取共享存储视频的运行时权限；用户已配置过文件夹，
+      // 启动时静默检查并补请求（一次系统弹窗，授权后正常扫描）。
+      await _ensureAndroidReadAccess();
       // 不阻塞启动流程：扫描在后台进行，媒体库页通过 isScanning 展示进度。
       unawaited(scan());
     }
+    _syncFolderWatcher();
+  }
+
+  /// 按设置同步 Windows 目录监听（文件夹列表变化 / 设置开关变化时调用）。
+  void _syncFolderWatcher() {
+    final enabled = GStorage.getSetting(SettingsKeys.localMediaWatchFolder);
+    if (enabled && folders.isNotEmpty) {
+      _folderWatcher.start(folders.toList());
+    } else {
+      _folderWatcher.stop();
+    }
+  }
+
+  /// 切换 Windows 目录监听开关。
+  @action
+  Future<void> setWatchFolder(bool value) async {
+    await GStorage.putSetting(SettingsKeys.localMediaWatchFolder, value);
+    _syncFolderWatcher();
+  }
+
+  /// 切换未匹配卡片缩略图开关（开启时立即为未匹配文件夹补生成）。
+  @action
+  Future<void> setThumbnailsEnabled(bool value) async {
+    await GStorage.putSetting(SettingsKeys.localMediaThumbnails, value);
+    if (value) {
+      unawaited(_generateMissingThumbnails());
+    } else {
+      thumbnails.clear();
+    }
+  }
+
+  /// 从本地播放历史重建续播点缓存（按 episodePageUrl 精确匹配文件路径，
+  /// 同一文件夹只保留最近更新的那一条）。
+  @action
+  void _refreshResumePoints() {
+    final byFile = <String, ({LocalMediaFolder folder, LocalMediaFile file})>{};
+    for (final folder in library) {
+      for (final file in folder.files) {
+        byFile[localMediaPathKey(file.path)] = (folder: folder, file: file);
+      }
+    }
+    final latest = <String, MediaResumePoint>{};
+    try {
+      for (final history in _historyRepository.getAllHistories()) {
+        if (!isLocalMediaHistory(history)) continue;
+        if (history.episodePageUrl.isEmpty) continue;
+        final target = byFile[localMediaPathKey(history.episodePageUrl)];
+        if (target == null) continue;
+        final progress = history.progresses[history.lastWatchEpisode];
+        final updatedAt = DateTime.fromMillisecondsSinceEpoch(
+          progress?.effectiveUpdatedAtMs(history.lastWatchTime) ?? 0,
+        );
+        final folderKey = localMediaPathKey(target.folder.path);
+        final existing = latest[folderKey];
+        if (existing == null || updatedAt.isAfter(existing.updatedAt)) {
+          latest[folderKey] = MediaResumePoint(
+            folder: target.folder,
+            file: target.file,
+            position: progress?.progress ?? Duration.zero,
+            updatedAt: updatedAt,
+          );
+        }
+      }
+    } catch (e) {
+      KazumiLogger().w('MediaController: refresh resume points failed', error: e);
+    }
+    if (!mapEquals(latest, Map.from(resumePoints))) {
+      resumePoints = ObservableMap.of(latest);
+    }
+  }
+
+  /// 修复以占位番剧落库的本地播放历史条目。
+  ///
+  /// 旧版本在文件尚未匹配时直接播放，会以标题哈希的占位 BangumiItem
+  /// 记录历史（id <= 0）；文件夹随后搜刮匹配到真实番剧后，旧条目不会
+  /// 自动更新，导致历史页显示占位标题、无法联动 Bangumi 进度。此处把
+  /// 这类条目按 episodePageUrl 找到所在文件夹，迁移到真实番剧的 key 下
+  /// 与既有条目合并。每次扫描后运行，占位条目迁移完毕即空跑退出。
+  Future<void> _repairPlaceholderHistories() async {
+    try {
+      final placeholders = _historyRepository
+          .getAllHistories()
+          .where(isLocalMediaHistory)
+          .where((h) => h.bangumiItem.id <= 0 && h.episodePageUrl.isNotEmpty)
+          .toList();
+      if (placeholders.isEmpty) return;
+      final byFile = <String, LocalMediaFolder>{};
+      for (final folder in library) {
+        for (final file in folder.files) {
+          byFile[localMediaPathKey(file.path)] = folder;
+        }
+      }
+      var repaired = false;
+      for (final history in placeholders) {
+        final folder = byFile[localMediaPathKey(history.episodePageUrl)];
+        if (folder == null) continue;
+        final info = scrapeResults[folder.path];
+        if (info == null || info.bangumiId == null) continue;
+        final progress = history.progresses[history.lastWatchEpisode];
+        await _historyRepository.updateHistory(
+          identity: PlaybackHistoryIdentity.offline(
+            bangumiItem: info.toBangumiItem(),
+            pluginName: kLocalMediaAdapterName,
+            episodeNumber: history.lastWatchEpisode,
+            episodeTitle: history.lastWatchEpisodeName,
+            road: 0,
+            episodePageUrl: history.episodePageUrl,
+          ),
+          progress: progress?.progress ?? Duration.zero,
+        );
+        await _historyRepository.deleteHistory(history);
+        repaired = true;
+        KazumiLogger().i(
+            'MediaController: repaired placeholder history of ${history.episodePageUrl}');
+      }
+      if (repaired) {
+        _refreshResumePoints();
+      }
+    } catch (e) {
+      KazumiLogger()
+          .w('MediaController: repair placeholder histories failed', error: e);
+    }
+  }
+
+  /// 单个文件夹的续播点（无则 null）。
+  MediaResumePoint? resumePointFor(LocalMediaFolder folder) =>
+      resumePoints[localMediaPathKey(folder.path)];
+
+  /// 一组文件夹（同一番剧多季 / 多目录）中最近更新的续播点。
+  MediaResumePoint? resumePointForFolders(List<LocalMediaFolder> folders) {
+    MediaResumePoint? best;
+    for (final folder in folders) {
+      final r = resumePoints[localMediaPathKey(folder.path)];
+      if (r != null && (best == null || r.updatedAt.isAfter(best.updatedAt))) {
+        best = r;
+      }
+    }
+    return best;
+  }
+
+  /// Android：确保已授予媒体视频读取权限（无权限时请求一次）。
+  Future<void> _ensureAndroidReadAccess() async {
+    if (!Platform.isAndroid) return;
+    if (await AndroidStorageAccess.hasMediaReadPermission()) return;
+    await AndroidStorageAccess.requestMediaReadPermission();
   }
 
   @action
@@ -198,8 +440,26 @@ abstract class _MediaController with Store {
       KazumiDialog.showToast(message: '该文件夹已添加');
       return;
     }
+    if (Platform.isAndroid) {
+      if (!await AndroidStorageAccess.hasMediaReadPermission()) {
+        final granted = await AndroidStorageAccess.requestMediaReadPermission();
+        if (!granted) {
+          KazumiDialog.showToast(
+              message: '未授予存储读取权限，无法扫描本地视频，请在系统设置中允许');
+          return;
+        }
+      }
+      if (!await AndroidStorageAccess.hasAllFilesAccess()) {
+        // 仅读取权限下共享存储目录只暴露视频文件；提示用户可开启
+        // 全文件访问以支持遍历任意目录（如包含外挂字幕等非视频文件）。
+        KazumiDialog.showToast(
+            message: '提示：可开启「所有文件访问」权限以获得完整目录遍历能力',
+            duration: const Duration(seconds: 3));
+      }
+    }
     folders.add(path);
     await LocalMediaFolderStore.save(folders.toList());
+    _syncFolderWatcher();
     await scan();
   }
 
@@ -218,6 +478,16 @@ abstract class _MediaController with Store {
       }
       await MediaScrapeStore.save(scrapeResults);
     }
+    final removedFileKeys = fileScrapeResults.keys
+        .where((key) => isLocalMediaPathWithin(path, key))
+        .toList();
+    if (removedFileKeys.isNotEmpty) {
+      for (final k in removedFileKeys) {
+        fileScrapeResults.remove(k);
+      }
+      await MediaScrapeStore.saveFileResults(fileScrapeResults);
+    }
+    _syncFolderWatcher();
     await scan();
   }
 
@@ -245,6 +515,11 @@ abstract class _MediaController with Store {
       library
         ..clear()
         ..addAll(result);
+      _refreshResumePoints();
+      unawaited(_repairPlaceholderHistories());
+      if (isGridMode) {
+        unawaited(_generateMissingThumbnails());
+      }
     } catch (e) {
       KazumiLogger().w('MediaController: scan failed', error: e);
       KazumiDialog.showToast(message: '扫描失败：$e');
@@ -367,6 +642,40 @@ abstract class _MediaController with Store {
         Map<String, MediaScrapeInfo>.from(scrapeResults));
   }
 
+  /// 为单个文件设置手动匹配的番剧（覆盖该文件所在文件夹的匹配结果）。
+  @action
+  Future<void> setFileMatch(
+    LocalMediaFile file,
+    BangumiItem item,
+  ) async {
+    if (fileScrapeResults.isEmpty) {
+      // 内存映射尚未加载（媒体库未初始化时）：先读取持久化结果再合并，
+      // 避免用空映射覆盖已保存的搜刮数据。
+      fileScrapeResults = ObservableMap.of(MediaScrapeStore.loadFileResults());
+    }
+    final info = MediaScrapeInfo.fromBangumiItem(item);
+    fileScrapeResults[file.path] = info;
+    await MediaScrapeStore.saveFileResults(
+        Map<String, MediaScrapeInfo>.from(fileScrapeResults));
+  }
+
+  /// 清除单个文件的搜刮结果，恢复使用文件夹级结果。
+  @action
+  Future<void> removeFileScrapeResult(String filePath) async {
+    fileScrapeResults.remove(filePath);
+    await MediaScrapeStore.saveFileResults(
+        Map<String, MediaScrapeInfo>.from(fileScrapeResults));
+  }
+
+  /// 获取文件的搜刮结果：优先文件级，其次文件夹级。
+  ///
+  /// [folder] 为文件所在媒体库文件夹（逻辑分组）。文件夹级结果按
+  /// 文件夹路径索引，传文件全路径永远查不到，会导致播放历史记录下
+  /// 占位番剧而非真实匹配结果。
+  MediaScrapeInfo? getFileScrapeInfo(
+          LocalMediaFile file, LocalMediaFolder folder) =>
+      fileScrapeResults[file.path] ?? scrapeResults[folder.path];
+
   /// 直接为文件夹写入搜刮结果（如磁力任务完成后自动同步），
   /// 会更新内存 observable 并持久化。
   @action
@@ -462,6 +771,10 @@ abstract class _MediaController with Store {
     if (unmatched.isNotEmpty) {
       groups.add(AnimeGroup(info: null, folders: unmatched));
     }
+    // 同番剧多季目录按季数排序（第 2 季排在「无季数标记」的第 1 季之后）。
+    for (final group in groups) {
+      group.folders.sort(_compareFoldersBySeason);
+    }
     return groups;
   }
 
@@ -496,6 +809,10 @@ abstract class _MediaController with Store {
             aCount: a.fileCount,
             bCount: b.fileCount,
           ));
+    // 同番剧多季目录按季数排序。
+    for (final item in items) {
+      item.folders.sort(_compareFoldersBySeason);
+    }
     // 未匹配条目没有元数据可排，统一按名称升序垫在最后。
     unmatched
         .sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
@@ -643,4 +960,192 @@ abstract class _MediaController with Store {
   }
 
   int get totalFiles => library.fold<int>(0, (sum, f) => sum + f.count);
+
+  /// 媒体库全部视频文件的总字节数。
+  int get totalSize => library.fold<int>(
+        0,
+        (sum, folder) => sum +
+            folder.files.fold<int>(0, (acc, file) => acc + file.size),
+      );
+
+  // ============ 跨功能查询 ============
+
+  /// 媒体库中匹配指定 Bangumi subject ID 的全部视频文件。
+  ///
+  /// 文件级搜刮结果优先，其次文件夹级；仅接受来源为 Bangumi 的正 ID。
+  List<LocalMediaFile> filesForBangumi(int bangumiId) {
+    if (bangumiId <= 0) return const [];
+    final result = <LocalMediaFile>[];
+    for (final folder in library) {
+      final folderInfo = scrapeResults[folder.path];
+      for (final file in folder.files) {
+        final info = fileScrapeResults[file.path] ?? folderInfo;
+        if (info?.bangumiId == bangumiId) {
+          result.add(file);
+        }
+      }
+    }
+    return result;
+  }
+
+  /// 媒体库中匹配该番剧、且文件名为第 [episode] 集的视频文件（无则 null）。
+  LocalMediaFile? fileForEpisode(int bangumiId, int episode) {
+    if (bangumiId <= 0 || episode <= 0) return null;
+    for (final file in filesForBangumi(bangumiId)) {
+      if (parseLocalEpisodeNumber(file.name) == episode) return file;
+    }
+    return null;
+  }
+
+  /// 预构建「解析集数 → 文件」映射（单次全库扫描）。
+  ///
+  /// 播放页剧集列表逐行调用 [fileForEpisode] 是 O(集数 × 全库) 的
+  /// 线性扫描，改为构建一次映射后按集数 O(1) 查询。
+  Map<int, LocalMediaFile> episodeFileMapForBangumi(int bangumiId) {
+    if (bangumiId <= 0) return const {};
+    final map = <int, LocalMediaFile>{};
+    for (final file in filesForBangumi(bangumiId)) {
+      final episode = parseLocalEpisodeNumber(file.name);
+      if (episode > 0) map[episode] = file;
+    }
+    return map;
+  }
+
+  /// 媒体库文件按 Bangumi subject ID 聚合的数量（文件级搜刮结果优先）。
+  ///
+  /// 与 [filesForBangumi] 口径一致（区别于按文件夹整目录计数的旧逻辑，
+  /// 混合目录中单文件改匹配到其它番剧时不再虚报）。
+  Map<int, int> fileCountsByBangumi() {
+    final counts = <int, int>{};
+    for (final folder in library) {
+      final folderInfo = scrapeResults[folder.path];
+      for (final file in folder.files) {
+        final info = fileScrapeResults[file.path] ?? folderInfo;
+        final bangumiId = info?.bangumiId ?? 0;
+        if (bangumiId > 0) {
+          counts[bangumiId] = (counts[bangumiId] ?? 0) + 1;
+        }
+      }
+    }
+    return counts;
+  }
+
+  // ============ 未匹配卡片缩略图 ============
+
+  bool _thumbnailGenerating = false;
+
+  /// 为尚未匹配的文件夹生成视频首帧缩略图（需 ffmpeg 可用且设置开启）。
+  ///
+  /// 缓存键 = 文件路径 + 修改时间 + 大小 的哈希，文件变化后自动重生成；
+  /// 已匹配的文件夹展示 Bangumi 封面，不生成。
+  Future<void> _generateMissingThumbnails() async {
+    if (_thumbnailGenerating) return;
+    if (!GStorage.getSetting(SettingsKeys.localMediaThumbnails)) return;
+    if (!VideoFrameExtractor.instance.isAvailable) return;
+    _thumbnailGenerating = true;
+    try {
+      final target = <(LocalMediaFolder, LocalMediaFile)>[];
+      for (final folder in library) {
+        if (scrapeResults.containsKey(folder.path)) continue;
+        LocalMediaFile? pick;
+        for (final file in folder.files) {
+          if (pick == null || file.size > pick.size) pick = file;
+        }
+        if (pick == null) continue;
+        final key = _thumbnailKey(pick);
+        final cached = thumbnails[folder.path];
+        if (cached != null && cached == key) continue;
+        target.add((folder, pick));
+      }
+      if (target.isEmpty) return;
+      final support = await getApplicationSupportDirectory();
+      final cacheDir = Directory(p.join(support.path, 'kazumi_thumbnails'));
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+      // 逐个生成，避免同时拉起大量 ffmpeg 进程。
+      final updated = Map<String, String>.from(thumbnails);
+      for (final (folder, file) in target) {
+        try {
+          final frame = await VideoFrameExtractor.instance.extractFrame(
+              file.path);
+          if (frame == null) continue;
+          final key = _thumbnailKey(file);
+          final dest = File(p.join(
+              cacheDir.path, '${_hash(key)}.jpg'));
+          if (!await dest.exists()) {
+            await frame.copy(dest.path);
+          }
+          await frame.delete();
+          if (await dest.exists()) {
+            updated[folder.path] = key;
+          }
+        } catch (e) {
+          KazumiLogger()
+              .w('MediaController: thumbnail failed for ${file.path}', error: e);
+        }
+      }
+      if (!mapEquals(updated, Map.from(thumbnails))) {
+        thumbnails = ObservableMap.of(updated);
+      }
+    } catch (e) {
+      KazumiLogger().w('MediaController: thumbnail generation failed', error: e);
+    } finally {
+      _thumbnailGenerating = false;
+    }
+  }
+
+  static String _thumbnailKey(LocalMediaFile file) =>
+      '${file.path}|${file.modifiedAt.millisecondsSinceEpoch}|${file.size}';
+
+  static String _hash(String input) {
+    var h = 0;
+    for (final code in input.codeUnits) {
+      h = (h * 31 + code) & 0x7FFFFFFF;
+    }
+    return h.toRadixString(16);
+  }
+
+  /// 按季数排序的文件夹比较器：季数越靠前越先（无季数判定为第 1 季）。
+  static int _compareFoldersBySeason(LocalMediaFolder a, LocalMediaFolder b) {
+    const scraper = _SeasonProbe();
+    final sa = scraper.parseSeason(a.name) ?? 1;
+    final sb = scraper.parseSeason(b.name) ?? 1;
+    if (sa != sb) return sa.compareTo(sb);
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+}
+
+/// 仅用于季数比较的轻量探针（MediaScraper 是重量级对象，避免每帧构建）。
+class _SeasonProbe {
+  const _SeasonProbe();
+
+  int? parseSeason(String raw) {
+    final lower = raw.toLowerCase();
+    final en = RegExp(r'(?:^|[^a-z])(?:s|season)\s*(\d{1,2})(?:[^a-z0-9]|$)',
+            caseSensitive: false)
+        .firstMatch(lower);
+    if (en != null) {
+      final n = int.tryParse(en.group(1)!);
+      if (n != null && n >= 1 && n <= 99) return n;
+    }
+    final cn = RegExp(r'第\s*([一二三四五六七八九十1-9１-９0-9]+)\s*[季期部]')
+        .firstMatch(raw);
+    if (cn != null) {
+      const map = {
+        '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+        '六': 6, '七': 7, '八': 8, '九': 9,
+        '1': 1, '2': 2, '3': 3, '4': 4, '5': 5,
+        '6': 6, '7': 7, '8': 8, '9': 9,
+      };
+      final v = cn.group(1)!.trim();
+      if (v == '十') return 10;
+      if (v.length >= 2 && v.startsWith('十')) {
+        final tail = map[v.substring(1)];
+        return tail == null ? null : 10 + tail;
+      }
+      return map[v];
+    }
+    return null;
+  }
 }

@@ -277,6 +277,14 @@ mixin _$MagnetController on _MagnetController, Store {
         .run(() => super.setSearchSource(sourceId));
   }
 
+  late final _$pauseAllDownloadsAsyncAction =
+      AsyncAction('_MagnetController.pauseAllDownloads', context: context);
+
+  @override
+  Future<void> pauseAllDownloads() {
+    return _$pauseAllDownloadsAsyncAction.run(() => super.pauseAllDownloads());
+  }
+
   late final _$startBuiltinEngineAsyncAction =
       AsyncAction('_MagnetController.startBuiltinEngine', context: context);
 
@@ -345,6 +353,16 @@ mixin _$MagnetController on _MagnetController, Store {
         .run(() => super.updateSubscription(updated));
   }
 
+  late final _$updateSubscriptionCoverAsyncAction = AsyncAction(
+      '_MagnetController.updateSubscriptionCover',
+      context: context);
+
+  @override
+  Future<void> updateSubscriptionCover(String id, String coverUrl) {
+    return _$updateSubscriptionCoverAsyncAction
+        .run(() => super.updateSubscriptionCover(id, coverUrl));
+  }
+
   late final _$removeSubscriptionAsyncAction =
       AsyncAction('_MagnetController.removeSubscription', context: context);
 
@@ -408,6 +426,14 @@ mixin _$MagnetController on _MagnetController, Store {
     return _$resumeDownloadAsyncAction.run(() => super.resumeDownload(taskId));
   }
 
+  late final _$retryDownloadAsyncAction =
+      AsyncAction('_MagnetController.retryDownload', context: context);
+
+  @override
+  Future<void> retryDownload(String taskId) {
+    return _$retryDownloadAsyncAction.run(() => super.retryDownload(taskId));
+  }
+
   late final _$removeDownloadAsyncAction =
       AsyncAction('_MagnetController.removeDownload', context: context);
 
@@ -415,6 +441,24 @@ mixin _$MagnetController on _MagnetController, Store {
   Future<void> removeDownload(String taskId, {bool deleteFiles = false}) {
     return _$removeDownloadAsyncAction
         .run(() => super.removeDownload(taskId, deleteFiles: deleteFiles));
+  }
+
+  late final _$matchDownloadToBangumiAsyncAction =
+      AsyncAction('_MagnetController.matchDownloadToBangumi', context: context);
+
+  @override
+  Future<void> matchDownloadToBangumi(String taskId, BangumiItem item) {
+    return _$matchDownloadToBangumiAsyncAction
+        .run(() => super.matchDownloadToBangumi(taskId, item));
+  }
+
+  late final _$rescrapeDownloadAsyncAction =
+      AsyncAction('_MagnetController.rescrapeDownload', context: context);
+
+  @override
+  Future<void> rescrapeDownload(String taskId) {
+    return _$rescrapeDownloadAsyncAction
+        .run(() => super.rescrapeDownload(taskId));
   }
 
   late final _$applyMagnetSettingsChangedAsyncAction = AsyncAction(
@@ -447,6 +491,28 @@ mixin _$MagnetController on _MagnetController, Store {
         name: '_MagnetController.refreshSearch');
     try {
       return super.refreshSearch();
+    } finally {
+      _$_MagnetControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  Future<int> clearCompletedDownloads() {
+    final _$actionInfo = _$_MagnetControllerActionController.startAction(
+        name: '_MagnetController.clearCompletedDownloads');
+    try {
+      return super.clearCompletedDownloads();
+    } finally {
+      _$_MagnetControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  Future<bool> recheckDownload(String taskId) {
+    final _$actionInfo = _$_MagnetControllerActionController.startAction(
+        name: '_MagnetController.recheckDownload');
+    try {
+      return super.recheckDownload(taskId);
     } finally {
       _$_MagnetControllerActionController.endAction(_$actionInfo);
     }

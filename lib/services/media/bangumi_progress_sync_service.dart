@@ -22,6 +22,12 @@ class BangumiProgressSyncService {
   static const Duration _failureCooldown = Duration(minutes: 1);
   static final Map<String, DateTime> _lastFailureAt = {};
 
+  /// 已标记「看过」的 subject（进程内幂等）。
+  static final Set<int> _watchedMarked = {};
+
+  /// 各 subject 正片集数缓存。
+  static final Map<int, int> _episodeCountCache = {};
+
   static String _syncKey(int bangumiId, int episode) => '$bangumiId:$episode';
 
   @visibleForTesting
@@ -85,6 +91,8 @@ class BangumiProgressSyncService {
           KazumiLogger().i(
             'BangumiProgressSync: ep_status -> $target for subject $bangumiId',
           );
+          // 集数追平正片总量后，把收藏状态同步为「看过」。
+          unawaited(_markWatchedIfComplete(bangumiId, target));
           return;
         }
       } catch (e) {
@@ -98,5 +106,45 @@ class BangumiProgressSyncService {
     KazumiLogger().w(
       'BangumiProgressSync: update failed after retries for subject $bangumiId',
     );
+  }
+
+  /// 集数追平正片总量后，把 Bangumi 收藏状态标记为「看过」（type=2）。
+  ///
+  /// 正片总量来自 Bangumi 分集列表（type=0），按 subject 缓存；
+  /// 已标记过的 subject 不再重复请求。
+  static Future<void> _markWatchedIfComplete(int bangumiId, int target) async {
+    if (_watchedMarked.contains(bangumiId)) return;
+    final total = await _episodeCount(bangumiId);
+    if (total == null || target < total) return;
+    _watchedMarked.add(bangumiId);
+    try {
+      final ok = await BangumiApi.updateBangumiById(bangumiId, {'type': 2});
+      if (ok) {
+        KazumiLogger().i(
+          'BangumiProgressSync: subject $bangumiId marked as watched',
+        );
+      }
+    } catch (e) {
+      KazumiLogger().w('BangumiProgressSync: mark watched failed', error: e);
+    }
+  }
+
+  static Future<int?> _episodeCount(int bangumiId) async {
+    final cached = _episodeCountCache[bangumiId];
+    if (cached != null) return cached;
+    try {
+      final episodes = await BangumiApi.getBangumiEpisodesByID(bangumiId);
+      var count = 0;
+      for (final e in episodes) {
+        if (e.type != 0) continue;
+        if (e.episode.toInt() > 0) count++;
+      }
+      if (count > 0) _episodeCountCache[bangumiId] = count;
+      return count > 0 ? count : null;
+    } catch (e) {
+      KazumiLogger()
+          .w('BangumiProgressSync: fetch episode count failed', error: e);
+      return null;
+    }
   }
 }

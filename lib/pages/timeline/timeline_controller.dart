@@ -40,6 +40,10 @@ abstract class _TimelineController with Store {
   late bool onlyShowWatchingBangumis =
       _collectRepository.getTimelineOnlyShowWatchingBangumis();
 
+  @observable
+  late bool onlyShowJapaneseBangumis =
+      _collectRepository.getTimelineOnlyShowJapaneseBangumis();
+
   int _sortType = 3;
   int get sortType => _sortType;
 
@@ -172,6 +176,12 @@ abstract class _TimelineController with Store {
   Future<void> setOnlyShowWatchingBangumis(bool value) async {
     onlyShowWatchingBangumis = value;
     await _collectRepository.updateTimelineOnlyShowWatchingBangumis(value);
+  }
+
+  @action
+  Future<void> setOnlyShowJapaneseBangumis(bool value) async {
+    onlyShowJapaneseBangumis = value;
+    await _collectRepository.updateTimelineOnlyShowJapaneseBangumis(value);
   }
 
   Set<int> loadWatchingBangumiIds() {

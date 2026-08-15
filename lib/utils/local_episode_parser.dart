@@ -246,6 +246,49 @@ String sanitizeAnimeTitle(String fileName) {
   return candidates.first;
 }
 
+/// 本地文件分类：正片 / 特别篇（SP/OVA/OAD 等）/ 剧场版 / 特典。
+enum LocalEpisodeKind {
+  normal,
+  special,
+  movie,
+  extra,
+}
+
+/// 判断本地视频文件属于哪一类（用于展示「SP」「剧场版」等标记，
+/// 并把非正片内容排到列表末尾）。
+LocalEpisodeKind classifyLocalEpisode(String fileName) {
+  final lower = fileName.toLowerCase();
+  if (RegExp(r'(剧场版|电影|剧场|movie\b|theatrical)', caseSensitive: false)
+      .hasMatch(lower)) {
+    return LocalEpisodeKind.movie;
+  }
+  if (RegExp(r'(特典|pv\b|cm\b|promotion|preview|预告|映像特典)',
+          caseSensitive: false)
+      .hasMatch(lower)) {
+    return LocalEpisodeKind.extra;
+  }
+  if (RegExp(r'(sp\b|special|ova\b|oad\b|特别篇|特别编|番外|sp\s*\d)',
+          caseSensitive: false)
+      .hasMatch(lower)) {
+    return LocalEpisodeKind.special;
+  }
+  return LocalEpisodeKind.normal;
+}
+
+/// 分类的中文标记（空串表示正片）。
+String localEpisodeKindLabel(LocalEpisodeKind kind) {
+  switch (kind) {
+    case LocalEpisodeKind.normal:
+      return '';
+    case LocalEpisodeKind.special:
+      return 'SP';
+    case LocalEpisodeKind.movie:
+      return '剧场版';
+    case LocalEpisodeKind.extra:
+      return '特典';
+  }
+}
+
 /// 生成弹幕侧车文件的作用域标识。
 ///
 /// 同一目录混放多部番剧（扫描器按标题拆分组）时，仅按集数命名的

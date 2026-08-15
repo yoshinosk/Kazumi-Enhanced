@@ -173,6 +173,22 @@ mixin _$VideoPageController on _VideoPageController, Store {
     });
   }
 
+  late final _$isStreamModeAtom =
+      Atom(name: '_VideoPageController.isStreamMode', context: context);
+
+  @override
+  bool get isStreamMode {
+    _$isStreamModeAtom.reportRead();
+    return super.isStreamMode;
+  }
+
+  @override
+  set isStreamMode(bool value) {
+    _$isStreamModeAtom.reportWrite(value, super.isStreamMode, () {
+      super.isStreamMode = value;
+    });
+  }
+
   late final _$roadListAtom =
       Atom(name: '_VideoPageController.roadList', context: context);
 
@@ -257,6 +273,25 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
+  void _initForStreamPlayback(
+      {required BangumiItem bangumiItem,
+      required String streamUrl,
+      required String fileName,
+      required String pluginName}) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._initForStreamPlayback');
+    try {
+      return super._initForStreamPlayback(
+          bangumiItem: bangumiItem,
+          streamUrl: streamUrl,
+          fileName: fileName,
+          pluginName: pluginName);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(
         name: '_VideoPageController._beginEpisodeSwitch');
@@ -311,6 +346,7 @@ showTabBody: ${showTabBody},
 historyOffset: ${historyOffset},
 isOfflineMode: ${isOfflineMode},
 isLocalMediaMode: ${isLocalMediaMode},
+isStreamMode: ${isStreamMode},
 roadList: ${roadList}
     ''';
   }

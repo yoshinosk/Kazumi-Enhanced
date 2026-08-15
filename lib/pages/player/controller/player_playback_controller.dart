@@ -15,6 +15,7 @@ import 'package:kazumi/services/network/system_proxy_service.dart';
 import 'package:kazumi/services/player/playback_cache_policy.dart';
 import 'package:kazumi/services/player/player_screenshot_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/services/video_source/video_source_format.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mobx/mobx.dart';
@@ -234,6 +235,7 @@ abstract class _PlayerPlaybackController with Store {
     bool adBlockerEnabled, {
     required bool Function() canInstall,
     int offset = 0,
+    VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
     startOffset = offset;
     superResolutionMode = SuperResolutionMode.fromStorageValue(
@@ -285,6 +287,15 @@ abstract class _PlayerPlaybackController with Store {
       await pp.setProperty("demuxer-cache-dir", await getPlayerTempPath());
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
+      }
+      // 本地媒体库：自动加载与视频同目录的外挂字幕（.ass/.srt 等），
+      // fuzzy 模式按文件名相似度匹配，避免加载无关目录中的字幕文件。
+      // 在线播放路径不开启：远程 URL 无法扫描目录，避免多余加载行为。
+      if (isLocalPlayback()) {
+        await pp.setProperty("sub-auto", "fuzzy");
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
       }
       await cachePolicy.apply();
       if (!isCurrentPlayer(player)) {
@@ -405,6 +416,13 @@ abstract class _PlayerPlaybackController with Store {
 
       if (superResolutionMode != SuperResolutionMode.off) {
         await setShader(superResolutionMode, player: player);
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+
+      if (videoSourceFormat == VideoSourceFormat.hls) {
+        await pp.setProperty('demuxer-lavf-format', 'hls');
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }

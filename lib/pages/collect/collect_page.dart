@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/collect/collect_module.dart';
+import 'package:kazumi/modules/download/download_module.dart';
+import 'package:kazumi/pages/download/download_controller.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/bean/card/bangumi_card.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
@@ -248,6 +252,22 @@ class _CollectPageState extends State<CollectPage>
   List<Widget> contentGrid(List<CollectedBangumi> collectedBangumiList) {
     final bool showAnimeCounter =
         GStorage.getSetting(SettingsKeys.showAnimeCounter);
+    // 本地可用角标：按 Bangumi subject ID 汇总媒体库文件数与缓存集数。
+    // 用文件级口径（与详情页 / 搜索页一致），文件夹级整目录计数在
+    // 混合目录单文件改匹配时会虚报。
+    final mediaController = inject<MediaController>();
+    final downloadController = inject<DownloadController>();
+    final localCounts = mediaController.fileCountsByBangumi();
+    final cacheCounts = <int, int>{};
+    for (final record in downloadController.records) {
+      final completed = record.episodes.values
+          .where((e) => e.status == DownloadStatus.completed)
+          .length;
+      if (completed > 0) {
+        cacheCounts[record.bangumiId] =
+            (cacheCounts[record.bangumiId] ?? 0) + completed;
+      }
+    }
     List<Widget> gridViewList = [];
     List<List<CollectedBangumi>> collectedBangumiRenderItemList =
         List.generate(tabs.length, (_) => <CollectedBangumi>[]);
@@ -285,38 +305,19 @@ class _CollectPageState extends State<CollectPage>
                 delegate: SliverChildBuilderDelegate(
                   (BuildContext context, int index) {
                     return collectedBangumiRenderItem.isNotEmpty
-                        ? Stack(
-                            children: [
-                              BangumiCardV(
-                                bangumiItem: collectedBangumiRenderItem[index]
-                                    .bangumiItem,
-                                canTap: !showDelete,
-                              ),
-                              Positioned(
-                                right: 5,
-                                bottom: 5,
-                                child: showDelete
-                                    ? Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .secondaryContainer,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: CollectButton(
-                                          bangumiItem:
-                                              collectedBangumiRenderItem[index]
-                                                  .bangumiItem,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSecondaryContainer,
-                                        ),
-                                      )
-                                    : Container(),
-                              ),
-                            ],
+                        ? _CollectGridCard(
+                            item: collectedBangumiRenderItem[index],
+                            showDelete: showDelete,
+                            localCount: localCounts[
+                                    collectedBangumiRenderItem[index]
+                                        .bangumiItem
+                                        .id] ??
+                                0,
+                            cacheCount: cacheCounts[
+                                    collectedBangumiRenderItem[index]
+                                        .bangumiItem
+                                        .id] ??
+                                0,
                           )
                         : null;
                   },
@@ -401,6 +402,108 @@ class _FullSyncProgressDialogState extends State<_FullSyncProgressDialog> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// ׷������Ƭ��BangumiCardV + ���½Ǳ༭��ť + ���ϽǱ��ؿ��ýǱꡣ
+class _CollectGridCard extends StatelessWidget {
+  const _CollectGridCard({
+    required this.item,
+    required this.showDelete,
+    required this.localCount,
+    required this.cacheCount,
+  });
+
+  final CollectedBangumi item;
+  final bool showDelete;
+  final int localCount;
+  final int cacheCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final badges = <Widget>[];
+    if (localCount > 0) {
+      badges.add(_AvailabilityBadge(
+        text: '����$localCount',
+        color: Theme.of(context).colorScheme.primary,
+        foreground: Theme.of(context).colorScheme.onPrimary,
+      ));
+    }
+    if (cacheCount > 0) {
+      badges.add(_AvailabilityBadge(
+        text: '����$cacheCount',
+        color: Theme.of(context).colorScheme.tertiary,
+        foreground: Theme.of(context).colorScheme.onTertiary,
+      ));
+    }
+    return Stack(
+      children: [
+        BangumiCardV(
+          bangumiItem: item.bangumiItem,
+          canTap: !showDelete,
+        ),
+        if (badges.isNotEmpty)
+          Positioned(
+            left: 5,
+            top: 5,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: badges,
+            ),
+          ),
+        Positioned(
+          right: 5,
+          bottom: 5,
+          child: showDelete
+              ? Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: CollectButton(
+                    bangumiItem: item.bangumiItem,
+                    color:
+                        Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
+                )
+              : Container(),
+        ),
+      ],
+    );
+  }
+}
+
+class _AvailabilityBadge extends StatelessWidget {
+  const _AvailabilityBadge({
+    required this.text,
+    required this.color,
+    required this.foreground,
+  });
+
+  final String text;
+  final Color color;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w600,
+              height: 1.1,
+            ),
       ),
     );
   }

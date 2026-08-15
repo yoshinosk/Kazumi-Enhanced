@@ -88,6 +88,43 @@ class MediaScraper {
   /// 单个标题最多派生的候选关键词数，避免一个文件夹打爆搜索接口。
   static const int _kMaxKeywordVariants = 6;
 
+  /// 常见「无意义占位标题」：测试/下载/临时目录等。
+  ///
+  /// 这类名称几乎不可能是番剧名，直接拿它们搜索 Bangumi 只会浪费请求，
+  /// 还可能误匹配到无关条目（如把 `test` 目录匹配成某部名字含 test 的番）。
+  /// 搜刮时对自动派生的候选做拦截，用户手动指定的关键词不受影响。
+  static const Set<String> _kGenericTitles = {
+    'test', 'tests', 'testing',
+    'sample', 'samples',
+    'demo', 'trial',
+    'temp', 'tmp',
+    'download', 'downloads',
+    'untitled', 'misc', 'miscellaneous',
+    'other', 'others', 'various', 'stuff',
+    'backup', 'backups', 'copy', 'copies',
+    'new folder', 'untitled folder',
+    '测试', '测试视频', '示例', '样例', '试用',
+    '下载', '临时', '临时文件',
+    '新建文件夹', '未命名', '未命名文件夹',
+    '其他', '杂项', '备份',
+  };
+
+  /// 判定清洗后的标题是否是「无意义的占位标题」（如 test、新建文件夹）。
+  ///
+  /// 大小写不敏感；容忍数字/括号后缀变体（`test1`、`测试2`、`新建文件夹(3)`）。
+  /// 纯数字正名（如《86》）剥掉后缀后为空，不会误伤。
+  bool isGenericTitle(String title) {
+    var t = title.trim().toLowerCase();
+    if (t.isEmpty) return true;
+    if (_kGenericTitles.contains(t)) return true;
+    // 数字后缀变体：先剥括号数字，再剥尾部的数字/分隔符。
+    // 命中名单才是最终判据，「86」剥空后落不进名单。
+    t = t
+        .replaceFirst(RegExp(r'\s*\(\d+\)\s*$'), '')
+        .replaceFirst(RegExp(r'[\d\s_\-.]*$'), '');
+    return t.length >= 2 && _kGenericTitles.contains(t);
+  }
+
   /// 取出「basename」，仅在末尾是真正的视频扩展名时去掉扩展名。
   ///
   /// 不能用 `p.basenameWithoutExtension`：文件夹名里如果自带点号
@@ -556,10 +593,15 @@ class MediaScraper {
     final season = parseSeason(base);
     final year = parseYear(base);
 
-    addExpanded(trimmed, season: season, year: year);
+    final generic = isGenericTitle(trimmed);
+    // 无意义占位标题（test / 新建文件夹 等）不直接作为搜索词，转用文件候选。
+    if (!generic) {
+      addExpanded(trimmed, season: season, year: year);
+    }
 
-    // 清洗后信息太短时，尝试内部视频文件的首个文件名与去发布组前缀的原始名
-    if (trimmed.length <= 4) {
+    // 清洗后信息太短或是占位标题时，尝试内部视频文件的首个文件名
+    // 与去发布组前缀的原始名（如 `test/` 目录里放着真实番剧文件）。
+    if (trimmed.length <= 4 || generic) {
       LocalMediaFile? firstFile;
       for (final f in folder.files) {
         if (f.name.isNotEmpty) {
@@ -569,7 +611,9 @@ class MediaScraper {
       }
       if (firstFile != null) {
         final fileClean = cleanName(firstFile.name);
-        if (fileClean.isNotEmpty && fileClean != trimmed) {
+        if (fileClean.isNotEmpty &&
+            fileClean != trimmed &&
+            !isGenericTitle(fileClean)) {
           addExpanded(
             fileClean,
             season: parseSeason(firstFile.name),
@@ -581,7 +625,8 @@ class MediaScraper {
           base.replaceAll(RegExp(r'\[[^\]]*\]'), ' ').trim();
       if (noBrackets.isNotEmpty &&
           noBrackets != base &&
-          noBrackets != trimmed) {
+          noBrackets != trimmed &&
+          !isGenericTitle(noBrackets)) {
         add(noBrackets, year: year);
       }
     }

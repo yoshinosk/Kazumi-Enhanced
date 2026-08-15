@@ -142,6 +142,29 @@ mixin _$TimelineController on _TimelineController, Store {
     });
   }
 
+  late final _$onlyShowJapaneseBangumisAtom = Atom(
+      name: '_TimelineController.onlyShowJapaneseBangumis', context: context);
+
+  @override
+  bool get onlyShowJapaneseBangumis {
+    _$onlyShowJapaneseBangumisAtom.reportRead();
+    return super.onlyShowJapaneseBangumis;
+  }
+
+  bool _onlyShowJapaneseBangumisIsInitialized = false;
+
+  @override
+  set onlyShowJapaneseBangumis(bool value) {
+    _$onlyShowJapaneseBangumisAtom.reportWrite(
+        value,
+        _onlyShowJapaneseBangumisIsInitialized
+            ? super.onlyShowJapaneseBangumis
+            : null, () {
+      super.onlyShowJapaneseBangumis = value;
+      _onlyShowJapaneseBangumisIsInitialized = true;
+    });
+  }
+
   late final _$getSchedulesAsyncAction =
       AsyncAction('_TimelineController.getSchedules', context: context);
 
@@ -189,6 +212,16 @@ mixin _$TimelineController on _TimelineController, Store {
         .run(() => super.setOnlyShowWatchingBangumis(value));
   }
 
+  late final _$setOnlyShowJapaneseBangumisAsyncAction = AsyncAction(
+      '_TimelineController.setOnlyShowJapaneseBangumis',
+      context: context);
+
+  @override
+  Future<void> setOnlyShowJapaneseBangumis(bool value) {
+    return _$setOnlyShowJapaneseBangumisAsyncAction
+        .run(() => super.setOnlyShowJapaneseBangumis(value));
+  }
+
   late final _$_TimelineControllerActionController =
       ActionController(name: '_TimelineController', context: context);
 
@@ -212,7 +245,8 @@ isLoading: ${isLoading},
 isTimeOut: ${isTimeOut},
 notShowAbandonedBangumis: ${notShowAbandonedBangumis},
 notShowWatchedBangumis: ${notShowWatchedBangumis},
-onlyShowWatchingBangumis: ${onlyShowWatchingBangumis}
+onlyShowWatchingBangumis: ${onlyShowWatchingBangumis},
+onlyShowJapaneseBangumis: ${onlyShowJapaneseBangumis}
     ''';
   }
 }
