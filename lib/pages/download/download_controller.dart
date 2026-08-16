@@ -177,11 +177,13 @@ abstract class _DownloadController with Store {
   }
 
   Future<void> _updateBackgroundNotification() async {
-    if (!_backgroundService.isRunning) return;
+    if (!_backgroundService.isHeldBy(BackgroundDownloadService.httpLease)) {
+      return;
+    }
 
     final stats = _getDownloadStats();
     if (!stats.hasWork) {
-      await _backgroundService.stopService();
+      await _backgroundService.release(BackgroundDownloadService.httpLease);
       return;
     }
 
@@ -199,9 +201,13 @@ abstract class _DownloadController with Store {
   }
 
   Future<void> _startBackgroundServiceIfNeeded() async {
-    if (!_backgroundService.isSupported || _backgroundService.isRunning) return;
+    if (!_backgroundService.isSupported ||
+        _backgroundService.isHeldBy(BackgroundDownloadService.httpLease)) {
+      return;
+    }
 
-    final started = await _backgroundService.startService();
+    final started =
+        await _backgroundService.acquire(BackgroundDownloadService.httpLease);
     if (started) {
       KazumiLogger().i('DownloadController: background service started');
     }
@@ -365,16 +371,31 @@ abstract class _DownloadController with Store {
   }
 
   /// 弹幕文件路径
-  String _danmakuFilePath(String downloadDirectory) {
-    return '$downloadDirectory/danmaku.json';
+  /// [episode] 非空时读取分集侧车文件（本地媒体库多集共用目录时避免互相覆盖）。
+  /// [scope] 非空时追加番剧作用域后缀（同目录混放多部番剧时避免串剧）。
+  String _danmakuFilePath(String downloadDirectory,
+      {int? episode, String scope = ''}) {
+    if (episode == null) return '$downloadDirectory/danmaku.json';
+    return scope.isEmpty
+        ? '$downloadDirectory/danmaku_$episode.json'
+        : '$downloadDirectory/danmaku_${episode}_$scope.json';
   }
 
   /// 从文件读取弹幕数据
   /// 支持新格式 (带 danDanBangumiID 的 wrapper) 和旧格式 (纯数组)
+  /// [scope] 非空时优先读带番剧作用域的侧车，不存在则回退旧版
+  /// 无作用域的 `danmaku_<ep>.json`，避免升级后旧缓存失效。
   Future<({List<DanmakuEntry> danmakus, int danDanBangumiID})?>
-      _readDanmakuFromFile(String downloadDirectory) async {
+      _readDanmakuFromFile(String downloadDirectory,
+          {int? episode, String scope = ''}) async {
     if (downloadDirectory.isEmpty) return null;
-    final file = File(_danmakuFilePath(downloadDirectory));
+    var file = File(
+        _danmakuFilePath(downloadDirectory, episode: episode, scope: scope));
+    if (!await file.exists() && scope.isNotEmpty && episode != null) {
+      final legacyFile =
+          File(_danmakuFilePath(downloadDirectory, episode: episode));
+      if (await legacyFile.exists()) file = legacyFile;
+    }
     if (!await file.exists()) return null;
     try {
       final content = await file.readAsString();
@@ -401,10 +422,15 @@ abstract class _DownloadController with Store {
   }
 
   /// 写入弹幕数据到文件 (新格式，包含 danDanBangumiID)
-  Future<void> _writeDanmakuToFile(String downloadDirectory,
-      List<DanmakuEntry> danmakus, int danDanBangumiID) async {
+  Future<void> _writeDanmakuToFile(
+      String downloadDirectory,
+      List<DanmakuEntry> danmakus,
+      int danDanBangumiID, {
+      int? episode,
+      String scope = ''}) async {
     if (downloadDirectory.isEmpty) return;
-    final file = File(_danmakuFilePath(downloadDirectory));
+    final file =
+        File(_danmakuFilePath(downloadDirectory, episode: episode, scope: scope));
     final wrapper = {
       'danDanBangumiID': danDanBangumiID,
       'danmakus': danmakus.map((d) => d.toJson()).toList(),
@@ -425,6 +451,39 @@ abstract class _DownloadController with Store {
     }
 
     return null;
+  }
+
+  /// 读取指定目录下视频旁的弹幕侧车文件（`danmaku.json`）。
+  ///
+  /// 供本地媒体库使用：本地文件不属于下载记录，无法走 [getCachedDanmakus]，
+  /// 但视频文件夹里可能已经存在与文件同目录的弹幕缓存。
+  /// [episode] 非空时优先读取分集侧车文件（`danmaku_<ep>.json`）；
+  /// [scope] 非空时读取带番剧作用域的侧车（`danmaku_<ep>_<scope>.json`），
+  /// 不存在时回退读取不带作用域的旧文件。
+  Future<({List<DanmakuEntry> danmakus, int danDanBangumiID})?>
+      readDirectoryDanmaku(String directory,
+          {int? episode, String scope = ''}) {
+    return _readDanmakuFromFile(directory, episode: episode, scope: scope);
+  }
+
+  /// 将弹幕写入指定目录下的弹幕侧车文件（`danmaku.json`）。
+  /// [episode] 非空时写入分集侧车文件（`danmaku_<ep>.json`），
+  /// 避免同一目录多集互相覆盖；[scope] 非空时追加番剧作用域后缀，
+  /// 避免同一目录混放多部番剧时互相覆盖。
+  Future<void> writeDirectoryDanmaku(
+    String directory,
+    List<DanmakuEntry> danmakus,
+    int danDanBangumiID, {
+    int? episode,
+    String scope = '',
+  }) async {
+    try {
+      await _writeDanmakuToFile(directory, danmakus, danDanBangumiID,
+          episode: episode, scope: scope);
+    } catch (e) {
+      KazumiLogger()
+          .w('DownloadController: failed to write directory danmaku', error: e);
+    }
   }
 
   Future<void> updateCachedDanmakus(
@@ -811,7 +870,7 @@ abstract class _DownloadController with Store {
 
     refreshRecords();
 
-    await _backgroundService.stopService();
+    await _backgroundService.release(BackgroundDownloadService.httpLease);
   }
 
   Future<void> retryDownload({

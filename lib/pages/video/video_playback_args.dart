@@ -1,7 +1,10 @@
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/download/download_module.dart';
+import 'package:kazumi/modules/history/history_module.dart'
+    show kMagnetStreamAdapterName;
 import 'package:kazumi/modules/roads/road_module.dart';
 import 'package:kazumi/plugins/plugins.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 
 /// Route arguments for '/video/'. Entry points hand playback context over
 /// through the route instead of pre-filling a shared controller, which lets
@@ -40,4 +43,50 @@ class OfflineVideoPlaybackArgs extends VideoPlaybackArgs {
   final int episodeNumber;
   final int road;
   final List<DownloadEpisode> downloadedEpisodes;
+}
+
+/// 本地媒体库播放参数：在应用内播放本地视频文件并关联弹幕。
+class LocalMediaVideoPlaybackArgs extends VideoPlaybackArgs {
+  const LocalMediaVideoPlaybackArgs({
+    required super.bangumiItem,
+    required this.files,
+    required this.selectedIndex,
+    required this.pluginName,
+    this.bangumiSyncId,
+  });
+
+  /// 同一文件夹下的全部本地视频文件，支持选集切换。
+  final List<LocalMediaFile> files;
+
+  /// 本次点击要播放的文件在 [files] 中的索引。
+  final int selectedIndex;
+
+  /// 用于历史记录与弹幕缓存的标识，本地媒体固定为 'local'。
+  final String pluginName;
+
+  /// 已确认的 Bangumi subject ID，仅搜刮来源为 bangumi 时非空。
+  /// 播放完成后的 Bangumi 进度联动用它；legacy/AniList 条目为 null 不触发同步。
+  final int? bangumiSyncId;
+}
+
+/// 磁力任务边下边播参数：播放引擎内置流媒体服务器提供的 HTTP 流。
+///
+/// 单文件流，写入历史（adapterName=magnet-stream）：流 URL 在引擎存活期间
+/// 有效，历史页恢复时会校验可达性；弹幕按文件名解析集数 + 标题检索匹配。
+class MagnetStreamVideoPlaybackArgs extends VideoPlaybackArgs {
+  const MagnetStreamVideoPlaybackArgs({
+    required super.bangumiItem,
+    required this.streamUrl,
+    required this.fileName,
+    this.pluginName = kMagnetStreamAdapterName,
+  });
+
+  /// 引擎流媒体服务器返回的本地 HTTP URL。
+  final String streamUrl;
+
+  /// 被流式播放的种子文件名（用于展示与集数解析）。
+  final String fileName;
+
+  /// 弹幕缓存 / 检索标识，边下边播固定为 'magnet-stream'。
+  final String pluginName;
 }

@@ -10,14 +10,47 @@ import 'package:kazumi/services/logging/logger.dart';
 /// 1. 显示通知栏进度
 /// 2. 保持进程存活
 /// 3. 提供通知栏交互（暂停全部）
+///
+/// 该服务是应用级的单例前台服务，通过「租约」机制被多个下载功能共享：
+/// - `http`：在线视频（DownloadController）
+/// - `magnet`：磁力下载（MagnetController）
+/// 任一功能持有租约期间服务保持运行；全部释放后才停止。
+/// 通知栏内容按「最后更新的租约」渲染，租约释放时回退渲染仍活跃的租约。
 class BackgroundDownloadService {
   static final BackgroundDownloadService _instance =
       BackgroundDownloadService._internal();
   factory BackgroundDownloadService() => _instance;
   BackgroundDownloadService._internal();
 
+  /// 在线视频下载的租约名。
+  static const String httpLease = 'http';
+
+  /// 磁力下载的租约名。
+  static const String magnetLease = 'magnet';
+
   bool _isInitialized = false;
   bool _isRunning = false;
+
+  /// 当前持有租约的功能名。
+  final Set<String> _leases = {};
+
+  /// 服务启停串行化队列：startService 是异步的（含权限弹窗，可能数秒），
+  /// 期间若租约全部释放，release 必须等服务启动完成后才能判断停止，
+  /// 否则服务会以「零租约」状态常驻。
+  Future<void> _opQueue = Future.value();
+
+  Future<T> _serialized<T>(Future<T> Function() action) {
+    final result = _opQueue.then((_) => action());
+    _opQueue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// 各租约最近一次的通知内容（租约释放时回退渲染用）。
+  final Map<String, String> _leaseTitles = {};
+  final Map<String, String> _leaseTexts = {};
+
+  /// 当前渲染内容的租约名。
+  String? _renderLease;
 
   void Function()? onPauseAll;
   void Function()? onNavigateToDownloadRequested;
@@ -27,6 +60,10 @@ class BackgroundDownloadService {
 
   bool get isSupported => Platform.isAndroid;
   bool get isRunning => _isRunning;
+
+  /// 指定功能是否持有租约（服务可能被其他功能持有）。
+  bool isHeldBy(String lease) => _leases.contains(lease);
+
   Future<void> init() async {
     if (!isSupported || _isInitialized) return;
 
@@ -68,6 +105,76 @@ class BackgroundDownloadService {
     if (!isSupported) return true;
     final result = await FlutterForegroundTask.requestNotificationPermission();
     return result == NotificationPermission.granted;
+  }
+
+  /// 功能申请持有前台服务。返回服务是否可用（运行中）。
+  Future<bool> acquire(String lease) async {
+    if (!isSupported) return false;
+    return _serialized(() async {
+      if (_leases.add(lease)) {
+        KazumiLogger().i('BackgroundDownloadService: acquired by "$lease"');
+      }
+      if (_isRunning) return true;
+      final ok = await startService();
+      return ok;
+    });
+  }
+
+  /// 功能释放前台服务；全部租约释放后停止服务。
+  Future<void> release(String lease) async {
+    if (!isSupported) return;
+    await _serialized(() async {
+      if (!_leases.remove(lease)) return;
+      KazumiLogger().i('BackgroundDownloadService: released by "$lease"');
+      _leaseTitles.remove(lease);
+      _leaseTexts.remove(lease);
+      if (_renderLease == lease) {
+        _renderLease = null;
+        // 回退渲染仍活跃的租约内容（任一）。
+        for (final other in _leases) {
+          final title = _leaseTitles[other];
+          if (title != null) {
+            _renderLease = other;
+            await updateServiceSafe(
+              title: title,
+              text: _leaseTexts[other] ?? '',
+            );
+            break;
+          }
+        }
+      }
+      if (_leases.isEmpty && _isRunning) {
+        await stopService();
+      }
+    });
+  }
+
+  /// 更新指定租约的通知栏内容。仅当该租约最后更新时立即渲染；
+  /// 其他租约更新时由 [release] 的回退逻辑接管。
+  Future<void> updateNotification(
+    String lease, {
+    required String title,
+    required String text,
+  }) async {
+    if (!isSupported || !_isRunning || !_leases.contains(lease)) return;
+    _leaseTitles[lease] = title;
+    _leaseTexts[lease] = text;
+    _renderLease = lease;
+    await updateServiceSafe(title: title, text: text);
+  }
+
+  Future<void> updateServiceSafe({
+    required String title,
+    required String text,
+  }) async {
+    try {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: title,
+        notificationText: text,
+      );
+    } catch (e) {
+      // 忽略更新失败，不影响下载
+    }
   }
 
   Future<bool> startService() async {
@@ -141,22 +248,6 @@ class BackgroundDownloadService {
     }
   }
 
-  Future<void> updateNotification({
-    required String title,
-    required String text,
-  }) async {
-    if (!isSupported || !_isRunning) return;
-
-    try {
-      await FlutterForegroundTask.updateService(
-        notificationTitle: title,
-        notificationText: text,
-      );
-    } catch (e) {
-      // 忽略更新失败，不影响下载
-    }
-  }
-
   Future<void> updateProgress({
     required int activeCount,
     required int totalCount,
@@ -177,7 +268,7 @@ class BackgroundDownloadService {
       text = '$percent% · $speedText';
     }
 
-    await updateNotification(title: title, text: text);
+    await updateNotification(httpLease, title: title, text: text);
   }
 
   void handleNotificationAction(String buttonId) {

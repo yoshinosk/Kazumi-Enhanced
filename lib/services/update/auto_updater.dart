@@ -763,12 +763,20 @@ class AutoUpdater {
 
       if (Platform.isWindows) {
         if (type == FileSystemEntityType.file) {
-          final arg = '/select,${filePath.replaceAll('/', r'\')}';
-          await Process.start('explorer.exe', [arg], runInShell: true);
+          // /select, 与路径必须作为两个独立参数、且不经过 shell 传递：
+          // 合并参数或 runInShell 会把含空格的路径破坏，explorer 解析
+          // 失败后回退打开默认目录（「我的文档」）。
+          await Process.start(
+            'explorer.exe',
+            ['/select,', filePath.replaceAll('/', r'\')],
+            runInShell: false,
+          );
         } else {
           await Process.start(
-              'explorer.exe', [targetDirOrFile.replaceAll('/', r'\')],
-              runInShell: true);
+            'explorer.exe',
+            [targetDirOrFile.replaceAll('/', r'\')],
+            runInShell: false,
+          );
         }
       } else if (Platform.isMacOS) {
         if (type == FileSystemEntityType.file) {

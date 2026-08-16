@@ -13,6 +13,7 @@ import android.net.Uri
 import android.app.PictureInPictureParams
 import android.graphics.drawable.Icon
 import android.util.Rational
+import java.util.HashMap
 import androidx.annotation.NonNull
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -105,6 +106,15 @@ class MainActivity: AudioServiceActivity() {
                 val path = call.argument<String>("path") ?: filesDir.absolutePath
                 val availableBytes = getAvailableStorage(path)
                 result.success(availableBytes)
+            } else if (call.method == "hasMediaReadPermission") {
+                result.success(hasMediaReadPermission())
+            } else if (call.method == "requestMediaReadPermission") {
+                requestMediaReadPermission(result)
+            } else if (call.method == "hasAllFilesAccess") {
+                result.success(hasAllFilesAccess())
+            } else if (call.method == "requestAllFilesAccess") {
+                requestAllFilesAccess()
+                result.success(null)
             } else {
                 result.notImplemented()
             }
@@ -332,6 +342,76 @@ class MainActivity: AudioServiceActivity() {
             stat.availableBlocksLong * stat.blockSizeLong
         } catch (e: Exception) {
             -1L
+        }
+    }
+
+    private fun mediaReadPermission(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_VIDEO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+    }
+
+    private fun hasMediaReadPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, mediaReadPermission()) ==
+                PackageManager.PERMISSION_GRANTED
+    }
+
+    // 多槽位权限结果：addFolder 与启动静默请求可能并发，单槽会被
+    // 后一次请求覆盖导致前一个 Dart Future 永久悬挂；按 requestCode
+    // 分别回填。
+    private val mediaReadPermissionResults = HashMap<Int, MethodChannel.Result>()
+    private var mediaReadRequestCode = 2001
+
+    private fun requestMediaReadPermission(result: MethodChannel.Result) {
+        if (hasMediaReadPermission()) {
+            result.success(true)
+            return
+        }
+        val code = mediaReadRequestCode++
+        mediaReadPermissionResults[code] = result
+        androidx.core.app.ActivityCompat.requestPermissions(
+            this,
+            arrayOf(mediaReadPermission()),
+            code
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode >= 2001) {
+            val result = mediaReadPermissionResults.remove(requestCode) ?: return
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+            result.success(granted)
+        }
+    }
+
+    private fun hasAllFilesAccess(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                android.os.Environment.isExternalStorageManager()
+    }
+
+    private fun requestAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return
+        }
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                intent.data = Uri.parse("package:$packageName")
+                startActivity(intent)
+            } catch (ignored: Exception) {
+            }
         }
     }
 }

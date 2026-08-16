@@ -364,6 +364,9 @@ class _TimelinePageState extends State<TimelinePage>
     if (timelineController.onlyShowWatchingBangumis) {
       enabledCount++;
     }
+    if (timelineController.onlyShowJapaneseBangumis) {
+      enabledCount++;
+    }
     return enabledCount;
   }
 
@@ -618,6 +621,19 @@ class _TimelinePageState extends State<TimelinePage>
               icon: Icons.live_tv_rounded,
             ),
           ),
+          const SizedBox(height: 12),
+          Observer(
+            builder: (context) => buildFilterOptionTile(
+              context,
+              title: '仅显示日漫',
+              description: '只保留日本动画，过滤掉国漫等其他地区条目。',
+              value: timelineController.onlyShowJapaneseBangumis,
+              onChanged: (value) {
+                timelineController.setOnlyShowJapaneseBangumis(value);
+              },
+              icon: Icons.public_rounded,
+            ),
+          ),
         ],
       ),
     );
@@ -781,6 +797,12 @@ class _TimelinePageState extends State<TimelinePage>
         final watchingBangumiIds = timelineController.loadWatchingBangumiIds();
         filteredList = filteredList
             .where((item) => watchingBangumiIds.contains(item.id))
+            .toList();
+      }
+
+      if (timelineController.onlyShowJapaneseBangumis) {
+        filteredList = filteredList
+            .where((item) => item.isJapaneseAnime)
             .toList();
       }
 

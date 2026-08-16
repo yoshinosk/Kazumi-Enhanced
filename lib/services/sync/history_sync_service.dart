@@ -51,6 +51,9 @@ class HistorySyncService {
     required int progressMs,
     int? updatedAt,
   }) async {
+    // 本地媒体库条目（含本机绝对路径）与边下边播条目（流 URL 随引擎存活）
+    // 不参与跨设备同步。
+    if (isLocalMediaHistory(history) || isStreamHistory(history)) return;
     final deviceId = await getDeviceId();
     final effectiveUpdatedAt =
         updatedAt ?? history.lastWatchTime.millisecondsSinceEpoch;
@@ -98,6 +101,8 @@ class HistorySyncService {
   }
 
   Future<void> appendDeleteHistory(History history) async {
+    // 本地媒体库条目与边下边播条目不参与跨设备同步。
+    if (isLocalMediaHistory(history) || isStreamHistory(history)) return;
     final event = HistorySyncEvent.deleteHistory(
       deviceId: await getDeviceId(),
       seq: await _nextSeq(),
@@ -135,6 +140,9 @@ class HistorySyncService {
   ) {
     final events = <HistorySyncEvent>[];
     for (final history in histories) {
+      // 本地媒体库条目含本机绝对路径、边下边播条目含临时流 URL，同步到
+      // 其他设备只会产生无法播放的死条目，跳过。
+      if (isLocalMediaHistory(history) || isStreamHistory(history)) continue;
       history.entryKind = HistoryEntryKind.normalize(history.entryKind);
       for (final progress in history.progresses.values) {
         final updatedAt = progress.effectiveUpdatedAtMs(history.lastWatchTime);
@@ -198,9 +206,14 @@ class HistorySyncService {
     final historiesByKey = {
       for (final history in snapshot.histories) history.key: history,
     };
-    final staleKeys = GStorage.histories.keys
-        .where((key) => !historiesByKey.containsKey(key))
-        .toList();
+    // 本地媒体库与边下边播条目不参与跨设备同步（快照中必然缺失），
+    // 必须从 stale 判定中排除，否则每次同步会把这两类历史当作过期删除。
+    final staleKeys = <String>[];
+    for (final history in GStorage.histories.values) {
+      if (historiesByKey.containsKey(history.key)) continue;
+      if (isLocalMediaHistory(history) || isStreamHistory(history)) continue;
+      staleKeys.add(history.key);
+    }
 
     if (historiesByKey.isNotEmpty) {
       await GStorage.histories.putAll(historiesByKey);

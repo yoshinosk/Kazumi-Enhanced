@@ -148,6 +148,16 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
             label: '追番',
           ),
           NavigationDestination(
+            selectedIcon: Icon(Icons.download_rounded),
+            icon: Icon(Icons.download_outlined),
+            label: '下载',
+          ),
+          NavigationDestination(
+            selectedIcon: Icon(Icons.video_library),
+            icon: Icon(Icons.video_library_outlined),
+            label: '媒体库',
+          ),
+          NavigationDestination(
             selectedIcon: Icon(Icons.settings),
             icon: Icon(Icons.settings),
             label: '我的',
@@ -194,6 +204,16 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                   selectedIcon: Icon(Icons.favorite),
                   icon: Icon(Icons.favorite_border),
                   label: Text('追番'),
+                ),
+                NavigationRailDestination(
+                  selectedIcon: Icon(Icons.download_rounded),
+                  icon: Icon(Icons.download_outlined),
+                  label: Text('下载'),
+                ),
+                NavigationRailDestination(
+                  selectedIcon: Icon(Icons.video_library),
+                  icon: Icon(Icons.video_library_outlined),
+                  label: Text('媒体库'),
                 ),
                 NavigationRailDestination(
                   selectedIcon: Icon(Icons.settings),

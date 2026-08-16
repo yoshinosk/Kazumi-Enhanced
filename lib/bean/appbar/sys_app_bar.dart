@@ -1,7 +1,8 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:window_manager/window_manager.dart';
@@ -54,6 +55,7 @@ class SysAppBar extends StatelessWidget implements PreferredSizeWidget {
     if (isDesktop()) {
       // acs.add(IconButton(onPressed: () => windowManager.minimize(), icon: const Icon(Icons.minimize)));
       if (!showWindowButton()) {
+        acs.add(const WindowMaximizeButton());
         acs.add(CloseButton(onPressed: () => windowManager.close()));
       }
       acs.add(const SizedBox(width: 8));
@@ -115,14 +117,14 @@ class SysAppBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize {
     // macOS needs to add 22(macOS title bar height)
     // to default toolbar height to build appbar like normal
+    double baseHeight;
     if (Platform.isMacOS && needTopOffset && showWindowButton()) {
-      if (toolbarHeight != null) {
-        return Size.fromHeight(toolbarHeight! + 22);
-      } else {
-        return const Size.fromHeight(kToolbarHeight + 22);
-      }
+      baseHeight = (toolbarHeight ?? kToolbarHeight) + 22;
     } else {
-      return Size.fromHeight(toolbarHeight ?? kToolbarHeight);
+      baseHeight = toolbarHeight ?? kToolbarHeight;
     }
+    // bottom（如 TabBar）的高度需要计入，否则标题会被底部组件遮挡
+    final bottomHeight = bottom?.preferredSize.height ?? 0;
+    return Size.fromHeight(baseHeight + bottomHeight);
   }
 }

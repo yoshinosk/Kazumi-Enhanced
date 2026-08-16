@@ -1,6 +1,6 @@
 class ApiEndpoints {
   /// 当前版本
-  static const String version = '2.2.6';
+  static const String version = '0.0.1';
 
   /// 规则API级别
   static const int apiLevel = 8;
@@ -40,7 +40,7 @@ class ApiEndpoints {
   static const String bangumiIndex = 'https://bangumi.tv/';
 
   /// bangumi API
-  static const String bangumiAPIDomain = 'https://api.bgm.tv';
+  static const String bangumiAPIDomain = 'https://bgmapi.anibt.net';
 
   /// Bangumi 鉴权 API
   static const String bangumiAuthAPIMirrorDomain = 'https://api.bgmapi.com';
@@ -76,6 +76,10 @@ class ApiEndpoints {
   /// 获取用户收藏。用户名，分页参数1，分页参数2
   static const String bangumiGetCollection =
       '/v0/users/{0}/collections?subject_type=2&limit={1}&offset={2}&type={3}';
+
+  /// 获取用户单个条目收藏。用户名，条目 ID。
+  static const String bangumiGetCollectionBySubject =
+      '/v0/users/{0}/collections/{1}';
 
   /// Bangumi Next API Domain
   static const String bangumiAPINextDomain = 'https://next.bgm.tv';
@@ -127,6 +131,9 @@ class ApiEndpoints {
 
   /// 获取弹弹番剧元数据（通过BGM番剧ID）
   static const String dandanAPIInfoByBgmBangumiId = "/api/v2/bangumi/bgmtv/{0}";
+
+  /// 本地视频文件精确匹配（文件名 + 前 16MiB MD5 + 文件大小）
+  static const String dandanAPIMatch = "/api/v2/match";
 
   /// 图片识别番剧
   static const String traceApi = 'https://api.trace.moe/search';

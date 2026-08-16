@@ -49,8 +49,16 @@ class DioFactory {
         },
       );
 
-  static Dio createForConfig(NetworkConfig config) {
-    return _create(config);
+  static Dio createForConfig(
+    NetworkConfig config, {
+    Map<String, dynamic> defaultHeaders = const {},
+    List<Interceptor> interceptors = const [],
+  }) {
+    return _create(
+      config,
+      defaultHeaders: defaultHeaders,
+      interceptors: interceptors,
+    );
   }
 
   static void reset() {

@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:ui';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -9,6 +9,7 @@ import 'package:kazumi/bean/widget/collect_button.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/info/info_controller.dart';
+import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
 import 'package:kazumi/bean/card/bangumi_info_card.dart';
 import 'package:kazumi/pages/info/source_sheet.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
@@ -20,6 +21,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/utils/device.dart';
 
 class InfoPage extends StatefulWidget {
@@ -206,6 +208,59 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     );
   }
 
+  /// 弹出磁力搜索关键词选择面板，按番剧的几个标题进行搜索。
+  void _showMagnetSearchSheet() {
+    final item = infoController.bangumiItem;
+    final titles = <String>[
+      if (item.nameCn.isNotEmpty) item.nameCn,
+      if (item.name.isNotEmpty && item.name != item.nameCn) item.name,
+      ...item.alias.where(
+          (a) => a.isNotEmpty && a != item.nameCn && a != item.name),
+    ];
+    if (titles.isEmpty) {
+      KazumiDialog.showToast(message: '没有可用的标题用于搜索');
+      return;
+    }
+    if (titles.length == 1) {
+      context.pushNamed(
+        '/magnet/',
+        arguments: MagnetSearchRouteArgs(query: titles.first, anime: item),
+      );
+      return;
+    }
+    showAdaptiveBottomSheet<void>(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('选择搜索关键词',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
+              for (final title in titles)
+                ListTile(
+                  leading: const Icon(Icons.search_rounded),
+                  title: Text(title),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    this.context.pushNamed(
+                      '/magnet/',
+                      arguments: MagnetSearchRouteArgs(query: title, anime: item),
+                    );
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -389,6 +444,13 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                         ),
                       EmbeddedNativeControlArea(
                         child: IconButton(
+                          tooltip: '搜索资源',
+                          onPressed: _showMagnetSearchSheet,
+                          icon: const Icon(Icons.search_rounded),
+                        ),
+                      ),
+                      EmbeddedNativeControlArea(
+                        child: IconButton(
                           onPressed: () {
                             launchUrl(
                               Uri.parse(
@@ -399,8 +461,10 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                           icon: const Icon(Icons.open_in_browser_rounded),
                         ),
                       ),
-                      if (!showWindowButton && isDesktop())
+                      if (!showWindowButton && isDesktop()) ...[
+                        const WindowMaximizeButton(),
                         CloseButton(onPressed: () => windowManager.close()),
+                      ],
                       SizedBox(width: 8),
                     ],
                     toolbarHeight: (Platform.isMacOS && showWindowButton)

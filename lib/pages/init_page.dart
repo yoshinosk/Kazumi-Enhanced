@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -12,8 +12,11 @@ import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
+import 'package:kazumi/pages/magnet/magnet_controller.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
 import 'package:kazumi/services/download/background_download_service.dart';
+import 'package:kazumi/services/notification/app_notifications.dart';
 import 'package:kazumi/services/platform/windows_shortcut.dart';
 import 'package:kazumi/services/platform/platform_environment_service.dart';
 import 'package:kazumi/services/update/startup_update_check.dart';
@@ -27,6 +30,8 @@ class InitPage extends StatefulWidget {
     required this.shaderAssetService,
     required this.myController,
     required this.downloadController,
+    required this.magnetController,
+    required this.mediaController,
   });
 
   final PluginsController pluginsController;
@@ -34,6 +39,8 @@ class InitPage extends StatefulWidget {
   final ShaderAssetService shaderAssetService;
   final MyController myController;
   final DownloadController downloadController;
+  final MagnetController magnetController;
+  final MediaController mediaController;
 
   @override
   State<InitPage> createState() => _InitPageState();
@@ -45,6 +52,8 @@ class _InitPageState extends State<InitPage> {
   ShaderAssetService get shaderAssetService => widget.shaderAssetService;
   MyController get myController => widget.myController;
   DownloadController get downloadController => widget.downloadController;
+  MagnetController get magnetController => widget.magnetController;
+  MediaController get mediaController => widget.mediaController;
 
   @override
   void initState() {
@@ -53,6 +62,7 @@ class _InitPageState extends State<InitPage> {
   }
 
   Future<void> _initializeApp() async {
+    unawaited(AppNotifications.init());
     _migrateStorage();
     _loadShaders();
     _loadDanmakuShield();
@@ -63,6 +73,19 @@ class _InitPageState extends State<InitPage> {
       _setupBackgroundDownloadNavigation();
     } catch (e) {
       KazumiLogger().e('InitPage: downloadController.init() failed', error: e);
+    }
+    // 先初始化媒体库（加载已持久化的搜刮结果），
+    // 磁力控制器随后把已完成任务的搜刮结果同步到媒体库。
+    try {
+      await mediaController.init();
+    } catch (e) {
+      KazumiLogger().e('InitPage: mediaController.init() failed', error: e);
+    }
+    try {
+      magnetController.attachMediaController(mediaController);
+      await magnetController.init();
+    } catch (e) {
+      KazumiLogger().e('InitPage: magnetController.init() failed', error: e);
     }
 
     await _checkRunningOnX11();

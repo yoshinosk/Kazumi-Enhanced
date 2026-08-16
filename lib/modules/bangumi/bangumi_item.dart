@@ -37,6 +37,8 @@ class BangumiItem {
   List<int> votesCount;
   @HiveField(14, defaultValue: '')
   String info;
+  @HiveField(15, defaultValue: [])
+  List<String> metaTags;
   BangumiInterest? interest;
 
   BangumiItem({
@@ -55,8 +57,13 @@ class BangumiItem {
     required this.votes,
     required this.votesCount,
     required this.info,
+    this.metaTags = const [],
     this.interest,
   });
+
+  /// 是否为日本动画（命中 tags 或 metaTags 中的「日本」标签）
+  bool get isJapaneseAnime =>
+      tags.any((tag) => tag.name == '日本') || metaTags.contains('日本');
 
   factory BangumiItem.fromJson(Map<String, dynamic> json) {
     List<String> parseBangumiAliases(Map<String, dynamic> jsonData) {
@@ -163,6 +170,7 @@ class BangumiItem {
       votes: json['rating']['total'] ?? 0,
       votesCount: voteList,
       info: json['info'] ?? '',
+      metaTags: List<String>.from(json['metaTags'] ?? json['meta_tags'] ?? []),
       interest: interest,
     );
   }

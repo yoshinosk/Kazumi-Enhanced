@@ -48,6 +48,12 @@ abstract class ICollectRepository {
   /// 更新时间表页"只显示在看的番剧"设置
   Future<void> updateTimelineOnlyShowWatchingBangumis(bool value);
 
+  /// 获取时间表页"仅显示日漫"设置
+  bool getTimelineOnlyShowJapaneseBangumis();
+
+  /// 更新时间表页"仅显示日漫"设置
+  Future<void> updateTimelineOnlyShowJapaneseBangumis(bool value);
+
   // ========== 其他设置 ==========
 
   /// 获取隐私模式设置
@@ -188,6 +194,36 @@ class CollectRepository implements ICollectRepository {
   }
 
   // ========== 其他设置实现 ==========
+
+  @override
+  bool getTimelineOnlyShowJapaneseBangumis() {
+    try {
+      final value =
+          GStorage.getSetting(SettingsKeys.timelineOnlyShowJapaneseBangumis);
+      return value;
+    } catch (e, stackTrace) {
+      KazumiLogger().e(
+        'GStorage: get timeline only show japanese bangumis setting failed, using default false',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return false;
+    }
+  }
+
+  @override
+  Future<void> updateTimelineOnlyShowJapaneseBangumis(bool value) async {
+    try {
+      await GStorage.putSetting(
+          SettingsKeys.timelineOnlyShowJapaneseBangumis, value);
+    } catch (e, stackTrace) {
+      KazumiLogger().e(
+        'GStorage: update timeline only show japanese bangumis setting failed. value=$value',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
 
   @override
   bool getPrivateMode() {

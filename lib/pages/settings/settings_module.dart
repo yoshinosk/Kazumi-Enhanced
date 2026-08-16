@@ -1,4 +1,4 @@
-import 'package:flutter_modular/flutter_modular.dart';
+﻿import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/about/about_module.dart';
 import 'package:kazumi/pages/bangumi/bangumi_module.dart';
 import 'package:kazumi/pages/download/download_page_module.dart';
@@ -10,6 +10,7 @@ import 'package:kazumi/pages/settings/displaymode_settings.dart';
 import 'package:kazumi/pages/settings/download_settings.dart';
 import 'package:kazumi/pages/settings/interface_settings.dart';
 import 'package:kazumi/pages/settings/keyboard_settings.dart';
+import 'package:kazumi/pages/settings/magnet_settings.dart';
 import 'package:kazumi/pages/settings/player_settings.dart';
 import 'package:kazumi/pages/settings/proxy/proxy_module.dart';
 import 'package:kazumi/pages/settings/renderer_settings.dart';
@@ -59,6 +60,10 @@ final settingsModule = createModule(
       ..route(
         '/download-settings',
         child: (context, state) => const DownloadSettingsPage(),
+      )
+      ..route(
+        '/magnet',
+        child: (context, state) => const MagnetSettingsPage(),
       )
       ..module(bangumiModule);
   },

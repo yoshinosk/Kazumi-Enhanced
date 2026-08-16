@@ -14,6 +14,7 @@ import 'package:kazumi/modules/characters/character_item.dart';
 import 'package:kazumi/modules/staff/staff_item.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/device.dart';
+import 'package:kazumi/pages/info/local_episodes_section.dart';
 
 class InfoTabView extends StatefulWidget {
   const InfoTabView({
@@ -201,6 +202,8 @@ class _InfoTabViewState extends State<InfoTabView>
                   );
                 }).toList(),
               ),
+              const SizedBox(height: 16),
+              LocalEpisodesSection(bangumiItem: widget.bangumiItem),
             ],
           ),
         ),

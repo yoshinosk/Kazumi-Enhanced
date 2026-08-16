@@ -17,6 +17,7 @@ import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/services/player/remote.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:kazumi/pages/player/danmaku_offset_menu.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
@@ -722,6 +723,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 _buildDanmakuToggleButton(context),
+                                DanmakuOffsetMenu(
+                                  onChanged: playerController
+                                      .danmaku.clearAndInvalidateScheduledDanmakus,
+                                ),
                                 IconButton(
                                   onPressed: () {
                                     showDanmakuSettingsSheet(

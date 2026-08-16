@@ -9,22 +9,6 @@ part of 'video_controller.dart';
 // ignore_for_file: non_constant_identifier_names, unnecessary_brace_in_string_interps, unnecessary_lambdas, prefer_expression_function_bodies, lines_longer_than_80_chars, avoid_as, avoid_annotating_with_dynamic, no_leading_underscores_for_local_identifiers
 
 mixin _$VideoPageController on _VideoPageController, Store {
-  late final _$episodeCommentsListAtom =
-      Atom(name: '_VideoPageController.episodeCommentsList', context: context);
-
-  @override
-  ObservableList<EpisodeCommentItem> get episodeCommentsList {
-    _$episodeCommentsListAtom.reportRead();
-    return super.episodeCommentsList;
-  }
-
-  @override
-  set episodeCommentsList(ObservableList<EpisodeCommentItem> value) {
-    _$episodeCommentsListAtom.reportWrite(value, super.episodeCommentsList, () {
-      super.episodeCommentsList = value;
-    });
-  }
-
   late final _$_loadingAtom =
       Atom(name: '_VideoPageController._loading', context: context);
 
@@ -93,22 +77,6 @@ mixin _$VideoPageController on _VideoPageController, Store {
     });
   }
 
-  late final _$commentsEpisodeAtom =
-      Atom(name: '_VideoPageController.commentsEpisode', context: context);
-
-  @override
-  int get commentsEpisode {
-    _$commentsEpisodeAtom.reportRead();
-    return super.commentsEpisode;
-  }
-
-  @override
-  set commentsEpisode(int value) {
-    _$commentsEpisodeAtom.reportWrite(value, super.commentsEpisode, () {
-      super.commentsEpisode = value;
-    });
-  }
-
   late final _$isFullscreenAtom =
       Atom(name: '_VideoPageController.isFullscreen', context: context);
 
@@ -122,22 +90,6 @@ mixin _$VideoPageController on _VideoPageController, Store {
   set isFullscreen(bool value) {
     _$isFullscreenAtom.reportWrite(value, super.isFullscreen, () {
       super.isFullscreen = value;
-    });
-  }
-
-  late final _$isCommentsAscendingAtom =
-      Atom(name: '_VideoPageController.isCommentsAscending', context: context);
-
-  @override
-  bool get isCommentsAscending {
-    _$isCommentsAscendingAtom.reportRead();
-    return super.isCommentsAscending;
-  }
-
-  @override
-  set isCommentsAscending(bool value) {
-    _$isCommentsAscendingAtom.reportWrite(value, super.isCommentsAscending, () {
-      super.isCommentsAscending = value;
     });
   }
 
@@ -205,6 +157,38 @@ mixin _$VideoPageController on _VideoPageController, Store {
     });
   }
 
+  late final _$isLocalMediaModeAtom =
+      Atom(name: '_VideoPageController.isLocalMediaMode', context: context);
+
+  @override
+  bool get isLocalMediaMode {
+    _$isLocalMediaModeAtom.reportRead();
+    return super.isLocalMediaMode;
+  }
+
+  @override
+  set isLocalMediaMode(bool value) {
+    _$isLocalMediaModeAtom.reportWrite(value, super.isLocalMediaMode, () {
+      super.isLocalMediaMode = value;
+    });
+  }
+
+  late final _$isStreamModeAtom =
+      Atom(name: '_VideoPageController.isStreamMode', context: context);
+
+  @override
+  bool get isStreamMode {
+    _$isStreamModeAtom.reportRead();
+    return super.isStreamMode;
+  }
+
+  @override
+  set isStreamMode(bool value) {
+    _$isStreamModeAtom.reportWrite(value, super.isStreamMode, () {
+      super.isStreamMode = value;
+    });
+  }
+
   late final _$roadListAtom =
       Atom(name: '_VideoPageController.roadList', context: context);
 
@@ -268,6 +252,46 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
+  void _initForLocalMediaPlayback(
+      {required BangumiItem bangumiItem,
+      required List<LocalMediaFile> files,
+      required int selectedIndex,
+      required String pluginName,
+      required int? bangumiSyncId}) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._initForLocalMediaPlayback');
+    try {
+      return super._initForLocalMediaPlayback(
+          bangumiItem: bangumiItem,
+          files: files,
+          selectedIndex: selectedIndex,
+          pluginName: pluginName,
+          bangumiSyncId: bangumiSyncId);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void _initForStreamPlayback(
+      {required BangumiItem bangumiItem,
+      required String streamUrl,
+      required String fileName,
+      required String pluginName}) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._initForStreamPlayback');
+    try {
+      return super._initForStreamPlayback(
+          bangumiItem: bangumiItem,
+          streamUrl: streamUrl,
+          fileName: fileName,
+          pluginName: pluginName);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(
         name: '_VideoPageController._beginEpisodeSwitch');
@@ -312,41 +336,17 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
-  void _applyEpisodeComments(
-      int episode, EpisodeInfo info, List<EpisodeCommentItem> comments) {
-    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
-        name: '_VideoPageController._applyEpisodeComments');
-    try {
-      return super._applyEpisodeComments(episode, info, comments);
-    } finally {
-      _$_VideoPageControllerActionController.endAction(_$actionInfo);
-    }
-  }
-
-  @override
-  void toggleSortOrder() {
-    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
-        name: '_VideoPageController.toggleSortOrder');
-    try {
-      return super.toggleSortOrder();
-    } finally {
-      _$_VideoPageControllerActionController.endAction(_$actionInfo);
-    }
-  }
-
-  @override
   String toString() {
     return '''
-episodeCommentsList: ${episodeCommentsList},
 selectedEpisode: ${selectedEpisode},
 playingEpisode: ${playingEpisode},
-commentsEpisode: ${commentsEpisode},
 isFullscreen: ${isFullscreen},
-isCommentsAscending: ${isCommentsAscending},
 isPip: ${isPip},
 showTabBody: ${showTabBody},
 historyOffset: ${historyOffset},
 isOfflineMode: ${isOfflineMode},
+isLocalMediaMode: ${isLocalMediaMode},
+isStreamMode: ${isStreamMode},
 roadList: ${roadList}
     ''';
   }

@@ -18,14 +18,19 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
-import 'package:kazumi/pages/player/episode_comments_sheet.dart';
+import 'package:kazumi/pages/player/episode_danmaku_sheet.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/download/download_episode_sheet.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
+import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/modules/download/download_module.dart';
+import 'package:kazumi/modules/history/history_module.dart'
+    show kLocalMediaAdapterName;
 import 'package:kazumi/services/player/timed_shutdown_service.dart';
 import 'package:kazumi/utils/device.dart';
+import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:kazumi/services/platform/display_mode_service.dart';
 
 class VideoPage extends StatefulWidget {
@@ -125,7 +130,9 @@ class _VideoPageState extends State<VideoPage>
   }
 
   void _initializePlayback() {
-    if (videoPageController.isOfflineMode) {
+    if (videoPageController.isOfflineMode ||
+        videoPageController.isLocalMediaMode ||
+        videoPageController.isStreamMode) {
       _initOfflineMode(playerController);
     } else {
       _initOnlineMode(playerController);
@@ -947,7 +954,11 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget _buildDownloadStatusIcon(int episodeNumber, String episodePageUrl) {
-    if (videoPageController.isOfflineMode) return const SizedBox.shrink();
+    if (videoPageController.isOfflineMode ||
+        videoPageController.isLocalMediaMode ||
+        videoPageController.isStreamMode) {
+      return const SizedBox.shrink();
+    }
     final episode = _getEpisodeFromRecords(episodeNumber, episodePageUrl);
     if (episode == null) return const SizedBox.shrink();
     switch (episode.status) {
@@ -981,6 +992,55 @@ class _VideoPageState extends State<VideoPage>
     }
   }
 
+  /// 本地媒体库角标：在线播放下，若媒体库已匹配到该番剧的同集文件，
+  /// 显示本地图标；点击直接用媒体库文件播放该集。
+  ///
+  /// [localEpisodeFiles] 为预构建的「解析集数 → 文件」映射（menuBody
+  /// 构建一次），避免逐集调用 fileForEpisode 线性扫全库。
+  Widget _buildLocalMediaIcon(
+      int episodeNumber, Map<int, LocalMediaFile> localEpisodeFiles) {
+    if (videoPageController.isOfflineMode ||
+        videoPageController.isLocalMediaMode ||
+        videoPageController.isStreamMode) {
+      return const SizedBox.shrink();
+    }
+    final file = localEpisodeFiles[episodeNumber];
+    if (file == null) return const SizedBox.shrink();
+    final bangumiId = videoPageController.bangumiItem.id;
+    final mediaController = inject<MediaController>();
+    return Tooltip(
+      message: '本地媒体库有该集，点击切换本地播放',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () {
+          final siblings = mediaController.filesForBangumi(bangumiId);
+          final index = siblings.indexWhere((f) => f.path == file.path);
+          // 先停止当前播放器，避免新旧两个播放器同时存活（音频重叠、资源双份）。
+          playerController.beginShutdown();
+          _closeTabBodyAnimated();
+          context.pushNamed(
+            '/video/',
+            arguments: LocalMediaVideoPlaybackArgs(
+              bangumiItem: videoPageController.bangumiItem,
+              files: siblings.isEmpty ? [file] : siblings,
+              selectedIndex: index < 0 ? 0 : index,
+              pluginName: kLocalMediaAdapterName,
+              bangumiSyncId: bangumiId,
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(
+            Icons.folder_copy_rounded,
+            size: 16,
+            color: Theme.of(context).colorScheme.tertiary,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget get menuBody {
     return Observer(
       builder: (context) {
@@ -988,12 +1048,20 @@ class _VideoPageState extends State<VideoPage>
         if (visibleRoad >= 0 &&
             visibleRoad < videoPageController.roadList.length) {
           final road = videoPageController.roadList[visibleRoad];
+          // 预构建本地媒体库「集数 → 文件」映射：在线剧集列表逐行展示
+          // 本地角标时按 O(1) 查询（原实现逐集全库线性扫描）。
+          final localEpisodeFiles = inject<MediaController>()
+              .episodeFileMapForBangumi(videoPageController.bangumiItem.id);
           int count = 1;
           for (var urlItem in road.data) {
             int count0 = count;
             final episodeName = count0 - 1 < road.identifier.length
                 ? road.identifier[count0 - 1]
                 : '第$count0集';
+            // 优先按剧集名称解析的集数匹配（多季 / 非连续播放列表时列表
+            // 位置与实际集数不一致），解析失败回退列表位置。
+            final parsedName = parseLocalEpisodeNumber(episodeName);
+            final localEpisodeNumber = parsedName > 0 ? parsedName : count0;
             cardList.add(Container(
               margin: const EdgeInsets.only(bottom: 4),
               child: Material(
@@ -1052,6 +1120,8 @@ class _VideoPageState extends State<VideoPage>
                                           .onSurface),
                             )),
                             _buildDownloadStatusIcon(count0, urlItem),
+                            _buildLocalMediaIcon(
+                                localEpisodeNumber, localEpisodeFiles),
                             const SizedBox(width: 2),
                           ],
                         ),
@@ -1090,7 +1160,6 @@ class _VideoPageState extends State<VideoPage>
 
   Widget get tabBody {
     final bool danmakuOn = playerController.danmaku.danmakuOn;
-    final int episodeNum = videoPageController.commentsEpisode;
 
     return Container(
       color: Theme.of(context).canvasColor,
@@ -1115,7 +1184,7 @@ class _VideoPageState extends State<VideoPage>
                   },
                   tabs: const [
                     Tab(text: '选集'),
-                    Tab(text: '评论'),
+                    Tab(text: '弹幕'),
                   ],
                 ),
                 if (MediaQuery.sizeOf(context).width <=
@@ -1184,7 +1253,9 @@ class _VideoPageState extends State<VideoPage>
                           ],
                         ),
                       ),
-                      if (!videoPageController.isOfflineMode)
+                      if (!videoPageController.isOfflineMode &&
+                          !videoPageController.isLocalMediaMode &&
+                          !videoPageController.isStreamMode)
                         Positioned(
                           right: 16,
                           bottom: 16,
@@ -1203,9 +1274,8 @@ class _VideoPageState extends State<VideoPage>
                         ),
                     ],
                   ),
-                  EpisodeCommentsSheet(
-                    episode: episodeNum,
-                    selection: videoPageController.selectedEpisode,
+                  EpisodeDanmakuSheet(
+                    playerController: playerController,
                     videoPageController: videoPageController,
                   ),
                 ],

@@ -4,7 +4,10 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
+import 'package:kazumi/modules/danmaku/danmaku_match_response.dart';
+import 'package:kazumi/utils/dandan_file_hash.dart';
 import 'package:kazumi/utils/string_similarity.dart';
+import 'package:path/path.dart' as p;
 
 class DanmakuApi {
   static final DanmakuClient _client = DanmakuClient.instance;
@@ -21,7 +24,14 @@ class DanmakuApi {
   }
 
   // 从标题获取DanDanBangumiID
-  static Future<int> getBangumiIDByTitle(String title) async {
+  //
+  // [minSimilarity] 为可接受的最低标题相似度。低于该阈值时宁可返回 0（交由上层
+  // 继续尝试其它策略），也不要返回一个风马牛不相及的番剧——错误的 animeId 会
+  // 直接导致加载到完全无关的弹幕。
+  static Future<int> getBangumiIDByTitle(
+    String title, {
+    double minSimilarity = 0.35,
+  }) async {
     DanmakuSearchResponse danmakuSearchResponse =
         await getDanmakuSearchResponse(title);
 
@@ -30,7 +40,9 @@ class DanmakuApi {
 
     for (var anime in danmakuSearchResponse.animes) {
       int animeId = anime.animeId;
-      if (animeId >= 100000 || animeId < 2) {
+      // 早期实现额外排除了 animeId >= 100000 的条目，但弹弹 Play 近年新增番剧的
+      // animeId 普遍已超过该阈值，这会把绝大多数新番直接过滤掉。
+      if (animeId < 2) {
         continue;
       }
 
@@ -49,7 +61,55 @@ class DanmakuApi {
       }
     }
 
+    if (maxSimilarity < minSimilarity) {
+      KazumiLogger().w(
+          'Danmaku: best similarity $maxSimilarity below threshold $minSimilarity for "$title", discarded');
+      return 0;
+    }
+
     return bestAnimeId;
+  }
+
+  /// 通过弹弹 Play 的文件匹配接口精确定位本地视频对应的分集。
+  ///
+  /// 相比「标题检索 + 集数猜测」，该接口直接以文件哈希命中弹幕库，
+  /// 不受字幕组命名、季度拆分、BGM ID 映射缺失的影响，是本地媒体的首选方案。
+  static Future<DanmakuMatchResponse> matchLocalFile(String filePath) async {
+    if (filePath.isEmpty) return DanmakuMatchResponse.empty;
+
+    final fileHash = await calculateDandanFileHash(filePath);
+    if (fileHash == null) {
+      KazumiLogger().w('Danmaku: unable to hash local file $filePath');
+      return DanmakuMatchResponse.empty;
+    }
+    final fileSize = await readFileSize(filePath);
+    // 弹弹 Play 官方 API 文档规定 `/api/v2/match` 的 fileName 不包含文件夹名
+    // 与扩展名（扩展名会在服务端的文件名比对中造成失配）；特殊字符需转义。
+    final fileName = p.basenameWithoutExtension(filePath);
+
+    final endPoint = ApiEndpoints.dandanAPIDomain + ApiEndpoints.dandanAPIMatch;
+    KazumiLogger()
+        .i('Danmaku: matching local file "$fileName" (size: $fileSize)');
+
+    final jsonData = await _client.post(endPoint, data: {
+      'fileName': fileName,
+      'fileHash': fileHash,
+      'fileSize': fileSize,
+      'videoDuration': 0,
+      'matchMode': 'hashAndFileName',
+    });
+    if (jsonData is! Map) {
+      return DanmakuMatchResponse.empty;
+    }
+    final response = DanmakuMatchResponse.fromJson(
+        Map<String, dynamic>.from(jsonData));
+    // 业务错误（如签名无效、额度受限）会以 200 + success=false 返回，
+    // 不要静默当作「无候选」，便于在日志中定位匹配失败的真实原因。
+    if (!response.success && response.errorCode != 0) {
+      KazumiLogger().w(
+          'Danmaku: match API returned error ${response.errorCode}: ${response.errorMessage}');
+    }
+    return response;
   }
 
   // 从BangumiID获取分集ID
@@ -96,23 +156,47 @@ class DanmakuApi {
     if (bangumiID == 0) {
       return danmakus;
     }
-    // 这里猜测了弹弹Play的分集命名规则，例如上面的番剧ID为1758，第一集弹幕库ID大概率为17580001，但是此命名规则并没有体现在官方API文档里，保险的做法是请求 ApiEndpoints.dandanInfo
-    var path = ApiEndpoints.dandanAPIComment +
-        bangumiID.toString() +
-        episode.toString().padLeft(4, '0');
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
-    Map<String, String> withRelated = {
-      'withRelated': 'true',
-    };
-    KazumiLogger().i("Danmaku: final request URL $endPoint");
-    final jsonData = await _client.get(endPoint, queryParameters: withRelated);
-    List<dynamic> comments = jsonData['comments'];
-
-    for (var comment in comments) {
-      DanmakuEntry danmaku = DanmakuEntry.fromJson(comment);
-      danmakus.add(danmaku);
+    // 关键修正：不再猜测 `animeId * 10000 + 集数` 的弹幕库 ID。
+    // 该命名规则并未写入弹弹 Play 官方文档，对大量番剧（尤其新番、多季、合集）
+    // 都不成立，会直接表现为“弹弹明明有该番剧弹幕库却关联不到”。
+    // 改为查询番剧真实分集列表，按集数定位 episodeId 后再取弹幕。
+    final episodeId = await _resolveDanDanEpisodeId(bangumiID, episode);
+    if (episodeId == 0) {
+      KazumiLogger().w(
+          'Danmaku: cannot resolve episodeId for bangumi $bangumiID episode $episode');
+      return danmakus;
     }
-    return danmakus;
+    return await getDanDanmakuByEpisodeID(episodeId);
+  }
+
+  /// 在弹弹番剧分集列表中按集数定位真实 episodeId。
+  ///
+  /// 1. 优先按分集标题中解析出的集数匹配（兼容 "01" / "1" / "第1话" / "EP1" 等写法）；
+  /// 2. 退化时按数组下标匹配（TV 番剧通常顺序即集数）。
+  static Future<int> _resolveDanDanEpisodeId(int bangumiID, int episode) async {
+    try {
+      final resp = await getDanDanEpisodesByDanDanBangumiID(bangumiID);
+      if (!resp.success || resp.episodes.isEmpty) {
+        return 0;
+      }
+      for (final ep in resp.episodes) {
+        if (_parseEpisodeNumber(ep.episodeTitle) == episode) {
+          return ep.episodeId;
+        }
+      }
+      if (episode >= 1 && episode <= resp.episodes.length) {
+        return resp.episodes[episode - 1].episodeId;
+      }
+    } catch (e) {
+      KazumiLogger().w('Danmaku: failed to resolve episodeId', error: e);
+    }
+    return 0;
+  }
+
+  static int _parseEpisodeNumber(String title) {
+    final match = RegExp(r'(\d+)').firstMatch(title.trim());
+    if (match == null) return -1;
+    return int.tryParse(match.group(1)!) ?? -1;
   }
 
   static Future<List<DanmakuEntry>> getDanDanmakuByEpisodeID(

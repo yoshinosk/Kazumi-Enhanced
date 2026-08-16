@@ -14,6 +14,20 @@ class HistoryEntryKind {
   HistoryEntryKind._();
 }
 
+/// 本地媒体库播放使用的 adapterName 标识（区别于下载缓存插件名）。
+const String kLocalMediaAdapterName = 'local';
+
+/// 磁力边下边播使用的 adapterName 标识（流 URL 随引擎生命周期存活）。
+const String kMagnetStreamAdapterName = 'magnet-stream';
+
+/// 判断历史条目是否来自本地媒体库播放。
+bool isLocalMediaHistory(History history) =>
+    history.adapterName == kLocalMediaAdapterName;
+
+/// 判断历史条目是否来自磁力边下边播。
+bool isStreamHistory(History history) =>
+    history.adapterName == kMagnetStreamAdapterName;
+
 class PlaybackHistoryIdentity {
   const PlaybackHistoryIdentity({
     required this.bangumiItem,

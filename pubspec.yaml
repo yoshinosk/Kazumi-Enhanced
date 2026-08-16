@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.2.6+20206
+version: 0.0.1+1
 
 environment:
   sdk: ">=3.3.4 <4.0.0"
@@ -91,6 +91,7 @@ dependencies:
   screen_brightness_ohos: ^2.1.2
   screen_brightness_platform_interface: ^2.1.0
   synchronized: any
+  xml: ^6.5.0
   flutter_svg: ^2.2.3
   antlr4: ^4.13.2
   fl_chart: ^1.1.1
@@ -112,7 +113,7 @@ dependencies:
   webview_windows:
     git:
       url: https://github.com/Predidit/flutter-webview-windows.git
-      ref: 8e3578e6032c93f1723f58db930d480b7828d796
+      ref: 2b3306d2bfb9f22cbb328743b60e547cf50f0c3c
   desktop_webview_window:
     git:
       url: https://github.com/Predidit/linux_webview_window.git
@@ -120,50 +121,59 @@ dependencies:
   media_kit:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./media_kit
   media_kit_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./media_kit_video
   media_kit_libs_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/universal/media_kit_libs_video
   macos_secure_bookmarks: ^0.2.1
-
+  libtorrent_flutter: ^1.9.2
+  awesome_notifications: ^0.12.1
+  local_notifier: ^0.1.6
+  watcher: ^1.2.1
 dependency_overrides:
+  # Kazumi 本地 vendor：续做种修复（原生层 no_recheck_incomplete_resume 翻转，
+  # 见 third_party/libtorrent_flutter/README 与「重启续做种实施方案」）。
+  # 使用 prebuilt DLL 时行为与上游一致；重建原生库后翻转 resumeAware。
+  libtorrent_flutter:
+    path: third_party/libtorrent_flutter
+
   media_kit_libs_linux:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/linux/media_kit_libs_linux
   media_kit_libs_ios_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/ios/media_kit_libs_ios_video
   media_kit_libs_android_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/android/media_kit_libs_android_video
   media_kit_libs_windows_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/windows/media_kit_libs_windows_video
   media_kit_libs_macos_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/macos/media_kit_libs_macos_video
   media_kit_libs_ohos:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6d744e4ad8af23d29942a7061d8de101972a3707
+      ref: 994465d9bfca3f39d0b41199d16e7fd93fe97881
       path: ./libs/ohos/media_kit_libs_ohos
 
 dev_dependencies:

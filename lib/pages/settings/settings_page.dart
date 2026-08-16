@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
@@ -10,6 +10,7 @@ import 'package:kazumi/pages/settings/danmaku/danmaku_settings.dart';
 import 'package:kazumi/pages/settings/download_settings.dart';
 import 'package:kazumi/pages/settings/interface_settings.dart';
 import 'package:kazumi/pages/settings/keyboard_settings.dart';
+import 'package:kazumi/pages/settings/magnet_settings.dart';
 import 'package:kazumi/pages/settings/player_settings.dart';
 import 'package:kazumi/pages/settings/proxy/proxy_settings_page.dart';
 import 'package:kazumi/pages/settings/theme_settings_page.dart';
@@ -83,6 +84,13 @@ final List<_SettingsGroup> _settingsGroups = [
         description: '并发数与弹幕缓存',
         icon: Icons.downloading_rounded,
         builder: (_) => const DownloadSettingsPage(),
+      ),
+      _SettingsCategory(
+        id: 'magnet',
+        label: '磁力下载',
+        description: 'Mikan 搜索与磁力下载',
+        icon: Icons.search_rounded,
+        builder: (_) => const MagnetSettingsPage(),
       ),
     ],
   ),

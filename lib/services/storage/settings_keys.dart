@@ -13,6 +13,8 @@ enum SettingGroup {
   sync,
   update,
   misc,
+  magnet,
+  media,
 }
 
 class SettingContext {
@@ -203,6 +205,11 @@ class SettingsKeys {
     true,
     group: SettingGroup.danmaku,
   );
+  static const danmakuAxisAutoCheck = SettingKey<bool>(
+    _SettingBoxKey.danmakuAxisAutoCheck,
+    true,
+    group: SettingGroup.danmaku,
+  );
   static const themeMode = SettingKey<String>(
     _SettingBoxKey.themeMode,
     'system',
@@ -388,6 +395,11 @@ class SettingsKeys {
     false,
     group: SettingGroup.collect,
   );
+  static const timelineOnlyShowJapaneseBangumis = SettingKey<bool>(
+    _SettingBoxKey.timelineOnlyShowJapaneseBangumis,
+    false,
+    group: SettingGroup.collect,
+  );
   static const useSystemFont = SettingKey<bool>(
     _SettingBoxKey.useSystemFont,
     false,
@@ -521,6 +533,365 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  // 磁力搜索 / 下载 / RSS 订阅相关设置
+  static const mikanBaseUrl = SettingKey<String>(
+    'mikanBaseUrl',
+    'https://mikanani.me',
+    group: SettingGroup.magnet,
+  );
+
+  /// 启用的搜索源 id 列表，逗号分隔；为空时使用全部内置源。
+  static const magnetSearchSources = SettingKey<String>(
+    'magnetSearchSources',
+    '',
+    group: SettingGroup.magnet,
+  );
+
+  /// 默认搜索源 id（单选）。
+  static const magnetDefaultSource = SettingKey<String>(
+    'magnetDefaultSource',
+    'mikan',
+    group: SettingGroup.magnet,
+  );
+
+  /// Animes Garden 搜索条件：字幕组名称（可空）。
+  static const animesGardenFansub = SettingKey<String>(
+    'animesGardenFansub',
+    '',
+    group: SettingGroup.magnet,
+  );
+
+  /// Animes Garden 搜索条件：资源类型（可空，如 动画 / 合集 / 音乐）。
+  static const animesGardenType = SettingKey<String>(
+    'animesGardenType',
+    '',
+    group: SettingGroup.magnet,
+  );
+  static const magnetSubscriptions = SettingKey<String>(
+    'magnetSubscriptions',
+    '[]',
+    group: SettingGroup.magnet,
+  );
+  static const magnetDownloadEntries = SettingKey<String>(
+    'magnetDownloadEntries',
+    '[]',
+    group: SettingGroup.magnet,
+  );
+
+  // ---------- 内置磁力引擎（Libtorrent） ----------
+  /// 是否启用内置磁力下载引擎（随应用启动 / 停止）。
+  static const magnetEngineEnabled = SettingKey<bool>(
+    'magnetEngineEnabled',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// 默认下载目录，留空使用系统“下载”目录。
+  static const magnetDownloadDir = SettingKey<String>(
+    'magnetDownloadDir',
+    '',
+    group: SettingGroup.magnet,
+  );
+
+  /// BitTorrent 对等节点监听端口，0 表示使用默认。
+  static const magnetListenPort = SettingKey<int>(
+    'magnetListenPort',
+    0,
+    group: SettingGroup.magnet,
+  );
+
+  /// 单个会话最大对等节点连接数。
+  static const magnetMaxPeers = SettingKey<int>(
+    'magnetMaxPeers',
+    100,
+    group: SettingGroup.magnet,
+  );
+
+  /// 全局最大上传速度（KiB/s），0 表示不限。
+  static const magnetMaxUploadLimitKb = SettingKey<int>(
+    'magnetMaxUploadLimitKb',
+    0,
+    group: SettingGroup.magnet,
+  );
+
+  /// 全局最大下载速度（KiB/s），0 表示不限。
+  static const magnetMaxDownloadLimitKb = SettingKey<int>(
+    'magnetMaxDownloadLimitKb',
+    0,
+    group: SettingGroup.magnet,
+  );
+
+  /// 同时活动的下载任务数上限，0 表示不限。超出的任务进入排队（queued），
+  /// 有任务完成 / 暂停时按添加顺序自动提升。
+  static const magnetMaxActiveDownloads = SettingKey<int>(
+    'magnetMaxActiveDownloads',
+    3,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否启用「限速时段」：在指定时间段内把全局下载限速降为
+  /// [magnetScheduledLimitKb]（如夜间全速 / 白天限速）。
+  static const magnetScheduledLimitEnabled = SettingKey<bool>(
+    'magnetScheduledLimitEnabled',
+    false,
+    group: SettingGroup.magnet,
+  );
+
+  /// 限速时段开始时间（HH:mm，含跨天窗口）。
+  static const magnetScheduledLimitStart = SettingKey<String>(
+    'magnetScheduledLimitStart',
+    '23:00',
+    group: SettingGroup.magnet,
+  );
+
+  /// 限速时段结束时间（HH:mm，含跨天窗口）。
+  static const magnetScheduledLimitEnd = SettingKey<String>(
+    'magnetScheduledLimitEnd',
+    '08:00',
+    group: SettingGroup.magnet,
+  );
+
+  /// 限速时段内的全局下载限速（KiB/s，0 表示不限）。
+  static const magnetScheduledLimitKb = SettingKey<int>(
+    'magnetScheduledLimitKb',
+    500,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否仅 WiFi 下载（Android）：非 WiFi 网络下自动暂停下载任务，
+  /// 恢复 WiFi 后自动继续。
+  static const magnetWifiOnly = SettingKey<bool>(
+    'magnetWifiOnly',
+    false,
+    group: SettingGroup.magnet,
+  );
+
+  /// 做种停止策略：none=不自动停止（一直做种）/
+  /// time=做种指定时长后停止 / ratio=分享率达到阈值后停止。
+  static const magnetSeedingStopMode = SettingKey<String>(
+    'magnetSeedingStopMode',
+    'ratio',
+    group: SettingGroup.magnet,
+  );
+
+  /// 做种停止时长（小时），配合 [magnetSeedingStopMode]=time。
+  static const magnetSeedingStopHours = SettingKey<int>(
+    'magnetSeedingStopHours',
+    24,
+    group: SettingGroup.magnet,
+  );
+
+  /// 做种停止分享率阈值（0.1-10.0），配合 [magnetSeedingStopMode]=ratio。
+  static const magnetSeedingStopRatio = SettingKey<double>(
+    'magnetSeedingStopRatio',
+    1.0,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否启用 DHT 节点发现。
+  static const magnetEnableDht = SettingKey<bool>(
+    'magnetEnableDht',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否启用 UPnP / NAT-PMP 端口映射。
+  static const magnetEnableUpnp = SettingKey<bool>(
+    'magnetEnableUpnp',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否强制加密连接。
+  static const magnetForceEncrypt = SettingKey<bool>(
+    'magnetForceEncrypt',
+    false,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否启用 IPv6 监听。
+  static const magnetEnableIpv6 = SettingKey<bool>(
+    'magnetEnableIpv6',
+    false,
+    group: SettingGroup.magnet,
+  );
+
+  /// 是否自动更新 tracker 列表。
+  static const magnetTrackerAutoUpdate = SettingKey<bool>(
+    'magnetTrackerAutoUpdate',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// tracker 自动更新间隔（小时）。
+  static const magnetTrackerUpdateHours = SettingKey<int>(
+    'magnetTrackerUpdateHours',
+    24,
+    group: SettingGroup.magnet,
+  );
+
+  /// tracker 更新源，每行一个 URL。
+  static const magnetTrackerSources = SettingKey<String>(
+    'magnetTrackerSources',
+    'https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all.txt\n'
+        'https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/best.txt\n'
+        'https://newtrackon.com/api/stable',
+    group: SettingGroup.magnet,
+  );
+
+  /// tracker 最近一次成功更新时间（epoch 毫秒），0 表示从未更新。
+  static const magnetTrackerLastUpdated = SettingKey<int>(
+    'magnetTrackerLastUpdated',
+    0,
+    group: SettingGroup.magnet,
+  );
+
+  /// 缓存的 tracker 列表（每行一个 announce URL）。
+  static const magnetTrackersCache = SettingKey<String>(
+    'magnetTrackersCache',
+    '',
+    group: SettingGroup.magnet,
+  );
+
+  /// 下载完成后是否自动把文件移入媒体库（仅「已搜刮」任务生效）。
+  static const magnetAutoImportToLibrary = SettingKey<bool>(
+    'magnetAutoImportToLibrary',
+    false,
+    group: SettingGroup.magnet,
+  );
+
+  /// 自动入库的目标根目录；留空时使用媒体库的第一个文件夹。
+  static const magnetAutoImportRoot = SettingKey<String>(
+    'magnetAutoImportRoot',
+    '',
+    group: SettingGroup.magnet,
+  );
+
+  /// 下载完成后是否自动按标题搜刮番剧信息（未携带番剧信息的任务，
+  /// 如订阅自动下载）。搜刮成功后同步到媒体库，达到置信度阈值时自动入库。
+  static const magnetAutoScrapeOnComplete = SettingKey<bool>(
+    'magnetAutoScrapeOnComplete',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// 自动搜刮后触发自动入库所需的最低置信度（0~1）。低于阈值只同步
+  /// 搜刮结果、不移动文件，任务标记「待确认」供手动匹配。
+  static const magnetAutoImportConfidence = SettingKey<double>(
+    'magnetAutoImportConfidence',
+    0.7,
+    group: SettingGroup.magnet,
+  );
+
+  // 本地媒体库相关设置
+  static const localMediaFolders = SettingKey<String>(
+    'localMediaFolders',
+    '[]',
+    group: SettingGroup.media,
+  );
+  static const localMediaGroupByFolder = SettingKey<bool>(
+    'localMediaGroupByFolder',
+    true,
+    group: SettingGroup.media,
+  );
+  static const localMediaScrapeResults = SettingKey<String>(
+    'localMediaScrapeResults',
+    '{}',
+    group: SettingGroup.media,
+  );
+
+  /// 单个文件的搜刮结果（文件路径 → 番剧信息），优先级高于文件夹级结果。
+  static const localMediaFileScrapeResults = SettingKey<String>(
+    'localMediaFileScrapeResults',
+    '{}',
+    group: SettingGroup.media,
+  );
+
+  /// 媒体库视图模式：`folder`（按文件夹）/ `anime`（按番剧）/ `grid`（网格海报墙）。
+  static const localMediaViewMode = SettingKey<String>(
+    'localMediaViewMode',
+    'folder',
+    group: SettingGroup.media,
+  );
+
+  /// 番剧 / 网格视图的排序依据：`date`（首播日期）/ `name`（标题）/ `count`（文件数）。
+  ///
+  /// 默认按番剧首播日期排序，配合 [localMediaSortDescending] 默认降序，
+  /// 也就是「最新番剧排在最前面」。
+  static const localMediaSortMode = SettingKey<String>(
+    'localMediaSortMode',
+    'date',
+    group: SettingGroup.media,
+  );
+
+  /// 排序方向，true 为降序（日期越新 / 文件越多越靠前）。
+  static const localMediaSortDescending = SettingKey<bool>(
+    'localMediaSortDescending',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// 图片识别兜底：ffmpeg 可执行文件路径，留空则自动从 PATH/常见目录查找。
+  static const localMediaFfmpegPath = SettingKey<String>(
+    'localMediaFfmpegPath',
+    '',
+    group: SettingGroup.media,
+  );
+
+  /// 是否启用「抽帧 → trace.moe 以图搜番」兜底。
+  static const localMediaTraceFallback = SettingKey<bool>(
+    'localMediaTraceFallback',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// 批量搜刮时是否跳过已匹配的文件夹，只处理尚未匹配的番剧。
+  ///
+  /// 默认开启：已匹配的结果通常已人工确认过，重复搜刮既浪费请求配额，
+  /// 也有把正确结果覆盖成错误匹配的风险。
+  static const localMediaScrapeOnlyUnmatched = SettingKey<bool>(
+    'localMediaScrapeOnlyUnmatched',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// 本地媒体库播完一集后，是否把 Bangumi 收藏的 EP 进度更新为该集数。
+  ///
+  /// 默认关闭：仅对已搜刮到真实 Bangumi ID 的番剧生效，播放完成时触发。
+  static const localMediaSyncBangumiProgress = SettingKey<bool>(
+    'localMediaSyncBangumiProgress',
+    false,
+    group: SettingGroup.media,
+  );
+
+  /// 未匹配文件夹的网格卡片是否生成视频首帧缩略图（需 ffmpeg 可用）。
+  static const localMediaThumbnails = SettingKey<bool>(
+    'localMediaThumbnails',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// Windows 上是否用目录监听实时感知媒体库文件夹变化（关闭后走定时轮询）。
+  static const localMediaWatchFolder = SettingKey<bool>(
+    'localMediaWatchFolder',
+    true,
+    group: SettingGroup.media,
+  );
+
+  /// 提交磁力下载前是否检查磁盘剩余空间并预警。
+  static const magnetDiskSpaceCheck = SettingKey<bool>(
+    'magnetDiskSpaceCheck',
+    true,
+    group: SettingGroup.magnet,
+  );
+
+  /// 磁力下载页是否按番剧分组展示任务。
+  static const magnetGroupDownloads = SettingKey<bool>(
+    'magnetGroupDownloads',
+    true,
+    group: SettingGroup.magnet,
+  );
+
   static final List<SettingKey<Object?>> all = [
     hAenable,
     hardwareDecoder,
@@ -554,6 +925,7 @@ class SettingsKeys {
     danmakuDanDanSource,
     danmakuFontWeight,
     danmakuFollowSpeed,
+    danmakuAxisAutoCheck,
     themeMode,
     themeColor,
     privateMode,
@@ -591,6 +963,7 @@ class SettingsKeys {
     timelineNotShowAbandonedBangumis,
     timelineNotShowWatchedBangumis,
     timelineOnlyShowWatchingBangumis,
+    timelineOnlyShowJapaneseBangumis,
     useSystemFont,
     forceAdBlocker,
     backgroundPlayback,
@@ -617,6 +990,53 @@ class SettingsKeys {
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,
+    mikanBaseUrl,
+    magnetSearchSources,
+    magnetDefaultSource,
+    magnetSubscriptions,
+    magnetDownloadEntries,
+    magnetEngineEnabled,
+    magnetDownloadDir,
+    magnetListenPort,
+    magnetMaxPeers,
+    magnetMaxUploadLimitKb,
+    magnetMaxDownloadLimitKb,
+    magnetMaxActiveDownloads,
+    magnetScheduledLimitEnabled,
+    magnetScheduledLimitStart,
+    magnetScheduledLimitEnd,
+    magnetScheduledLimitKb,
+    magnetWifiOnly,
+    magnetSeedingStopMode,
+    magnetSeedingStopHours,
+    magnetSeedingStopRatio,
+    magnetEnableDht,
+    magnetEnableUpnp,
+    magnetForceEncrypt,
+    magnetEnableIpv6,
+    magnetTrackerAutoUpdate,
+    magnetTrackerUpdateHours,
+    magnetTrackerSources,
+    magnetTrackerLastUpdated,
+    magnetTrackersCache,
+    magnetAutoImportToLibrary,
+    magnetAutoImportRoot,
+    magnetAutoScrapeOnComplete,
+    magnetAutoImportConfidence,
+    localMediaFolders,
+    localMediaGroupByFolder,
+    localMediaScrapeResults,
+    localMediaViewMode,
+    localMediaSortMode,
+    localMediaSortDescending,
+    localMediaFfmpegPath,
+    localMediaTraceFallback,
+    localMediaScrapeOnlyUnmatched,
+    localMediaSyncBangumiProgress,
+    localMediaThumbnails,
+    localMediaWatchFolder,
+    magnetDiskSpaceCheck,
+    magnetGroupDownloads,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {
@@ -665,6 +1085,7 @@ class _SettingBoxKey {
       danmakuDanDanSource = 'danmakuDanDanSource',
       danmakuFontWeight = 'danmakuFontWeight',
       danmakuFollowSpeed = 'danmakuFollowSpeed',
+      danmakuAxisAutoCheck = 'danmakuAxisAutoCheck',
       themeMode = 'themeMode',
       themeColor = 'themeColor',
       privateMode = 'privateMode',
@@ -703,6 +1124,7 @@ class _SettingBoxKey {
       timelineNotShowAbandonedBangumis = 'timelineNotShowAbandonedBangumis',
       timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
       timelineOnlyShowWatchingBangumis = 'timelineOnlyShowWatchingBangumis',
+      timelineOnlyShowJapaneseBangumis = 'timelineOnlyShowJapaneseBangumis',
       useSystemFont = 'useSystemFont',
       forceAdBlocker = 'forceAdBlocker',
       backgroundPlayback = 'backgroundPlayback',
