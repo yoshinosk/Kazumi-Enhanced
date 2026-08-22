@@ -1,7 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/pages/player/danmaku_offset_menu.dart';
+import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
@@ -21,8 +23,20 @@ Future<void> checkDanmakuAxisAlignment({
 }) async {
   if (danmakus.isEmpty) return;
   if (!GStorage.getSetting<bool>(SettingsKeys.danmakuAxisAutoCheck)) return;
-  // 用户已手动调整过弹幕轴，视为已知晓偏差，不再打扰。
-  if (GStorage.getSetting<double>(SettingsKeys.danmakuTimeOffset) != 0) {
+  // 用户已手动调整过弹幕轴（全局偏移），或当前番剧 / 分集已有作用域
+  // 偏移（此前单集检测已应用），视为已知晓偏差，不再打扰。
+  // 作用域化存储保证其他番剧 / 分集仍会自动触发检测。
+  if (DanmakuTimeOffsetStore.effectiveOffset(
+        playerController.danmaku.bangumiID,
+        playerController.danmaku.danmakuEpisodeId,
+      ) !=
+      0) {
+    KazumiLogger().i(
+        'DanmakuAxis: skipped by active offset '
+        '${DanmakuTimeOffsetStore.effectiveOffset(playerController.danmaku.bangumiID, playerController.danmaku.danmakuEpisodeId)}s '
+        'bangumiID=${playerController.danmaku.bangumiID} '
+        'episodeId=${playerController.danmaku.danmakuEpisodeId}',
+        forceLog: true);
     return;
   }
 
@@ -34,11 +48,12 @@ Future<void> checkDanmakuAxisAlignment({
     danmakus: danmakus,
     videoDuration: duration,
   );
+  KazumiLogger().i(
+      'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds.toStringAsFixed(1)}s, video=${result.videoDurationSeconds.toStringAsFixed(1)}s, diff=${result.differenceSeconds.toStringAsFixed(1)}s, beyond=${result.beyondFraction.toStringAsFixed(3)}',
+      forceLog: true);
   if (result.issue == DanmakuAxisIssue.none) return;
   if (shouldProceed != null && !shouldProceed()) return;
 
-  KazumiLogger().i(
-      'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds}s, video=${result.videoDurationSeconds}s, diff=${result.differenceSeconds}s');
   await showDanmakuAxisMismatchDialog(
     playerController: playerController,
     videoPageController: videoPageController,
@@ -109,11 +124,14 @@ Future<void> showDanmakuAxisMismatchDialog({
             FilledButton(
               onPressed: () {
                 KazumiDialog.dismiss();
-                adjustDanmakuTimeOffset(
+                // 推荐偏移写入当前番剧/分集作用域，不污染其他剧集；
+                // 写入后重新调度当前弹幕立即生效。
+                unawaited(DanmakuTimeOffsetStore.setScopedOffset(
+                  playerController.danmaku.bangumiID,
+                  playerController.danmaku.danmakuEpisodeId,
                   result.recommendedOffsetSeconds,
-                  onChanged: playerController
-                      .danmaku.clearAndInvalidateScheduledDanmakus,
-                );
+                ));
+                playerController.danmaku.clearAndInvalidateScheduledDanmakus();
                 KazumiDialog.showToast(
                   message:
                       '已应用推荐偏移 ${formatDanmakuTimeOffset(result.recommendedOffsetSeconds)}',

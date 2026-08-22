@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
+import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/player/danmaku_offset_menu.dart';
 import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
@@ -32,6 +33,11 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
   bool _episodesFailed = false;
 
   int _bodyIndex = 0;
+
+  /// 弹幕池排序结果缓存：池内容版本未变时复用，避免每次 build 全量
+  /// flatten + O(N log N) 排序（数万条弹幕时单次可达数十毫秒）。
+  List<_DanmakuPoolItem>? _cachedPoolItems;
+  int _cachedPoolRevision = -1;
 
   PlayerController get playerController => widget.playerController;
 
@@ -94,6 +100,7 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
       videoPageController: widget.videoPageController,
       animeTitle: playerController.danmaku.danmakuAnimeTitle,
       episode: episode,
+      bangumiId: playerController.danmaku.bangumiID,
     );
   }
 
@@ -132,7 +139,9 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
     if (danmaku.danmakuOn) {
       return '弹幕已开启';
     }
-    if (danmaku.bangumiID <= 0 || danmaku.danDanmakus.isEmpty) {
+    // 弹幕池非空即视为已绑定（本地播放弹幕池可能来自侧车文件，
+    // 此时 bangumiID 可能为 0，不能据此判定未绑定）。
+    if (danmaku.danDanmakus.isEmpty) {
       return '未绑定弹幕';
     }
     return '弹幕已关闭';
@@ -343,7 +352,7 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
 
   Widget get _subTabBar {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       child: Row(
         children: [
           _buildSubTab(0, '弹幕池'),
@@ -356,7 +365,11 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
 
   Widget get _danmakuPoolBody {
     final danmaku = playerController.danmaku;
-    if (danmaku.bangumiID <= 0 || danmaku.danDanmakus.isEmpty) {
+    // 以弹幕池是否为空判定展示态：本地播放的弹幕池可能来自侧车文件
+    // 或手动绑定（bangumiID 可能为 0），池非空就应展示弹幕列表。
+    if (danmaku.danDanmakus.isEmpty) {
+      _cachedPoolItems = null;
+      _cachedPoolRevision = -1;
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -382,26 +395,22 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
       );
     }
     final offset = danmaku.timelineOffsetSeconds;
-    final items = <_DanmakuPoolItem>[];
-    danmaku.danDanmakus.forEach((second, list) {
-      for (final entry in list) {
-        items.add(_DanmakuPoolItem(second: second, entry: entry));
-      }
-    });
-    items.sort((a, b) {
-      final timeCompare = a.second.compareTo(b.second);
-      if (timeCompare != 0) {
-        return timeCompare;
-      }
-      return a.entry.message.compareTo(b.entry.message);
-    });
+    var items = _cachedPoolItems;
+    final revision = danmaku.danmakusRevision;
+    if (items == null || revision != _cachedPoolRevision) {
+      items = _buildPoolItems(danmaku);
+      _cachedPoolItems = items;
+      _cachedPoolRevision = revision;
+    }
+    // 闭包内使用需先提升为非空局部变量（流分析不作用于闭包捕获）。
+    final poolItems = items;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Text(
-            '共 ${items.length} 条弹幕',
+            '共 ${poolItems.length} 条弹幕',
             style: TextStyle(
               fontSize: 12,
               color: Theme.of(context).colorScheme.outline,
@@ -411,9 +420,9 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
         Divider(height: isDesktop() ? 0.5 : 0.2),
         Expanded(
           child: ListView.builder(
-            itemCount: items.length,
+            itemCount: poolItems.length,
             itemBuilder: (context, index) {
-              final item = items[index];
+              final item = poolItems[index];
               final colorScheme = Theme.of(context).colorScheme;
               return ListTile(
                 dense: true,
@@ -459,6 +468,24 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
         ),
       ],
     );
+  }
+
+  /// 把弹幕池按（秒, 消息）排序，构建弹幕池列表的只读快照。
+  List<_DanmakuPoolItem> _buildPoolItems(PlayerDanmakuController danmaku) {
+    final items = <_DanmakuPoolItem>[];
+    danmaku.danDanmakus.forEach((second, list) {
+      for (final entry in list) {
+        items.add(_DanmakuPoolItem(second: second, entry: entry));
+      }
+    });
+    items.sort((a, b) {
+      final timeCompare = a.second.compareTo(b.second);
+      if (timeCompare != 0) {
+        return timeCompare;
+      }
+      return a.entry.message.compareTo(b.entry.message);
+    });
+    return items;
   }
 
   String _typeLabel(int type) {

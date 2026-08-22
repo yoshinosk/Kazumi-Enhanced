@@ -2,6 +2,92 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.8.22
+
+- 修复磁力任务「边下边播后瞬间 100% / 已完成」的根因：libtorrent 官方语义中 `finished/seeding` 仅表示**优先级 > 0 的片段已下完**（可伴随「部分片段被过滤未下载」），而边下边播启动流时原生引擎（`lt_start_stream`）会把非流窗口片段全部降为 `dont_download`，流窗口（头部 + 尾部 + 起播关键片段，通常仅数十 MB）下完引擎即如实上报 `finished/progress=1.0`；应用层此前把它当作整包完成，`completedLength` 被对齐到整包大小导致假 100%，文件实际只有流窗口数据。新增完成态覆盖校验（`completionCoversExpected`）：引擎的 `totalWanted` 与 `totalDone` 未覆盖期望下载集（全部文件或已选择文件之和）的完成上报一律按下载中处理，任务保持真实进度，停止播放恢复优先级后继续下载剩余部分；已处于完成 / 做种态的任务不受影响。另将「原生完成上报」诊断日志改为 `forceLog` 持久化（INFO 默认不落盘，导致此前复现无据可查）
+  - 相关文件: lib/services/magnet/magnet_download_service.dart, test/magnet_download_entry_test.dart
+
+## 2026.8.22
+
+- 修复磁力任务「文件不完整却显示做种中 / 100%」：`_onTorrents` 中「完成态可信」证据含 `checking` 状态，而当目标目录已残留（可能不完整）同名文件时引擎校验阶段的 `totalDone` 会从 0 爬升，据此置位后引擎一报 `finished/seeding` 即被直接信任导致假做种；收严为**仅当 `active` 且 `hasMetadata` 且 `totalDone > 0`**（真实进入下载并校验 / 下载出字节）才置位可信，`checking` / 空 `active` 不再充当完成证据，交给「可疑瞬时报完成」检测强制 `recheck` 按磁盘真实情况转成续传缺失。另新增完成态上报的现场诊断日志便于确认引擎的 `state/progress/totalDone/totalWanted/isFinished/hasMetadata`。
+  - 相关文件: lib/services/magnet/magnet_download_service.dart
+
+## 2026.8.22
+
+- 修复创建磁力下载任务时磁盘空间校验误判「空间不足」的问题：Animes Garden 搜索源的 `size` 字段单位为字节（API 实测直接返回字节数，如 781398016 ≈ 745 MB），原 `_formatKbSize` 误当作 KB 乘以 1024，导致磁力任务体积被放大 1024 倍，磁盘空间校验用错误体积对比而误报「空间不足」；改为按字节处理（重命名为 `formatAnimesGardenSize`），并补充回归测试
+  - 相关文件: lib/services/magnet/animes_garden_service.dart, test/animes_garden_size_test.dart
+
+## 2026.8.19
+
+- 调整磁力 RSS 订阅功能：新增自动检查更新间隔设置（默认 1 小时，可在设置中调整为 30 分钟～1 天），定时检查发现新条目时自动提交下载
+  - 相关文件: lib/services/storage/settings_keys.dart, lib/services/magnet/magnet_subscription_service.dart, lib/pages/magnet/magnet_controller.dart, lib/pages/settings/magnet_settings.dart
+
+## 2026.8.19
+
+- 磁力 RSS 订阅：打开软件时立即检查一次订阅更新；添加订阅时立即检查并自动下载当前 feed 条目（按订阅的自动下载开关决定是否下载，引擎未启用等失败场景不推进游标、下次定时检查自动重试）
+  - 相关文件: lib/services/magnet/magnet_subscription_service.dart, test/magnet_subscription_service_test.dart
+
+## 2026.8.19
+
+- 播放器弹幕面板「弹幕池 / 切换分集」按钮上方增加边距，避免紧贴分隔线
+  - 相关文件: lib/pages/player/episode_danmaku_sheet.dart
+
+## 2026.8.19
+
+- 修复本地媒体库播放时弹幕池绑定到其它番剧的问题（弹幕正常关联但不显示 / 轴对不上）：
+  - 策略链原为「侧车缓存 → 下载缓存 → 文件哈希匹配 → BGM 映射 → 标题检索」，文件哈希匹配 / 标题检索可能把弹幕池绑到与搜刮结果不同的番剧，且侧车缓存会固化这种错误绑定 —— 改为优先按「搜刮的番剧」绑定：先解析搜刮 BGM ID 对应的弹弹番剧 ID，命中且该集有弹幕时直接采用，文件匹配 / 标题检索仅作兜底
+  - 侧车缓存新增番剧一致性校验：搜刮番剧的弹弹 ID 已知且侧车 `danDanBangumiID` 与之不符时丢弃侧车（历史错误绑定），改按搜刮番剧重新绑定
+  - 在线播放路径行为不变（文件匹配本就只用于本地文件）
+  - 相关文件: lib/pages/player/controller/player_danmaku_controller.dart
+
+## 2026.8.18
+
+- 修复磁力下载重复任务与「刚创建就显示做种中」问题：
+  - 同磁力链（info-hash 相同、tracker 不同）重复提交会创建重复任务：新增按 `xt=urn:btih` 归一化的去重（忽略大小写 / tracker / dn 差异），`add()` 直接忽略重复，搜索界面重复提交提示「该资源已在下载队列中」
+  - 新建任务几秒内即显示「做种中 / 100%」而文件实际是空占位：元数据未就绪时引擎把「0 片（无内容可下）」的磁力上报为 `progress=1.0 / is_finished`，`_mapStatus` 不再对无元数据任务判完成；元数据到达后引擎可能跳过磁盘校验直接报完成 —— 新增「可疑瞬时报完成」检测，任务从未下载、也未经过引擎校验却被报完成时强制 `recheck` 校验磁盘（空文件转下载、数据完整维持做种），重挂 / 重试后重新评估
+  - 相关文件: lib/services/magnet/magnet_download_service.dart, lib/pages/magnet/magnet_controller.dart, test/magnet_download_entry_test.dart
+
+## 2026.8.16
+
+- 修复本地文件手动绑定弹幕库（弹幕检索 / 弹幕切换）后弹幕不显示的问题：
+  - `getDanDanmakuByEpisodeID` 绑定成功后不写回弹弹番剧 ID：本地播放自动加载失败（`bangumiID=0`）后手动绑定，弹幕面板仍显示「未绑定弹幕」、弹幕轴偏移作用域落到 `0:episodeId` 与其它本地文件互相污染 —— 新增 `bangumiId` 参数并在绑定成功时写回，`bindDanmakuToEpisode` 及各调用点补传番剧 ID
+  - 弹幕池整体替换后发射代次不复位：播放器发射追踪误以为当前秒已发射，绑定瞬间当前秒的弹幕被跳过 —— 绑定成功后清空画布残留弹幕并递增发射代次，追踪复位后从当前秒重新发射
+  - 弹幕面板以 `bangumiID <= 0` 判定「未绑定弹幕」：弹幕池非空（侧车文件 / 手动绑定，bangumiID 可能为 0）也被隐藏 —— 改为按弹幕池是否为空判定，空态文案仍区分「未绑定 / 池为空」
+  - 相关文件: lib/pages/player/controller/player_danmaku_controller.dart, lib/pages/player/controller/player_danmaku_controller.g.dart, lib/pages/player/danmaku_switch_dialog.dart, lib/pages/player/episode_danmaku_sheet.dart
+
+## 2026.8.16
+
+- 修复审查确认的 9 个问题：
+  - 自动入库会移动 / 重命名正在被边下边播流读取的文件导致断流：`MagnetDownloadService` 新增 `isStreaming()`，`shouldAutoImport` 对在播任务跳过入库（不标记失败，流停止后下一轮状态同步自动重试）
+  - `clearCompleted()` 不停止在播任务的流服务器 / 做种句柄导致端口泄漏至进程退出：清除前逐个调用 `stopStreamsForTask()` 补做流停止与引擎移除
+  - tracker 定时器回调在 `dispose()` 之后重建调度链、退出后继续联网且无 try/catch：调度入口加 `_disposed` 检查，回调包 try/catch，更新失败也继续下一周期自愈
+  - 新订阅首拉 feed 为空时 `lastGuid=null`、下一轮把整个 feed 当新条目全量自动下载：游标未初始化时本轮只建立游标、不上报新条目
+  - 媒体库标题分组「假路径」键随目录文件集合变化（单标题 ↔ 多标题）失效、搜刮 / 历史迁移按旧键永久丢失：扫描结果新增分组快照（目录 → 归一化标题 → 分组路径，新增设置 `localMediaLastGrouping`），每次扫描按标题对齐新旧快照并迁移搜刮结果到新键
+  - 弹幕池面板每次 build 全量 flatten + O(N log N) 排序（数万条弹幕时卡顿）：`PlayerDanmakuController` 新增弹幕池版本计数，面板按版本缓存排序结果
+  - WebView 旧页面在导航切换期间迟到的解析事件被新 resolve 接受、可能播错 URL/offset：新增页面代际（`beginPageLoad` / `markPageStarted` / `canAcceptResolve`），Android 实现以新页面脚本启动标记、通用回退实现以 `onLoadStart` 为界丢弃旧页面迟到消息
+  - 播放中每秒 2 行历史同步事件写入、约 1 小时触发 1MB checkpoint 全量重写：进度事件按（条目, 分集, 线路）10 秒窗口合并，中间重复写入直接丢弃（事件为幂等 upsert，不影响最终一致性）
+  - 前台服务拒绝通知权限后每批任务重复弹窗、acquire 失败后租约悬挂：权限询问改为会话级记忆（拒绝后不再重复弹自定义窗），`acquire` 启动失败时回滚本次新增租约，避免 `isHeldBy` 门控误判服务可用而不再重试
+  - 相关文件: lib/services/magnet/magnet_download_service.dart, lib/pages/magnet/magnet_controller.dart, lib/services/magnet/magnet_subscription_service.dart, lib/services/media/local_media_scanner.dart, lib/services/media/local_media_models.dart, lib/pages/media/media_controller.dart, lib/services/storage/settings_keys.dart, lib/pages/player/controller/player_danmaku_controller.dart, lib/pages/player/episode_danmaku_sheet.dart, lib/webview/video/video_webview_controller.dart, lib/webview/video/impl/video_webview_android_impl.dart, lib/webview/video/impl/video_webview_impl.dart, lib/services/sync/history_sync_service.dart, lib/services/download/background_download_service.dart
+
+## 2026.8.16
+
+- 修复「仅 WiFi 下载」策略完全失效的问题：非 WiFi 分支先置 `_pausedByWifi = true` 再调用 `pause()`，而 `pause()` 同步段第一句就把该标记清除（注释本意只清用户手动暂停），导致 WiFi 恢复 / 关闭开关时按标记续传的分支永不命中、被策略暂停的任务永远卡在暂停态。抽出内部 `_pauseEntry()`（不清标记），策略暂停改走内部实现，`pause()` 仅用户手动暂停时清标记
+  - 相关文件: lib/services/magnet/magnet_download_service.dart
+- 修复磁盘空间自动暂停对新任务永不生效的问题：防重标记 `_diskSpaceCheckedTaskIds.add` 在 `applyTorrentStatus` 之前执行，而任务总量在 `applyTorrentStatus` 中才写入，元数据就绪首个 tick 里 `totalLength` 仍为 0，检查提前 return 但标记已下发导致会话内永不复查；磁盘空间校验移到 `applyTorrentStatus` 之后
+  - 相关文件: lib/services/magnet/magnet_download_service.dart
+- 修复倍速 ≠ 1 时弹幕系统性丢失或重复的问题：弹幕发射由固定 1s Timer 驱动且每次只采样当前秒桶，2x 时奇数秒整桶丢失、0.5x 时同秒重复发射、缓冲停滞时同秒反复发射。改为记录上次发射的源秒，逐 tick 补发区间内所有整秒弹幕（跳变超过 5 秒视为 seek 只发当前秒），弹幕池代次变化（seek / 偏移调整 / 弹幕重载）后重置追踪
+  - 相关文件: lib/pages/player/player_item.dart
+- 修复弹幕轴检测结论写入全局持久设置、一次应用后永久自废的问题：推荐偏移改为按「bangumiID:episodeId」作用域存储（新增设置 `danmakuTimeOffsetByEpisode`，JSON 字符串），命中顺序为精确分集 → 同番剧（episodeId 未知）→ 全局手动偏移；单集检测结果不再作用于之后所有剧集，其他番剧 / 分集仍会自动触发检测
+  - 相关文件: lib/services/storage/settings_keys.dart, lib/pages/player/controller/player_danmaku_controller.dart, lib/pages/player/danmaku_axis_dialog.dart
+- 修复同步关闭期间的删除不落墓碑、重新开启后已删历史复活的问题：`appendSafely` 新增 `requireEnabled` 参数，删除 / 清空的墓碑无条件写盘（同步开关只控制上传与高频进度事件），重新开启同步后事件日志中的墓碑会抑制远程快照 putAll 复活
+  - 相关文件: lib/services/sync/history_sync_service.dart, lib/repositories/history_repository.dart
+- 修复占位历史迁移覆盖更新的真实历史的问题：`_repairPlaceholderHistories` 迁移前先按真实番剧查询既有条目，若匹配后用户已重新播放过（真实条目更新）则跳过迁移、直接丢弃占位条目，避免 `updateHistory` 无条件写 `lastWatchTime=now` 并用陈旧占位进度覆盖新历史；迁移路径改为迁移全部集数进度并按占位条目的 watch-state 收尾
+  - 相关文件: lib/pages/media/media_controller.dart
+- 修复本地媒体库扫描单个无权限子目录（如 Android/data）导致整个根目录扫描失败清空媒体库的问题：`listSync(recursive: true)` 改为逐层手动遍历，单个子目录无权限 / 损坏只跳过该目录；同时以真实路径（resolveSymbolicLinks）去重，防止 Windows junction 符号链接环导致无限遍历
+  - 相关文件: lib/services/media/local_media_scanner.dart
+- 修复 Android 13+ 首次启动并发请求通知（POST_NOTIFICATIONS）与媒体读取（READ_MEDIA_VIDEO）权限时后发弹窗被系统静默取消、媒体库首次扫描无权限的问题：`_initializeApp` 改为先 `await AppNotifications.init()` 完成通知权限请求，再进入 `mediaController.init()` 的媒体权限请求，串行化启动时的权限对话框
+  - 相关文件: lib/pages/init_page.dart
+
 ## 2026.8.16
 
 - 开始维护当前分支版本号：项目版本由上游 `2.2.6+20206` 改为 `0.0.1+1`（`pubspec.yaml`、`lib/request/config/api_endpoints.dart` 同步为 `0.0.1`），README 顶部标注本分支基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发

@@ -58,6 +58,13 @@ class BackgroundDownloadService {
   /// 返回 true 表示用户同意请求权限，false 表示用户拒绝
   Future<bool> Function()? onNotificationPermissionRequired;
 
+  /// 本会话对通知权限询问的结果（null 表示尚未询问）。
+  ///
+  /// 权限被拒后（自定义弹窗「稍后再说」或系统弹窗拒绝）不再反复弹窗：
+  /// startService 会在每次 acquire 时被重入，若不记忆拒绝结果，
+  /// 磁力下载每 2 秒一次的状态同步会让权限弹窗无限重弹。
+  bool? _notificationPermissionConsented;
+
   bool get isSupported => Platform.isAndroid;
   bool get isRunning => _isRunning;
 
@@ -111,13 +118,41 @@ class BackgroundDownloadService {
   Future<bool> acquire(String lease) async {
     if (!isSupported) return false;
     return _serialized(() async {
-      if (_leases.add(lease)) {
+      final isNew = _leases.add(lease);
+      if (isNew) {
         KazumiLogger().i('BackgroundDownloadService: acquired by "$lease"');
       }
       if (_isRunning) return true;
-      final ok = await startService();
-      return ok;
+      try {
+        final ok = await startService();
+        if (!ok && isNew) {
+          // 启动失败：回滚本次新增的租约，避免租约悬挂。否则
+          // isHeldBy(lease) 会一直为真，调用方（如 DownloadController
+          // 的 isHeldBy 门控）会误以为服务可用而不再重试。
+          _rollbackLease(lease);
+          KazumiLogger().w(
+              'BackgroundDownloadService: lease "$lease" rolled back '
+              '(service failed to start)');
+        }
+        return ok;
+      } catch (e) {
+        if (isNew) {
+          _rollbackLease(lease);
+        }
+        KazumiLogger()
+            .e('BackgroundDownloadService: acquire failed', error: e);
+        return false;
+      }
     });
+  }
+
+  void _rollbackLease(String lease) {
+    _leases.remove(lease);
+    _leaseTitles.remove(lease);
+    _leaseTexts.remove(lease);
+    if (_renderLease == lease) {
+      _renderLease = null;
+    }
   }
 
   /// 功能释放前台服务；全部租约释放后停止服务。
@@ -187,26 +222,41 @@ class BackgroundDownloadService {
 
     final needsPermission = await needsNotificationPermission();
     if (needsPermission) {
-      if (onNotificationPermissionRequired != null) {
-        final userAgreed = await onNotificationPermissionRequired!();
-        if (userAgreed) {
-          final granted = await requestNotificationPermission();
-          if (!granted) {
-            KazumiLogger().w(
-                'BackgroundDownloadService: notification permission denied by user');
+      // 权限弹窗会话级去重：本会话已询问过（同意或拒绝）就不再重复
+      // 弹自定义窗，避免每批任务 / 每次 acquire 重入时弹窗风暴；
+      // 用户后续在系统设置手动授权后 needsPermission 自然变为 false。
+      final consented = _notificationPermissionConsented;
+      if (consented == null) {
+        if (onNotificationPermissionRequired != null) {
+          final userAgreed = await onNotificationPermissionRequired!();
+          if (userAgreed) {
+            final granted = await requestNotificationPermission();
+            _notificationPermissionConsented = granted;
+            if (!granted) {
+              KazumiLogger().w(
+                  'BackgroundDownloadService: notification permission denied by user');
+            }
+          } else {
+            _notificationPermissionConsented = false;
+            KazumiLogger()
+                .i('BackgroundDownloadService: user declined permission dialog');
           }
         } else {
-          KazumiLogger()
-              .i('BackgroundDownloadService: user declined permission dialog');
+          // 没有设置回调，直接请求权限（兼容旧行为）
+          final granted = await requestNotificationPermission();
+          _notificationPermissionConsented = granted;
+          if (!granted) {
+            KazumiLogger()
+                .w('BackgroundDownloadService: notification permission denied');
+          }
         }
-      } else {
-        // 没有设置回调，直接请求权限（兼容旧行为）
+      } else if (consented) {
+        // 本会话曾同意但系统层仍未授予（用户在系统设置关闭了通知）：
+        // 不弹自定义窗，直接再请求一次系统授权。
         final granted = await requestNotificationPermission();
-        if (!granted) {
-          KazumiLogger()
-              .w('BackgroundDownloadService: notification permission denied');
-        }
+        _notificationPermissionConsented = granted;
       }
+      // consented == false：本会话不再询问，直接尝试启动服务。
     }
 
     try {

@@ -27,6 +27,31 @@ abstract class VideoWebviewController<T> {
   bool isIframeLoaded = false;
   bool isVideoSourceLoaded = false;
 
+  /// WebView 页面代际：每次 [loadUrl]（新一次播放 / 换集）递增。
+  ///
+  /// 页面切换是异步的（旧页先被导航走、新页的脚本随后才开始执行），
+  /// 旧页面在导航切换期间迟到的 JS 解析消息会被新代际接受，导致用旧
+  /// URL + 新 offset 播放。解析事件只有在当前页面的脚本启动标记
+  /// （LogBridge 'script loaded'）到达后才被接受，以丢弃旧页迟到消息。
+  int _resolveEpoch = 0;
+  int _activeResolveEpoch = -1;
+
+  /// 新一次页面加载开始：使之前页面（含尚未送达的消息）的代际失效。
+  @protected
+  void beginPageLoad() {
+    _resolveEpoch++;
+  }
+
+  /// 当前页面的用户脚本已开始执行：此后到达的解析事件才属于当前页面。
+  @protected
+  void markPageStarted() {
+    _activeResolveEpoch = _resolveEpoch;
+  }
+
+  /// 是否可接受解析事件（当前页面的脚本启动标记已到达且未被新加载取代）。
+  @protected
+  bool get canAcceptResolve => _activeResolveEpoch == _resolveEpoch;
+
   /// WebView initialization method.
   Future<void> init();
 

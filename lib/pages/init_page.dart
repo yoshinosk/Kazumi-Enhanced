@@ -62,7 +62,11 @@ class _InitPageState extends State<InitPage> {
   }
 
   Future<void> _initializeApp() async {
-    unawaited(AppNotifications.init());
+    // 串行化启动时的权限请求：Android 同一时刻只允许一个权限对话框，
+    // 通知权限（POST_NOTIFICATIONS）与媒体读取权限（READ_MEDIA_VIDEO）
+    // 并发请求时后发者会被系统静默取消，导致媒体库首次扫描无权限。
+    // 先等待通知权限完成，mediaController.init() 里的媒体权限随后弹出。
+    await AppNotifications.init();
     _migrateStorage();
     _loadShaders();
     _loadDanmakuShield();

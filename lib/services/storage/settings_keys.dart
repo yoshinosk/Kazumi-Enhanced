@@ -175,6 +175,15 @@ class SettingsKeys {
     0.0,
     group: SettingGroup.danmaku,
   );
+
+  /// 按「bangumiID:episodeId」作用域存储的弹幕轴偏移（JSON 字符串，
+  /// {key: 秒}）。弹幕轴自动检测推荐的偏移写入作用域，避免单集检测结果
+  /// 永久作用于之后所有剧集；未命中作用域时回退到全局 danmakuTimeOffset。
+  static const danmakuTimeOffsetByEpisode = SettingKey<String>(
+    _SettingBoxKey.danmakuTimeOffsetByEpisode,
+    '',
+    group: SettingGroup.danmaku,
+  );
   static const danmakuEnabledByDefault = SettingKey<bool>(
     _SettingBoxKey.danmakuEnabledByDefault,
     false,
@@ -572,6 +581,13 @@ class SettingsKeys {
     '[]',
     group: SettingGroup.magnet,
   );
+
+  /// RSS 订阅自动检查更新的间隔（分钟），默认 1 小时。
+  static const magnetSubscriptionCheckIntervalMinutes = SettingKey<int>(
+    'magnetSubscriptionCheckIntervalMinutes',
+    60,
+    group: SettingGroup.magnet,
+  );
   static const magnetDownloadEntries = SettingKey<String>(
     'magnetDownloadEntries',
     '[]',
@@ -878,6 +894,14 @@ class SettingsKeys {
     group: SettingGroup.media,
   );
 
+  /// 最近一次媒体库扫描的标题分组快照（目录 → 标题键 → 分组路径），
+  /// 用于分组键随文件集合变化（单标题 ↔ 多标题）时迁移搜刮结果。
+  static const localMediaLastGrouping = SettingKey<String>(
+    'localMediaLastGrouping',
+    '',
+    group: SettingGroup.media,
+  );
+
   /// 提交磁力下载前是否检查磁盘剩余空间并预警。
   static const magnetDiskSpaceCheck = SettingKey<bool>(
     'magnetDiskSpaceCheck',
@@ -919,6 +943,7 @@ class SettingsKeys {
     danmakuDuration,
     danmakuLineHeight,
     danmakuTimeOffset,
+    danmakuTimeOffsetByEpisode,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
@@ -994,6 +1019,7 @@ class SettingsKeys {
     magnetSearchSources,
     magnetDefaultSource,
     magnetSubscriptions,
+    magnetSubscriptionCheckIntervalMinutes,
     magnetDownloadEntries,
     magnetEngineEnabled,
     magnetDownloadDir,
@@ -1035,6 +1061,7 @@ class SettingsKeys {
     localMediaSyncBangumiProgress,
     localMediaThumbnails,
     localMediaWatchFolder,
+    localMediaLastGrouping,
     magnetDiskSpaceCheck,
     magnetGroupDownloads,
   ];
@@ -1079,6 +1106,7 @@ class _SettingBoxKey {
       danmakuDuration = 'danmakuDuration',
       danmakuLineHeight = 'danmakuLineHeight',
       danmakuTimeOffset = 'danmakuTimeOffset',
+      danmakuTimeOffsetByEpisode = 'danmakuTimeOffsetByEpisode',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',

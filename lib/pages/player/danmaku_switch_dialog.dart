@@ -143,6 +143,7 @@ Future<void> showDanmakuEpisodePickerDialog({
                         videoPageController: videoPageController,
                         animeTitle: animeTitle,
                         episode: episode,
+                        bangumiId: bangumiId,
                       );
                     },
                   );
@@ -174,18 +175,23 @@ Future<void> showDanmakuEpisodePickerDialog({
 }
 
 /// 绑定指定番剧的指定分集弹幕，成功后开启弹幕并提示。
+///
+/// [bangumiId] 为弹弹 Play 番剧 ID：本地播放自动加载失败后手动绑定
+/// 时必须传入，保证弹幕池绑定信息完整（面板展示 / 时间轴偏移作用域）。
 Future<void> bindDanmakuToEpisode({
   required PlayerController playerController,
   required VideoPageController videoPageController,
   required String animeTitle,
   required DanmakuEpisode episode,
+  required int bangumiId,
 }) async {
   try {
     videoPageController.cancelAutomaticDanmakuLoad();
     final hasDanmakus = await playerController.danmaku.getDanDanmakuByEpisodeID(
         episode.episodeId,
         animeTitle: animeTitle,
-        episodeTitle: episode.episodeTitle);
+        episodeTitle: episode.episodeTitle,
+        bangumiId: bangumiId);
     if (hasDanmakus) {
       playerController.danmaku.setDanmakuEnabled(true);
       KazumiDialog.showToast(message: '弹幕切换成功');
@@ -271,6 +277,7 @@ Future<void> _searchDanmakuAndShowResult({
                                 videoPageController: videoPageController,
                                 animeTitle: danmakuInfo.animeTitle,
                                 episode: episode,
+                                bangumiId: danmakuInfo.animeId,
                               );
                             },
                           );
