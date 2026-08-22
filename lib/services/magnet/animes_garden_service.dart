@@ -210,18 +210,22 @@ class AnimesGardenService {
       title: title.isNotEmpty ? title : (magnet),
       magnetLink: magnet,
       torrentUrl: '',
-      size: _formatKbSize(item['size']),
+      size: formatAnimesGardenSize(item['size']),
       publishDate: date,
       publisher: publisher,
       subtitle: type,
     );
   }
 
-  /// Animes Garden 的 size 字段单位为 KB。
-  String _formatKbSize(dynamic kb) {
-    final kilobytes = num.tryParse(kb?.toString() ?? '');
-    if (kilobytes == null || kilobytes <= 0) return '';
-    var size = kilobytes.toDouble() * 1024;
+  /// 将 Animes Garden 的体积字段格式化为「X 单位」字符串。
+  ///
+  /// 注意：API 返回的 `size` 字段单位为**字节（bytes）**，实测例如
+  /// 781398016 ≈ 745 MB、3435973632 ≈ 3.2 GB。切勿按 KB 处理，否则体积会被
+  /// 放大 1024 倍，导致创建下载任务时磁盘空间校验误判「空间不足」。
+  static String formatAnimesGardenSize(dynamic bytes) {
+    final value = num.tryParse(bytes?.toString() ?? '');
+    if (value == null || value <= 0) return '';
+    var size = value.toDouble();
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     var unit = 0;
     while (size >= 1024 && unit < units.length - 1) {

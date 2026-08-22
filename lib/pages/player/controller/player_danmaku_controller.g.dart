@@ -95,10 +95,12 @@ mixin _$PlayerDanmakuController on _PlayerDanmakuController, Store {
 
   @override
   Future<bool> getDanDanmakuByEpisodeID(int episodeID,
-      {String? animeTitle, String? episodeTitle}) {
+      {String? animeTitle, String? episodeTitle, int? bangumiId}) {
     return _$getDanDanmakuByEpisodeIDAsyncAction.run(() => super
         .getDanDanmakuByEpisodeID(episodeID,
-            animeTitle: animeTitle, episodeTitle: episodeTitle));
+            animeTitle: animeTitle,
+            episodeTitle: episodeTitle,
+            bangumiId: bangumiId));
   }
 
   late final _$_PlayerDanmakuControllerActionController =

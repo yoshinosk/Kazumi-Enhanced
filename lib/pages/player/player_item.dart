@@ -123,6 +123,15 @@ class _PlayerItemState extends State<PlayerItem>
   Timer? mouseScrollerTimer;
   Timer? _adjustmentHudHideTimer;
 
+  /// 弹幕发射追踪：记录上次发射的源秒，逐 tick 补发区间内所有整秒弹幕。
+  /// 倍速播放时位置每 tick 前进 speed 秒，直接采样当前秒会丢桶（>1x）或
+  /// 重复发射（<1x）；缓冲停滞时同秒反复采样也会重复。
+  int? _lastDanmakuEmitSourceSecond;
+
+  /// 弹幕池代次（seek / 偏移变更 / 弹幕池重载时自增），变化后重置发射追踪。
+  int _danmakuEmitGeneration = -1;
+  int _danmakuEmitBangumiID = -1;
+
   /// 已触发过 Bangumi 进度同步的 (bangumiId:集数) key，防止 completed
   /// 持续状态下每个计时周期重复请求。
   String? _bangumiSyncFiredKey;
@@ -956,8 +965,52 @@ class _PlayerItemState extends State<PlayerItem>
       return;
     }
 
-    final danmakus = playerController.danmaku
-        .danmakusForPlaybackPosition(playerController.playback.currentPosition);
+    final danmakuController = playerController.danmaku;
+    final currentSecond = danmakuController
+        .resolveDanmakuSecond(playerController.playback.currentPosition);
+    if (currentSecond == null) return;
+
+    // 弹幕池代次变化（弹幕重载 / seek / 偏移调整）后重置追踪：
+    // 从当前秒重新发射，避免沿用旧池的发射进度。
+    if (danmakuController.scheduledDanmakuGeneration !=
+            _danmakuEmitGeneration ||
+        danmakuController.bangumiID != _danmakuEmitBangumiID) {
+      _danmakuEmitGeneration = danmakuController.scheduledDanmakuGeneration;
+      _danmakuEmitBangumiID = danmakuController.bangumiID;
+      _lastDanmakuEmitSourceSecond = null;
+    }
+
+    final lastSecond = _lastDanmakuEmitSourceSecond;
+    if (lastSecond == null) {
+      _lastDanmakuEmitSourceSecond = currentSecond;
+      _emitDanmakusForSourceSeconds(currentSecond);
+      return;
+    }
+    if (currentSecond <= lastSecond) {
+      // 位置停滞（缓冲 / 低倍速）或回退：不重复发射；回退时仅补发当前秒。
+      if (currentSecond < lastSecond) {
+        _lastDanmakuEmitSourceSecond = currentSecond;
+        _emitDanmakusForSourceSeconds(currentSecond);
+      }
+      return;
+    }
+    // 位置前进：补发区间内所有整秒弹幕。倍速 > 1 时每 tick 跨多个源秒，
+    // 只采样当前秒会整桶丢失；倍速 < 1 时同秒被多次采样会重复发射。
+    final gap = currentSecond - lastSecond;
+    _lastDanmakuEmitSourceSecond = currentSecond;
+    if (gap > 5) {
+      // 大幅跳变视为 seek / 长缓冲：只发射当前秒，避免瞬时刷出大量弹幕。
+      _emitDanmakusForSourceSeconds(currentSecond);
+      return;
+    }
+    for (var second = lastSecond + 1; second <= currentSecond; second++) {
+      _emitDanmakusForSourceSeconds(second);
+    }
+  }
+
+  void _emitDanmakusForSourceSeconds(int sourceSecond) {
+    final danmakus =
+        playerController.danmaku.danDanmakus[sourceSecond] ?? const [];
     final danmakuCount = danmakus.length;
     for (final entry in danmakus.asMap().entries) {
       final idx = entry.key;
@@ -1029,7 +1082,7 @@ class _PlayerItemState extends State<PlayerItem>
       final playingSelection = videoPageController.playbackEpisode;
       final playingRoadData =
           videoPageController.roadList[playingSelection.road];
-        if (playerController.playback.completed && !videoPageController.loading) {
+      if (playerController.playback.completed && !videoPageController.loading) {
         if (playerController.playback.resumedNearEnd) {
           // Completion of a stale near-end resume is not a real watch;
           // replay from the beginning instead of advancing.
@@ -1052,8 +1105,7 @@ class _PlayerItemState extends State<PlayerItem>
             } catch (_) {}
             widget.changeEpisode(playingSelection.episode + 1,
                 currentRoad: playingSelection.road);
-          } else if (playingSelection.episode >=
-              playingRoadData.data.length) {
+          } else if (playingSelection.episode >= playingRoadData.data.length) {
             // 最后一集播完：本地媒体库提示去在线 / 磁力补后续，其余仅提示。
             _maybePromptLastEpisodeFinished(playingSelection);
           }

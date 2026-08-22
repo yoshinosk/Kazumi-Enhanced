@@ -53,6 +53,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late bool watchFolderEnabled;
   late bool diskSpaceCheck;
   late bool groupDownloads;
+  late int subscriptionCheckIntervalMinutes;
   bool isPickingDir = false;
 
   MagnetController get _controller => inject<MagnetController>();
@@ -115,6 +116,8 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         GStorage.getSetting(SettingsKeys.localMediaWatchFolder);
     diskSpaceCheck = GStorage.getSetting(SettingsKeys.magnetDiskSpaceCheck);
     groupDownloads = GStorage.getSetting(SettingsKeys.magnetGroupDownloads);
+    subscriptionCheckIntervalMinutes = GStorage.getSetting(
+        SettingsKeys.magnetSubscriptionCheckIntervalMinutes);
   }
 
   @override
@@ -131,6 +134,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             _downloadManageSection(),
             _libraryLinkSection(),
           ],
+          _subscriptionSection(),
           _infoSection(),
         ],
       ),
@@ -742,6 +746,43 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         '${t.day.toString().padLeft(2, '0')} '
         '${t.hour.toString().padLeft(2, '0')}:'
         '${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  // ---------------- RSS 订阅 ----------------
+  Widget _subscriptionSection() {
+    final minutes = subscriptionCheckIntervalMinutes;
+    return SettingsSection(
+      title: const Text('RSS 订阅'),
+      tiles: [
+        SettingsTile(
+          leading: Icons.autorenew_rounded,
+          title: const Text('自动检查更新间隔'),
+          description: Text(minutes % 60 == 0
+              ? '每 ${minutes ~/ 60} 小时检查一次订阅更新，发现新内容时自动下载'
+              : '每 $minutes 分钟检查一次订阅更新，发现新内容时自动下载'),
+          value: DropdownButton<int>(
+            value: minutes,
+            underline: const SizedBox.shrink(),
+            isDense: true,
+            items: const [
+              DropdownMenuItem(value: 30, child: Text('30 分钟')),
+              DropdownMenuItem(value: 60, child: Text('1 小时')),
+              DropdownMenuItem(value: 120, child: Text('2 小时')),
+              DropdownMenuItem(value: 360, child: Text('6 小时')),
+              DropdownMenuItem(value: 720, child: Text('12 小时')),
+              DropdownMenuItem(value: 1440, child: Text('1 天')),
+            ],
+            onChanged: (value) async {
+              if (value == null) return;
+              setState(() => subscriptionCheckIntervalMinutes = value);
+              await GStorage.putSetting(
+                  SettingsKeys.magnetSubscriptionCheckIntervalMinutes, value);
+              await _controller.applyMagnetSettingsChanged();
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   // ---------------- 说明 ----------------

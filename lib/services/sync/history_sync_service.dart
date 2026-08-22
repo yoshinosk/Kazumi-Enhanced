@@ -32,6 +32,14 @@ class HistorySyncService {
   final AsyncSerialQueue _sequenceQueue = AsyncSerialQueue();
   int _captureSequence = 0;
 
+  /// 进度事件合并窗口：同一（历史条目, 分集, 线路）在该窗口内的重复
+  /// 进度写入被合并丢弃。播放期间每秒都会写 2 行事件（upsertProgress +
+  /// upsertWatchState），不节流会让日志在约 1 小时内涨到 1MB，触发
+  /// checkpoint 时整份日志改名重传 + 快照全量重写。事件是幂等 upsert，
+  /// 丢弃中间值不影响最终一致性（合并按 seq 取最新）。
+  static const Duration _progressAppendCoalesceWindow = Duration(seconds: 10);
+  final Map<String, DateTime> _lastProgressAppendAt = {};
+
   Future<String> getDeviceId() async {
     return _sequenceQueue.run(() async {
       final existing = GStorage.getSetting(SettingsKeys.historySyncDeviceId);
@@ -54,6 +62,16 @@ class HistorySyncService {
     // 本地媒体库条目（含本机绝对路径）与边下边播条目（流 URL 随引擎存活）
     // 不参与跨设备同步。
     if (isLocalMediaHistory(history) || isStreamHistory(history)) return;
+    // 播放期间的每秒进度写入按条目合并：窗口内重复写入直接丢弃，
+    // 只保留窗口后的最新一次（下次写入自带最新进度与 updatedAt）。
+    final coalesceKey = '${history.key}|$episode|$road';
+    final lastAppend = _lastProgressAppendAt[coalesceKey];
+    final now = DateTime.now();
+    if (lastAppend != null &&
+        now.difference(lastAppend) < _progressAppendCoalesceWindow) {
+      return;
+    }
+    _lastProgressAppendAt[coalesceKey] = now;
     final deviceId = await getDeviceId();
     final effectiveUpdatedAt =
         updatedAt ?? history.lastWatchTime.millisecondsSinceEpoch;
@@ -444,11 +462,18 @@ class HistorySyncService {
     });
   }
 
-  Future<void> appendSafely(Future<void> Function() append) async {
+  Future<void> appendSafely(
+    Future<void> Function() append, {
+    bool requireEnabled = true,
+  }) async {
+    // 同步开关只控制上传与进度事件的落盘：删除 / 清空墓碑必须无条件
+    // 写盘，否则开关关闭期间的删除在重新开启同步后会被远程快照
+    // putAll 回本地复活。进度事件高频且状态可被后续覆盖，开关关闭时
+    // 无需写入避免日志无限膨胀。
     final webDavEnable = GStorage.getSetting(SettingsKeys.webDavEnable);
     final historySyncEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableHistory);
-    if (webDavEnable != true || historySyncEnable != true) {
+    if (requireEnabled && (webDavEnable != true || historySyncEnable != true)) {
       return;
     }
     try {

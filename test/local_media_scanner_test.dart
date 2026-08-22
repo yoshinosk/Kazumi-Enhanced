@@ -96,4 +96,40 @@ void main() {
     final lower = localMediaPathIdentityForTest(pathOf('anime/ep01.mkv'));
     expect(upper == lower, Platform.isWindows);
   });
+
+  test('scanWithGroupings 单标题时分组键为整目录', () async {
+    final sub = Directory(pathOf('202607'));
+    sub.createSync(recursive: true);
+    File(p.join(sub.path, 'Behenko - 01 [1080p].mkv')).createSync();
+
+    final result =
+        await scanner.scanWithGroupings(temp.path, groupByFolder: true);
+    expect(result.folders, hasLength(1));
+    final grouping = result.groupings[localMediaPathKey(sub.path)];
+    expect(grouping, isNotNull);
+    // 单标题 → 分组路径即目录本身，键为归一化标题
+    expect(grouping!.values.single, sub.path);
+    expect(grouping.keys.single, 'behenko');
+  });
+
+  test('scanWithGroupings 多标题时分组键为标题逻辑路径', () async {
+    final sub = Directory(pathOf('202607'));
+    sub.createSync(recursive: true);
+    File(p.join(sub.path, 'Behenko - 01 [1080p].mkv')).createSync();
+    File(p.join(sub.path, 'Mato Seihei no Slave - 01.mkv')).createSync();
+
+    final result =
+        await scanner.scanWithGroupings(temp.path, groupByFolder: true);
+    final grouping = result.groupings[localMediaPathKey(sub.path)];
+    expect(grouping, isNotNull);
+    expect(grouping!.keys, containsAll(['behenko', 'matoseiheinoslave']));
+    expect(
+      localMediaPathKey(grouping['behenko']!),
+      localMediaPathKey(p.join(sub.path, 'Behenko')),
+    );
+    expect(
+      localMediaPathKey(grouping['matoseiheinoslave']!),
+      localMediaPathKey(p.join(sub.path, 'Mato Seihei no Slave')),
+    );
+  });
 }

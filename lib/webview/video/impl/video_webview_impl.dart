@@ -53,6 +53,9 @@ class VideoWebviewImpl
         onLoadStart: (controller, url) async {
           logEventController.add('started loading: $url');
           if (url.toString() != 'about:blank') {
+            // 新页面导航开始：此后到达的 JS 解析消息才属于当前页面
+            // （旧页面迟到的消息在此之前送达，会被代际检查丢弃）。
+            markPageStarted();
             await _onLoadStart();
           }
         },
@@ -84,6 +87,8 @@ class VideoWebviewImpl
       hasRegisteredHandlers = true;
     }
     count = 0;
+    // 新一次播放 / 换集：旧页面尚未送达的解析消息从此代际失效。
+    beginPageLoad();
     this.offset = offset;
     this.useLegacyParser = useLegacyParser;
     isIframeLoaded = false;
@@ -111,6 +116,11 @@ class VideoWebviewImpl
           handlerName: 'JSBridgeDebug',
           callback: (args) {
             String message = args[0].toString();
+            // 旧页面在导航切换期间迟到的解析消息：当前页面尚未开始
+            // 导航（或已被新的加载取代），丢弃避免用旧 URL 播错。
+            if (!canAcceptResolve) {
+              return;
+            }
             logEventController.add('Callback received: $message');
             logEventController.add(
                 'If there is audio but no video, please report it to the rule developer.');
@@ -140,6 +150,10 @@ class VideoWebviewImpl
           handlerName: 'VideoBridgeDebug',
           callback: (args) {
             String message = args[0].toString();
+            // 旧页面迟到的消息同样按代际丢弃（见 JSBridgeDebug 分支）。
+            if (!canAcceptResolve) {
+              return;
+            }
             logEventController.add('Callback received: $message');
             if (message.contains('http') && !isVideoSourceLoaded) {
               logEventController.add('Loading video source: $message');

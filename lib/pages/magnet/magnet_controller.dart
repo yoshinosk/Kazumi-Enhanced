@@ -474,6 +474,10 @@ abstract class _MagnetController with Store {
       KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
       return;
     }
+    if (_downloads.alreadyQueued(item)) {
+      KazumiDialog.showToast(message: '该资源已在下载队列中');
+      return;
+    }
     if (GStorage.getSetting(SettingsKeys.magnetDiskSpaceCheck)) {
       final proceed = await _checkDiskSpaceBeforeAdd(item, dir);
       if (!proceed) return;
@@ -638,10 +642,14 @@ abstract class _MagnetController with Store {
       if (folderPath.isEmpty) continue;
       // 自动入库需要同时满足：任务真正停止做种、用户开启开关、
       // 且搜刮置信度不低于阈值（详情页发起的任务置信度恒为 1.0）。
+      // 边下边播在播的任务跳过入库：移动 / 重命名正被引擎流服务器
+      // 读取的文件会让 HTTP 流断流；流停止后由下一轮状态同步重试
+      // （此处不标记失败，避免永久跳过）。
       final shouldAutoImport = entry.status == 'complete' &&
           GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary) &&
           entry.scrapeConfidence >=
-              GStorage.getSetting(SettingsKeys.magnetAutoImportConfidence);
+              GStorage.getSetting(SettingsKeys.magnetAutoImportConfidence) &&
+          !_downloads.isStreaming(entry.taskId);
       if (!shouldAutoImport) _syncScrapeInfo(entry, folderPath);
       if (shouldAutoImport &&
           !_autoImportedTaskIds.contains(entry.taskId) &&
@@ -1031,6 +1039,7 @@ abstract class _MagnetController with Store {
   @action
   Future<void> applyMagnetSettingsChanged() async {
     await _downloads.applySettingsChanged();
+    await _subscriptions.applySettings();
     _refreshEngineInfo();
   }
 

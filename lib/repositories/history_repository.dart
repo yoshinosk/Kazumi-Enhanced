@@ -136,8 +136,11 @@ class HistoryRepository implements IHistoryRepository {
 
   static Future<void> _appendDeleteSync(History history) async {
     final historySyncService = HistorySyncService();
+    // 删除墓碑无条件写盘：同步关闭期间的删除也需落日志，
+    // 否则重新开启同步后远程快照会把已删条目 putAll 回本地复活。
     await historySyncService.appendSafely(
       () => historySyncService.appendDeleteHistory(history),
+      requireEnabled: false,
     );
   }
 
@@ -145,6 +148,7 @@ class HistoryRepository implements IHistoryRepository {
     final historySyncService = HistorySyncService();
     await historySyncService.appendSafely(
       () => historySyncService.appendClearAll(),
+      requireEnabled: false,
     );
   }
 

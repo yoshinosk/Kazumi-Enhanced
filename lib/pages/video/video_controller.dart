@@ -910,6 +910,22 @@ abstract class _VideoPageController with Store implements Disposable {
                 ? result.episodeTitle
                 : '第${params.danmakuEpisodeNumber}集',
           );
+          if (params.isLocalPlayback) {
+            final dm = playerController.danmaku;
+            double minT = double.infinity, maxT = 0;
+            for (final d in result.danmakus) {
+              if (d.time < minT) minT = d.time;
+              if (d.time > maxT) maxT = d.time;
+            }
+            KazumiLogger().i(
+                'DanmakuDiag: local load ep=${params.danmakuEpisodeNumber} '
+                'count=${result.danmakus.length} '
+                'time=${minT.isFinite ? minT.toStringAsFixed(1) : '-'}..'
+                '${maxT.toStringAsFixed(1)}s '
+                'bangumiID=${dm.bangumiID} episodeId=${dm.danmakuEpisodeId} '
+                'on=$enableDanmaku offset=${dm.timelineOffsetSeconds}',
+                forceLog: true);
+          }
           if (enableDanmaku) {
             unawaited(
               checkDanmakuAxisAlignment(

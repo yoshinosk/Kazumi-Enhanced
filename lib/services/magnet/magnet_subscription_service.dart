@@ -5,6 +5,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/animes_garden_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/mikan_search_service.dart';
+import 'package:kazumi/services/storage/storage.dart';
 
 /// RSS / 资源订阅轮询服务。
 ///
@@ -30,7 +31,10 @@ class MagnetSubscriptionService {
   final AnimesGardenService _animesGarden;
   Timer? _pollTimer;
 
-  static const Duration _pollInterval = Duration(minutes: 15);
+  /// 订阅自动检查间隔，读取设置中的分钟数（默认 1 小时）。
+  Duration get _pollInterval => Duration(
+      minutes: GStorage.getSetting(
+          SettingsKeys.magnetSubscriptionCheckIntervalMinutes));
 
   List<MagnetSubscription> _subscriptions = const [];
   List<MagnetSubscription> get subscriptions =>
@@ -51,6 +55,8 @@ class MagnetSubscriptionService {
     _subscriptions = MagnetSubscriptionStore.load();
     onSubscriptionsChanged?.call(_subscriptions);
     _startPolling();
+    // 打开软件时立即检查一次更新（引擎就绪后由 onNewItems 自动下载）。
+    unawaited(checkAll());
   }
 
   Future<void> dispose() async {
@@ -63,7 +69,13 @@ class MagnetSubscriptionService {
     _pollTimer = Timer.periodic(_pollInterval, (_) => checkAll());
   }
 
-  /// 添加订阅，立即拉取一次以初始化 lastGuid，不触发 onNewItems。
+  /// 重新读取设置中的检查间隔并重启定时器（设置页调整间隔后调用）。
+  Future<void> applySettings() async {
+    _startPolling();
+  }
+
+  /// 添加订阅，立即拉取并上报当前 feed 条目（视为新内容）触发自动下载，
+  /// 成功后游标推进到最新条目；失败（引擎未启用等）不推进游标，下次检查重试。
   Future<MagnetSubscription?> add(MagnetSubscription subscription) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final base = MagnetSubscription(
@@ -84,8 +96,14 @@ class MagnetSubscriptionService {
       coverUrl: subscription.coverUrl,
     );
     final items = await _fetchFeed(base);
+    // 添加订阅立即上报当前 feed 条目（视为新内容），按 autoDownload 决定
+    // 是否自动下载；引擎未启用等失败时不推进游标，下次定时检查重试。
+    var acknowledged = true;
+    if (items.isNotEmpty && onNewItems != null) {
+      acknowledged = await onNewItems!(base, items);
+    }
     final newSub = base.copyWith(
-      lastGuid: items.isEmpty ? null : _itemGuid(items.first),
+      lastGuid: items.isEmpty || !acknowledged ? null : _itemGuid(items.first),
       lastCheckedAt: DateTime.now(),
     );
     _subscriptions = [..._subscriptions, newSub];
@@ -176,10 +194,12 @@ class MagnetSubscriptionService {
     // 条目既无磁力链也无种子直链时无法定位去重键，放弃本轮检测，
     // 避免把所有条目误报为新条目反复触发自动下载。
     if (firstGuid.isEmpty) return;
-    final lastIndex = (sub.lastGuid == null || sub.lastGuid!.isEmpty)
-        ? -1
-        : items.indexWhere((e) => _itemGuid(e) == sub.lastGuid);
-    final newItems = lastIndex < 0 ? items : items.sublist(0, lastIndex);
+    // 游标未初始化（添加订阅时首拉为空 / 添加时下载失败未推进游标）：
+    // 整个 feed 视为新条目上报；命中自动下载则推进游标，否则下一轮重试。
+    final lastGuid = sub.lastGuid;
+    final newItems = (lastGuid == null || lastGuid.isEmpty)
+        ? items
+        : _itemsSince(items, lastGuid);
     var acknowledged = true;
     if (newItems.isNotEmpty && onNewItems != null) {
       acknowledged = await onNewItems!(sub, newItems);
@@ -192,6 +212,13 @@ class MagnetSubscriptionService {
         _subscriptions.map((s) => s.id == sub.id ? updated : s).toList();
     await _saveSubscriptions(_subscriptions);
     onSubscriptionsChanged?.call(_subscriptions);
+  }
+
+  /// 返回游标之后的条目（游标不在列表中时整份列表都视为新条目）。
+  static List<MagnetSearchItem> _itemsSince(
+      List<MagnetSearchItem> items, String guid) {
+    final lastIndex = items.indexWhere((e) => _itemGuid(e) == guid);
+    return lastIndex < 0 ? items : items.sublist(0, lastIndex);
   }
 
   @visibleForTesting

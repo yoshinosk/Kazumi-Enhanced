@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -40,7 +41,8 @@ class AnimeGroup {
 /// 与 [AnimeGroup] 的区别：已匹配番剧仍按番剧聚合成一张卡片，
 /// 但未匹配的文件夹会**逐个**拆成独立卡片 —— 网格是海报墙，
 /// 把上百个未匹配文件夹塞进同一张「未匹配」卡片毫无意义。
-class MediaGridItem {  const MediaGridItem({
+class MediaGridItem {
+  const MediaGridItem({
     this.info,
     required this.title,
     required this.folders,
@@ -101,8 +103,7 @@ class MediaResumePoint {
       other is MediaResumePoint &&
           localMediaPathKey(other.folder.path) ==
               localMediaPathKey(folder.path) &&
-          localMediaPathKey(other.file.path) ==
-              localMediaPathKey(file.path) &&
+          localMediaPathKey(other.file.path) == localMediaPathKey(file.path) &&
           other.position == position &&
           other.updatedAt == updatedAt;
 
@@ -349,7 +350,8 @@ abstract class _MediaController with Store {
         }
       }
     } catch (e) {
-      KazumiLogger().w('MediaController: refresh resume points failed', error: e);
+      KazumiLogger()
+          .w('MediaController: refresh resume points failed', error: e);
     }
     if (!mapEquals(latest, Map.from(resumePoints))) {
       resumePoints = ObservableMap.of(latest);
@@ -361,8 +363,10 @@ abstract class _MediaController with Store {
   /// 旧版本在文件尚未匹配时直接播放，会以标题哈希的占位 BangumiItem
   /// 记录历史（id <= 0）；文件夹随后搜刮匹配到真实番剧后，旧条目不会
   /// 自动更新，导致历史页显示占位标题、无法联动 Bangumi 进度。此处把
-  /// 这类条目按 episodePageUrl 找到所在文件夹，迁移到真实番剧的 key 下
-  /// 与既有条目合并。每次扫描后运行，占位条目迁移完毕即空跑退出。
+  /// 这类条目按 episodePageUrl 找到所在文件夹，迁移到真实番剧的 key 下。
+  /// 若匹配后用户已重新播放过（真实条目已存在且更新），则跳过迁移、
+  /// 直接丢弃占位条目，避免陈旧占位进度覆盖新历史。每次扫描后运行，
+  /// 占位条目迁移完毕即空跑退出。
   Future<void> _repairPlaceholderHistories() async {
     try {
       final placeholders = _historyRepository
@@ -383,18 +387,47 @@ abstract class _MediaController with Store {
         if (folder == null) continue;
         final info = scrapeResults[folder.path];
         if (info == null || info.bangumiId == null) continue;
-        final progress = history.progresses[history.lastWatchEpisode];
-        await _historyRepository.updateHistory(
-          identity: PlaybackHistoryIdentity.offline(
-            bangumiItem: info.toBangumiItem(),
-            pluginName: kLocalMediaAdapterName,
-            episodeNumber: history.lastWatchEpisode,
-            episodeTitle: history.lastWatchEpisodeName,
-            road: 0,
-            episodePageUrl: history.episodePageUrl,
-          ),
-          progress: progress?.progress ?? Duration.zero,
+        final realBangumiItem = info.toBangumiItem();
+        // 文件夹匹配后用户已重新播放过该文件：真实条目存在且更新，
+        // 迁移会把陈旧占位进度覆盖到真实条目上（updateHistory 无条件
+        // 写 lastWatchTime=now 并覆写进度），此时直接丢弃占位条目。
+        final real = _historyRepository.getHistory(
+          kLocalMediaAdapterName,
+          realBangumiItem,
+          entryKind: HistoryEntryKind.offline,
         );
+        if (real != null &&
+            !real.lastWatchTime.isBefore(history.lastWatchTime)) {
+          await _historyRepository.deleteHistory(history);
+          continue;
+        }
+        final byEpisode = {
+          for (final progress in history.progresses.values)
+            progress.episode: progress,
+        };
+        final lastEpisode = history.lastWatchEpisode;
+        final lastProgress = byEpisode.remove(lastEpisode);
+        // 最后写入上次观看的分集，保证迁移后 watch-state 与占位条目一致；
+        // 其余分集进度一并迁移，避免旧占位条目中的其他进度丢失。
+        final ordered = [
+          ...byEpisode.values,
+          if (lastProgress != null) lastProgress,
+        ];
+        for (var i = 0; i < ordered.length; i++) {
+          final progress = ordered[i];
+          final isLast = i == ordered.length - 1;
+          await _historyRepository.updateHistory(
+            identity: PlaybackHistoryIdentity.offline(
+              bangumiItem: realBangumiItem,
+              pluginName: kLocalMediaAdapterName,
+              episodeNumber: progress.episode,
+              episodeTitle: isLast ? history.lastWatchEpisodeName : '',
+              road: progress.road,
+              episodePageUrl: history.episodePageUrl,
+            ),
+            progress: progress.progress,
+          );
+        }
         await _historyRepository.deleteHistory(history);
         repaired = true;
         KazumiLogger().i(
@@ -444,8 +477,7 @@ abstract class _MediaController with Store {
       if (!await AndroidStorageAccess.hasMediaReadPermission()) {
         final granted = await AndroidStorageAccess.requestMediaReadPermission();
         if (!granted) {
-          KazumiDialog.showToast(
-              message: '未授予存储读取权限，无法扫描本地视频，请在系统设置中允许');
+          KazumiDialog.showToast(message: '未授予存储读取权限，无法扫描本地视频，请在系统设置中允许');
           return;
         }
       }
@@ -505,16 +537,19 @@ abstract class _MediaController with Store {
     }
     isScanning = true;
     try {
-      final result = await _scanner.scanAll(
+      final result = await _scanner.scanAllWithGroupings(
         folders.toList(),
         groupByFolder: groupByFolder,
       );
       // 扫描期间又有新的扫描（或文件夹变更）发起：丢弃本次结果，
       // 由最新一轮接管；同时避免把 isScanning 提前置 false。
       if (generation != _scanGeneration) return;
+      // 分组键随文件集合变化而失效：先按新旧分组快照迁移搜刮结果，
+      // 再提交新的文件夹列表，保证本次扫描起各链路使用新键仍能命中。
+      await _migrateScrapeResultsForRegrouping(result.groupings);
       library
         ..clear()
-        ..addAll(result);
+        ..addAll(result.folders);
       _refreshResumePoints();
       unawaited(_repairPlaceholderHistories());
       if (isGridMode) {
@@ -529,6 +564,75 @@ abstract class _MediaController with Store {
       }
     }
   }
+
+  /// 标题分组键迁移：媒体库的「假路径」分组键（`<目录>/<清洗后标题>`）
+  /// 由目录内**当前**文件集合推导——单标题目录用真实目录作键，出现第二
+  /// 个标题后同一批文件改挂到标题分组键（反向合并同理）。键变化后按路径
+  /// 持久化的搜刮结果会永久失效（续播 / 缩略图按文件路径重建可自愈，
+  /// 搜刮与依赖它的历史迁移不会）。
+  ///
+  /// 每次扫描后把上次扫描的分组快照与新快照按归一化标题对齐，把旧键下
+  /// 的搜刮结果迁移到新键，并持久化新快照供下次迁移使用。
+  Future<void> _migrateScrapeResultsForRegrouping(
+      Map<String, Map<String, String>> newGroupings) async {
+    final oldGroupings = _decodeGroupingSnapshot(
+        GStorage.getSetting(SettingsKeys.localMediaLastGrouping));
+    if (oldGroupings.isNotEmpty) {
+      if (scrapeResults.isEmpty) {
+        scrapeResults = ObservableMap.of(MediaScrapeStore.load());
+      }
+      var changed = false;
+      for (final entry in newGroupings.entries) {
+        final oldByTitle = oldGroupings[entry.key];
+        if (oldByTitle == null) continue;
+        for (final title in entry.value.keys) {
+          final newPath = entry.value[title]!;
+          final oldPath = oldByTitle[title];
+          if (oldPath == null || localMediaPathsEqual(oldPath, newPath)) {
+            continue;
+          }
+          final info = scrapeResults[oldPath];
+          if (info == null) continue;
+          if (!scrapeResults.containsKey(newPath)) {
+            scrapeResults[newPath] = info;
+          }
+          scrapeResults.remove(oldPath);
+          changed = true;
+          KazumiLogger().i(
+              'MediaController: migrated scrape result $oldPath -> $newPath '
+              '(title grouping changed)');
+        }
+      }
+      if (changed) {
+        await MediaScrapeStore.save(
+            Map<String, MediaScrapeInfo>.from(scrapeResults));
+      }
+    }
+    await GStorage.putSetting(
+      SettingsKeys.localMediaLastGrouping,
+      _encodeGroupingSnapshot(newGroupings),
+    );
+  }
+
+  static Map<String, Map<String, String>> _decodeGroupingSnapshot(String raw) {
+    if (raw.isEmpty) return const {};
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return map.map(
+        (dir, byTitle) => MapEntry(
+          dir,
+          (byTitle as Map<String, dynamic>)
+              .map((title, path) => MapEntry(title, path as String)),
+        ),
+      );
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  static String _encodeGroupingSnapshot(
+          Map<String, Map<String, String>> groupings) =>
+      jsonEncode(groupings);
 
   @action
   Future<void> setGroupByFolder(bool value) async {
@@ -964,8 +1068,8 @@ abstract class _MediaController with Store {
   /// 媒体库全部视频文件的总字节数。
   int get totalSize => library.fold<int>(
         0,
-        (sum, folder) => sum +
-            folder.files.fold<int>(0, (acc, file) => acc + file.size),
+        (sum, folder) =>
+            sum + folder.files.fold<int>(0, (acc, file) => acc + file.size),
       );
 
   // ============ 跨功能查询 ============
@@ -1067,12 +1171,11 @@ abstract class _MediaController with Store {
       final updated = Map<String, String>.from(thumbnails);
       for (final (folder, file) in target) {
         try {
-          final frame = await VideoFrameExtractor.instance.extractFrame(
-              file.path);
+          final frame =
+              await VideoFrameExtractor.instance.extractFrame(file.path);
           if (frame == null) continue;
           final key = _thumbnailKey(file);
-          final dest = File(p.join(
-              cacheDir.path, '${_hash(key)}.jpg'));
+          final dest = File(p.join(cacheDir.path, '${_hash(key)}.jpg'));
           if (!await dest.exists()) {
             await frame.copy(dest.path);
           }
@@ -1081,15 +1184,16 @@ abstract class _MediaController with Store {
             updated[folder.path] = key;
           }
         } catch (e) {
-          KazumiLogger()
-              .w('MediaController: thumbnail failed for ${file.path}', error: e);
+          KazumiLogger().w('MediaController: thumbnail failed for ${file.path}',
+              error: e);
         }
       }
       if (!mapEquals(updated, Map.from(thumbnails))) {
         thumbnails = ObservableMap.of(updated);
       }
     } catch (e) {
-      KazumiLogger().w('MediaController: thumbnail generation failed', error: e);
+      KazumiLogger()
+          .w('MediaController: thumbnail generation failed', error: e);
     } finally {
       _thumbnailGenerating = false;
     }
@@ -1129,14 +1233,27 @@ class _SeasonProbe {
       final n = int.tryParse(en.group(1)!);
       if (n != null && n >= 1 && n <= 99) return n;
     }
-    final cn = RegExp(r'第\s*([一二三四五六七八九十1-9１-９0-9]+)\s*[季期部]')
-        .firstMatch(raw);
+    final cn = RegExp(r'第\s*([一二三四五六七八九十1-9１-９0-9]+)\s*[季期部]').firstMatch(raw);
     if (cn != null) {
       const map = {
-        '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-        '六': 6, '七': 7, '八': 8, '九': 9,
-        '1': 1, '2': 2, '3': 3, '4': 4, '5': 5,
-        '6': 6, '7': 7, '8': 8, '9': 9,
+        '一': 1,
+        '二': 2,
+        '三': 3,
+        '四': 4,
+        '五': 5,
+        '六': 6,
+        '七': 7,
+        '八': 8,
+        '九': 9,
+        '1': 1,
+        '2': 2,
+        '3': 3,
+        '4': 4,
+        '5': 5,
+        '6': 6,
+        '7': 7,
+        '8': 8,
+        '9': 9,
       };
       final v = cn.group(1)!.trim();
       if (v == '十') return 10;

@@ -1164,4 +1164,270 @@ void main() {
           isFalse);
     });
   });
+
+  group('MagnetDownloadService dedup key', () {
+    test('normalizes btih case and ignores tracker / dn differences', () {
+      expect(
+        MagnetDownloadService.dedupKeyForTest('magnet:?xt=urn:btih:ABC123DEF456'),
+        'btih:abc123def456',
+      );
+      expect(
+        MagnetDownloadService.dedupKeyForTest(
+            'magnet:?xt=urn:btih:ABC123DEF456&dn=Name&tr=udp://tracker.a/announce'),
+        'btih:abc123def456',
+      );
+      expect(
+        MagnetDownloadService.dedupKeyForTest('magnet:?xt=urn:btih:XYZ789'),
+        'btih:xyz789',
+      );
+    });
+
+    test('trims whitespace and falls back to raw uri for non-magnet', () {
+      expect(
+        MagnetDownloadService.dedupKeyForTest('   magnet:?xt=urn:btih:aaa   '),
+        'btih:aaa',
+      );
+      expect(
+        MagnetDownloadService.dedupKeyForTest('http://example.com/a.torrent'),
+        'uri:http://example.com/a.torrent',
+      );
+      expect(MagnetDownloadService.dedupKeyForTest(''), isNull);
+    });
+  });
+
+  group('MagnetDownloadService decideCompletionStatus', () {
+    test('non-complete status passes through unchanged', () {
+      final r = MagnetDownloadService.decideCompletionStatus(
+        status: 'active',
+        completionTrusted: false,
+        pendingVerification: false,
+      );
+      expect(r.status, 'active');
+      expect(r.completionTrusted, isFalse);
+      expect(r.pendingVerification, isFalse);
+    });
+
+    test('suspicious instant complete downgrades to checking and requests '
+        'recheck', () {
+      final r = MagnetDownloadService.decideCompletionStatus(
+        status: 'seeding',
+        completionTrusted: false,
+        pendingVerification: false,
+      );
+      expect(r.status, 'checking');
+      expect(r.completionTrusted, isFalse);
+      expect(r.pendingVerification, isTrue);
+    });
+
+    test('pending recheck that reports complete again is trusted', () {
+      final r = MagnetDownloadService.decideCompletionStatus(
+        status: 'complete',
+        completionTrusted: false,
+        pendingVerification: true,
+      );
+      expect(r.status, 'complete');
+      expect(r.completionTrusted, isTrue);
+      expect(r.pendingVerification, isFalse);
+    });
+
+    test('already trusted completion stays as-is', () {
+      final r = MagnetDownloadService.decideCompletionStatus(
+        status: 'seeding',
+        completionTrusted: true,
+        pendingVerification: false,
+      );
+      expect(r.status, 'seeding');
+      expect(r.completionTrusted, isTrue);
+      expect(r.pendingVerification, isFalse);
+    });
+  });
+
+  group('MagnetDownloadService completionCoversExpected', () {
+    // 真实尺度字节数（MB 级）：覆盖校验的容差为 1MB，过小的数值会让
+    // 「expected - slack」变负而失去判定意义。
+    const mb = 1024 * 1024;
+    const sizeA = 900 * mb;
+    const sizeB = 100 * mb;
+    const sizeAll = sizeA + sizeB;
+
+    MagnetDownloadEntry entryWithFiles({List<int>? selected}) {
+      return MagnetDownloadEntry(
+        sessionGid: '1',
+        title: 'T',
+        sourceUri: 'magnet:?xt=urn:btih:abc',
+        addedAt: DateTime(2026, 1, 1),
+        totalLength: sizeAll,
+        files: const [
+          MagnetDownloadFile(
+            index: 0,
+            name: 'f0',
+            path: 'f0',
+            size: sizeA,
+            isStreamable: true,
+          ),
+          MagnetDownloadFile(
+            index: 1,
+            name: 'f1',
+            path: 'f1',
+            size: sizeB,
+            isStreamable: true,
+          ),
+        ],
+        selectedFileIndexes: selected,
+      );
+    }
+
+    test('stream-window finish (narrowed wanted) is not real completion', () {
+      // 边下边播：流窗口（约 32MB）下完，引擎按 wanted 子集上报 finished。
+      final e = entryWithFiles();
+      final t = _info(
+        id: 1,
+        state: TorrentState.finished,
+        isFinished: true,
+        progress: 1.0,
+        totalWanted: 32 * mb,
+        totalDone: 32 * mb,
+      );
+      expect(MagnetDownloadService.completionCoversExpected(e, t), isFalse);
+    });
+
+    test('full-size finish covers expected bytes', () {
+      final e = entryWithFiles();
+      final t = _info(
+        id: 1,
+        state: TorrentState.seeding,
+        isFinished: true,
+        progress: 1.0,
+        totalWanted: sizeAll,
+        totalDone: sizeAll,
+      );
+      expect(MagnetDownloadService.completionCoversExpected(e, t), isTrue);
+    });
+
+    test('finish with zero verified bytes never covers expected', () {
+      // 引擎谎报完成（磁盘无数据）时 wanted 可能为满但 totalDone 为 0。
+      final e = entryWithFiles();
+      final t = _info(
+        id: 1,
+        state: TorrentState.seeding,
+        isFinished: true,
+        progress: 1.0,
+        totalWanted: sizeAll,
+        totalDone: 0,
+      );
+      expect(MagnetDownloadService.completionCoversExpected(e, t), isFalse);
+    });
+
+    test('file selection: finish of selected subset is covered', () {
+      final e = entryWithFiles(selected: [1]);
+      final t = _info(
+        id: 1,
+        state: TorrentState.finished,
+        isFinished: true,
+        progress: 1.0,
+        totalWanted: sizeB,
+        totalDone: sizeB,
+      );
+      expect(MagnetDownloadService.completionCoversExpected(e, t), isTrue);
+    });
+
+    test('file selection: stream window below selected set is not covered',
+        () {
+      final e = entryWithFiles(selected: [1]);
+      final t = _info(
+        id: 1,
+        state: TorrentState.finished,
+        isFinished: true,
+        progress: 1.0,
+        totalWanted: 20 * mb,
+        totalDone: 20 * mb,
+      );
+      expect(MagnetDownloadService.completionCoversExpected(e, t), isFalse);
+    });
+
+    test('unknown manifest falls back to totalLength', () {
+      final e = _entry(totalLength: 500 * mb);
+      // 无文件清单：按 totalLength 判定，流窗口完成被拒绝。
+      expect(
+        MagnetDownloadService.completionCoversExpected(
+          e,
+          _info(
+            id: 1,
+            totalWanted: 32 * mb,
+            totalDone: 32 * mb,
+            isFinished: true,
+            progress: 1.0,
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        MagnetDownloadService.completionCoversExpected(
+          e,
+          _info(
+            id: 1,
+            totalWanted: 500 * mb,
+            totalDone: 500 * mb,
+            isFinished: true,
+            progress: 1.0,
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('unknown expected size keeps legacy behavior (true)', () {
+      final e = _entry(totalLength: 0);
+      expect(
+        MagnetDownloadService.completionCoversExpected(
+          e,
+          _info(id: 1, totalWanted: 0, totalDone: 0),
+        ),
+        isTrue,
+      );
+    });
+
+    test('expectedDownloadBytes respects file selection', () {
+      final all = entryWithFiles();
+      expect(MagnetDownloadService.expectedDownloadBytes(all), sizeAll);
+      final selected = entryWithFiles(selected: [1]);
+      expect(MagnetDownloadService.expectedDownloadBytes(selected), sizeB);
+    });
+  });
+
+  group('MagnetDownloadService state mapping - pre-metadata guard', () {
+    test('metadata-less finished/seeding report is never complete', () {
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.finished,
+          isFinished: true,
+          progress: 1.0,
+          hasMetadata: false,
+        )),
+        'waiting',
+      );
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.seeding,
+          isFinished: true,
+          progress: 1.0,
+          hasMetadata: false,
+        )),
+        'waiting',
+      );
+    });
+
+    test('metadata-less error surfaces as error', () {
+      expect(
+        MagnetDownloadService.mapStatusForTest(_info(
+          id: 1,
+          state: TorrentState.error,
+          hasMetadata: false,
+        )),
+        'error',
+      );
+    });
+  });
 }
