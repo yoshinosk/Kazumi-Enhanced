@@ -49,7 +49,7 @@ Future<void> checkDanmakuAxisAlignment({
     videoDuration: duration,
   );
   KazumiLogger().i(
-      'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds.toStringAsFixed(1)}s, video=${result.videoDurationSeconds.toStringAsFixed(1)}s, diff=${result.differenceSeconds.toStringAsFixed(1)}s, beyond=${result.beyondFraction.toStringAsFixed(3)}',
+      'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds.toStringAsFixed(1)}s, video=${result.videoDurationSeconds.toStringAsFixed(1)}s, head=${result.headGapSeconds.toStringAsFixed(1)}s(${result.headGapReliable ? 'hard' : 'soft'}), tail=${result.tailGapSeconds.toStringAsFixed(1)}s(${result.tailGapReliable ? 'hard' : 'soft'}), beyond=${result.beyondFraction.toStringAsFixed(3)}, confidence=${result.confidence.toStringAsFixed(2)}, offset=${result.recommendedOffsetSeconds.toStringAsFixed(1)}s',
       forceLog: true);
   if (result.issue == DanmakuAxisIssue.none) return;
   if (shouldProceed != null && !shouldProceed()) return;
@@ -103,13 +103,32 @@ Future<void> showDanmakuAxisMismatchDialog({
               label: '视频时长',
               value: _formatDuration(result.videoDurationSeconds),
             ),
-            if (axisError)
+            if (axisError) ...[
+              if (result.headGapSeconds > 0.5)
+                _AxisInfoRow(
+                  label: '轴头空白',
+                  value:
+                      '${_formatDuration(result.headGapSeconds)}'
+                      '${result.headGapReliable ? '' : '（自然空窗）'}',
+                ),
+              if (result.tailGapSeconds > 0.5)
+                _AxisInfoRow(
+                  label: '轴尾空白',
+                  value:
+                      '${_formatDuration(result.tailGapSeconds)}'
+                      '${result.tailGapReliable ? '' : '（自然空窗）'}',
+                ),
               _AxisInfoRow(
                 label: '推荐偏移',
                 value: formatDanmakuTimeOffset(
                   result.recommendedOffsetSeconds,
                 ),
               ),
+              _AxisInfoRow(
+                label: '推荐可信度',
+                value: _confidenceLabel(result.confidence),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -199,6 +218,17 @@ String _formatDuration(double totalSeconds) {
   final remainder = seconds % Duration.secondsPerMinute;
   return '${minutes.toString().padLeft(2, '0')}:'
       '${remainder.toString().padLeft(2, '0')}';
+}
+
+/// 推荐偏移可信度的展示文案：多信号互相印证且幅度足够时为高。
+String _confidenceLabel(double confidence) {
+  if (confidence >= 0.85) {
+    return '高';
+  }
+  if (confidence >= 0.6) {
+    return '中';
+  }
+  return '低';
 }
 
 /// 等待播放器解析出视频时长（视频初始化后才有），超时返回 null。

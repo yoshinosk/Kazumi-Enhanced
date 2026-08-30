@@ -371,6 +371,14 @@ abstract class _PlayerPlaybackController with Store {
         } else {
           videoRenderer = androidVideoRenderer;
         }
+      } else if (Platform.isWindows) {
+        final String windowsVideoRenderer =
+            GStorage.getSetting(SettingsKeys.windowsVideoRenderer);
+        // auto 时不指定 vo，交由 mpv 自行选择，
+        // 与引入该设置之前的行为保持一致，避免老用户升级后出现回归。
+        if (windowsVideoRenderer != 'auto') {
+          videoRenderer = windowsVideoRenderer;
+        }
       }
 
       if (videoRenderer == 'mediacodec_embed') {
@@ -463,32 +471,19 @@ abstract class _PlayerPlaybackController with Store {
       if (!identical(mediaPlayer, currentPlayer)) {
         return;
       }
-      switch (mode) {
-        case SuperResolutionMode.efficiency:
-          await pp.command([
-            'change-list',
-            'glsl-shaders',
-            'set',
-            buildShadersAbsolutePath(
-              shaderAssetService.shadersDirectory.path,
-              mpvAnime4KShadersLite,
-            ),
-          ]);
-          break;
-        case SuperResolutionMode.quality:
-          await pp.command([
-            'change-list',
-            'glsl-shaders',
-            'set',
-            buildShadersAbsolutePath(
-              shaderAssetService.shadersDirectory.path,
-              mpvAnime4KShaders,
-            ),
-          ]);
-          break;
-        case SuperResolutionMode.off:
-          await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
-          break;
+      final shaders = mode.shaders;
+      if (shaders.isEmpty) {
+        await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
+      } else {
+        await pp.command([
+          'change-list',
+          'glsl-shaders',
+          'set',
+          buildShadersAbsolutePath(
+            shaderAssetService.shadersDirectory.path,
+            shaders,
+          ),
+        ]);
       }
       superResolutionMode = mode;
     } catch (e) {

@@ -435,6 +435,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
               underline: const SizedBox.shrink(),
               isDense: true,
               items: const [
+                DropdownMenuItem(value: 1, child: Text('1 小时')),
                 DropdownMenuItem(value: 6, child: Text('6 小时')),
                 DropdownMenuItem(value: 12, child: Text('12 小时')),
                 DropdownMenuItem(value: 24, child: Text('1 天')),

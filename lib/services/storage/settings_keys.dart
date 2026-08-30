@@ -364,6 +364,11 @@ class SettingsKeys {
     'auto',
     group: SettingGroup.player,
   );
+  static const windowsVideoRenderer = SettingKey<String>(
+    _SettingBoxKey.windowsVideoRenderer,
+    'auto',
+    group: SettingGroup.player,
+  );
   static const androidAutoEnterPIP = SettingKey<bool>(
     _SettingBoxKey.androidAutoEnterPIP,
     false,
@@ -980,6 +985,7 @@ class SettingsKeys {
     syncPlayUserName,
     androidEnableOpenSLES,
     androidVideoRenderer,
+    windowsVideoRenderer,
     androidAutoEnterPIP,
     defaultSuperResolutionMode,
     disableSuperResolutionWarning,
@@ -1144,6 +1150,7 @@ class _SettingBoxKey {
       syncPlayEndPoint = 'syncPlayEndPoint',
       androidEnableOpenSLES = 'androidEnableOpenSLES',
       androidVideoRenderer = 'androidVideoRenderer',
+      windowsVideoRenderer = 'windowsVideoRenderer',
       androidAutoEnterPIP = 'androidAutoEnterPIP',
       defaultSuperResolutionMode = 'defaultSuperResolutionType',
       disableSuperResolutionWarning = 'superResolutionWarn',

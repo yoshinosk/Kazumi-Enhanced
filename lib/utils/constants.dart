@@ -121,25 +121,90 @@ const Map<String, String> androidVideoRenderersList = {
   'mediacodec_embed': '功耗最低，不支持超分辨率',
 };
 
-/// 超分辨率滤镜
-const List<String> mpvAnime4KShaders = [
+/// Windows 可选视频渲染器
+///
+/// 随 Kazumi 分发的 libmpv 已内置 libplacebo 与 Vulkan，gpu-next 可用。
+/// 默认 auto 交由 mpv 自行选择，与未引入该设置时的行为保持一致。
+const Map<String, String> windowsVideoRenderersList = {
+  'auto': '自动选择',
+  'gpu': '基于 OpenGL, 兼容性最好',
+  'gpu-next': '基于 Vulkan (libplacebo), 着色器性能更好',
+};
+
+/// 各档位共用的收尾着色器：在两个 Upscale 之间降采样到接近屏幕尺寸，
+/// 避免后续处理在远大于显示尺寸的纹理上浪费算力。
+/// 参见上游 md/GLSL_Instructions_Advanced.md。
+const List<String> mpvAnime4KAutoDownscale = [
+  'Anime4K_AutoDownscalePre_x2.glsl',
+  'Anime4K_AutoDownscalePre_x4.glsl',
+];
+
+/// 超分辨率滤镜 - 效率档 (Anime4K Mode C)
+/// 链路: Upscale_Denoise -> Upscale
+/// 适用于已被降尺度且退化较少的片源, 开销最低。
+const List<String> mpvAnime4KShadersModeC = [
+  'Anime4K_Clamp_Highlights.glsl',
+  'Anime4K_Upscale_Denoise_CNN_x2_M.glsl',
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Upscale_CNN_x2_S.glsl',
+];
+
+/// 超分辨率滤镜 - 降噪档 (Anime4K Mode C+A)
+/// 链路: Upscale_Denoise -> Restore -> Upscale
+/// 在 Mode C 基础上补一次修复, 兼顾开销与轻微压缩噪点。
+const List<String> mpvAnime4KShadersModeCA = [
+  'Anime4K_Clamp_Highlights.glsl',
+  'Anime4K_Upscale_Denoise_CNN_x2_M.glsl',
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Restore_CNN_S.glsl',
+  'Anime4K_Upscale_CNN_x2_S.glsl',
+];
+
+/// 超分辨率滤镜 - 均衡档 (Anime4K Mode B)
+/// 链路: Restore_Soft -> Upscale -> Upscale
+/// Soft 变体针对降采样产生的振铃与锯齿, 适合 720p 番剧。
+const List<String> mpvAnime4KShadersModeB = [
+  'Anime4K_Clamp_Highlights.glsl',
+  'Anime4K_Restore_CNN_Soft_M.glsl',
+  'Anime4K_Upscale_CNN_x2_M.glsl',
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Upscale_CNN_x2_S.glsl',
+];
+
+/// 超分辨率滤镜 - 质量档 (Anime4K Mode A)
+/// 链路: Restore -> Upscale -> Upscale
+/// 与上游 md/Template/GLSL_Windows_High-end/mpv.conf 一致。
+const List<String> mpvAnime4KShadersModeA = [
   'Anime4K_Clamp_Highlights.glsl',
   'Anime4K_Restore_CNN_VL.glsl',
   'Anime4K_Upscale_CNN_x2_VL.glsl',
-  'Anime4K_AutoDownscalePre_x2.glsl',
-  'Anime4K_AutoDownscalePre_x4.glsl',
-  'Anime4K_Upscale_CNN_x2_M.glsl'
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Upscale_CNN_x2_M.glsl',
 ];
 
-/// 超分辨率滤镜 (轻量)
-const List<String> mpvAnime4KShadersLite = [
+/// 超分辨率滤镜 - 均衡增强档 (Anime4K Mode B+B)
+/// 链路: Restore_Soft -> Upscale -> Restore_Soft -> Upscale
+/// 仅在放大倍率 x2 及以上时使用, 否则容易过锐。
+const List<String> mpvAnime4KShadersModeBB = [
+  'Anime4K_Clamp_Highlights.glsl',
+  'Anime4K_Restore_CNN_Soft_M.glsl',
+  'Anime4K_Upscale_CNN_x2_M.glsl',
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Restore_CNN_Soft_S.glsl',
+  'Anime4K_Upscale_CNN_x2_S.glsl',
+];
+
+/// 超分辨率滤镜 - 极致档 (Anime4K Mode A+A)
+/// 链路: Restore -> Upscale -> Restore -> Upscale
+/// 感知质量最高, 但在 1080p 屏上播放 1080p 片源会明显过锐,
+/// 仅建议低分辨率片源放大时启用。
+const List<String> mpvAnime4KShadersModeAA = [
   'Anime4K_Clamp_Highlights.glsl',
   'Anime4K_Restore_CNN_M.glsl',
-  'Anime4K_Restore_CNN_S.glsl',
   'Anime4K_Upscale_CNN_x2_M.glsl',
-  'Anime4K_AutoDownscalePre_x2.glsl',
-  'Anime4K_AutoDownscalePre_x4.glsl',
-  'Anime4K_Upscale_CNN_x2_S.glsl'
+  ...mpvAnime4KAutoDownscale,
+  'Anime4K_Restore_CNN_S.glsl',
+  'Anime4K_Upscale_CNN_x2_S.glsl',
 ];
 
 /// 可选播放倍速

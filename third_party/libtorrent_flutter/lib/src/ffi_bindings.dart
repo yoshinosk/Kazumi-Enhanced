@@ -119,6 +119,10 @@ typedef LtResumeTorrent = void Function(Pointer<LtSessionOpaque>, int);
 typedef _RecheckTorrentN = Void Function(Pointer<LtSessionOpaque>, Int64);
 typedef LtRecheckTorrent = void Function(Pointer<LtSessionOpaque>, int);
 
+typedef _ExportTorrentN = Int32 Function(
+    Pointer<LtSessionOpaque>, Int64, Pointer<Utf8>);
+typedef LtExportTorrent = int Function(Pointer<LtSessionOpaque>, int, Pointer<Utf8>);
+
 // ─── Status ──────────────────────────────────────────────────────────────────
 typedef _GetTorrentCountN = Int32 Function(Pointer<LtSessionOpaque>);
 typedef LtGetTorrentCount = int Function(Pointer<LtSessionOpaque>);
@@ -225,6 +229,14 @@ typedef _VersionN = Pointer<Utf8> Function();
 typedef LtVersion = Pointer<Utf8> Function();
 
 // ─── Helper: read fixed char array ──────────────────────────────────────────
+T? _tryLookup<T>(T Function() resolve) {
+  try {
+    return resolve();
+  } catch (_) {
+    return null;
+  }
+}
+
 String readCharArray(Array<Char> arr, int maxLen) {
   final bytes = <int>[];
   for (var i = 0; i < maxLen; i++) {
@@ -269,6 +281,10 @@ class TorrentBridgeBindings {
   late final LtPauseTorrent       pauseTorrent;
   late final LtResumeTorrent      resumeTorrent;
   late final LtRecheckTorrent     recheckTorrent;
+
+  /// Optional binding: absent on prebuilt libs built before
+  /// `lt_export_torrent` existed (e.g. stale Android prebuilts).
+  late final LtExportTorrent?     exportTorrent;
   late final LtGetTorrentCount    getTorrentCount;
   late final LtGetAllStatuses     getAllStatuses;
   late final LtGetStatus          getStatus;
@@ -301,6 +317,10 @@ class TorrentBridgeBindings {
     pauseTorrent        = _lib.lookup<NativeFunction<_PauseTorrentN>>('lt_pause_torrent').asFunction<LtPauseTorrent>();
     resumeTorrent       = _lib.lookup<NativeFunction<_ResumeTorrentN>>('lt_resume_torrent').asFunction<LtResumeTorrent>();
     recheckTorrent      = _lib.lookup<NativeFunction<_RecheckTorrentN>>('lt_recheck_torrent').asFunction<LtRecheckTorrent>();
+    // Optional symbol: lookup failure on stale prebuilt libs must not crash
+    // the whole engine init — metadata caching simply stays disabled.
+    exportTorrent = _tryLookup(() =>
+        _lib.lookup<NativeFunction<_ExportTorrentN>>('lt_export_torrent').asFunction<LtExportTorrent>());
     getTorrentCount     = _lib.lookup<NativeFunction<_GetTorrentCountN>>('lt_get_torrent_count').asFunction<LtGetTorrentCount>();
     getAllStatuses       = _lib.lookup<NativeFunction<_GetAllStatusesN>>('lt_get_all_statuses').asFunction<LtGetAllStatuses>();
     getStatus           = _lib.lookup<NativeFunction<_GetStatusN>>('lt_get_status').asFunction<LtGetStatus>();

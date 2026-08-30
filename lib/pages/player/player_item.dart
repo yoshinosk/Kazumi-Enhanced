@@ -705,12 +705,14 @@ class _PlayerItemState extends State<PlayerItem>
       }
     }
 
-    final bool requiresPerformanceWarning = mode == SuperResolutionMode.quality;
     final bool warningDisabled = GStorage.getSetting(
       SettingsKeys.disableSuperResolutionWarning,
     );
 
-    if (requiresPerformanceWarning && !warningDisabled) {
+    final bool needsWarning =
+        mode.requiresPerformanceWarning || mode.requiresUpscaleRatioWarning;
+
+    if (needsWarning && !warningDisabled) {
       bool confirmed = false;
 
       await KazumiDialog.show(builder: (context) {
@@ -723,7 +725,11 @@ class _PlayerItemState extends State<PlayerItem>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('启用超分辨率（质量档）可能会造成设备卡顿，是否继续？'),
+                if (mode.requiresPerformanceWarning)
+                  Text('启用超分辨率（${mode.label}）可能会造成设备卡顿。'),
+                if (mode.requiresUpscaleRatioWarning)
+                  Text('${mode.label}仅在放大倍率 x2 及以上时能提升画质，'
+                      '片源分辨率接近屏幕分辨率时画面可能过度锐化。'),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisSize: MainAxisSize.min,

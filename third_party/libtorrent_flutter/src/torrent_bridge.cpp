@@ -33,6 +33,11 @@
 #include <libtorrent/version.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/download_priority.hpp>
+#include <libtorrent/create_torrent.hpp>
+#include <libtorrent/bencode.hpp>
+
+#include <fstream>
+#include <vector>
 
 // ── cross-platform sockets ──────────────────────────────────────────────────────
 #ifdef _WIN32
@@ -2177,6 +2182,40 @@ TORRENT_API void lt_recheck_torrent(lt_session_t session, lt_torrent_id id) {
     auto it = sw->handles.find(id);
     if (it != sw->handles.end() && it->second.is_valid())
         try { it->second.force_recheck(); } catch (...) {}
+}
+
+// Export the torrent metadata as a standalone .torrent file. Used by Kazumi
+// to persist metadata after a magnet fetch so restarts can re-mount via
+// add_torrent_file without waiting for another DHT metadata round-trip.
+TORRENT_API int lt_export_torrent(lt_session_t session, lt_torrent_id id,
+                                  const char* file_path) {
+    if (!session || !file_path) { set_err("null arg"); return -1; }
+    auto* sw = to_sw(session);
+    std::lock_guard<std::mutex> lk(sw->mu);
+    auto it = sw->handles.find(id);
+    if (it == sw->handles.end() || !it->second.is_valid()) {
+        set_err("invalid torrent handle"); return -1;
+    }
+    try {
+        auto ti = it->second.torrent_file();
+        if (!ti || !ti->is_valid()) { set_err("no metadata"); return -1; }
+        lt::create_torrent ct(*ti);
+        lt::entry e = ct.generate();
+        std::vector<char> buf;
+        lt::bencode(std::back_inserter(buf), e);
+        if (buf.empty()) { set_err("empty bencode"); return -1; }
+        std::ofstream f(file_path, std::ios::binary | std::ios::trunc);
+        if (!f) { set_err("cannot open file"); return -1; }
+        f.write(buf.data(), (std::streamsize)buf.size());
+        f.close();
+        if (!f) { set_err("write failed"); return -1; }
+        set_err("");
+        return 0;
+    } catch (const std::exception& ex) {
+        set_err(ex.what()); return -1;
+    } catch (...) {
+        set_err("unknown export error"); return -1;
+    }
 }
 
 // ── status queries ──────────────────────────────────────────────────────────────

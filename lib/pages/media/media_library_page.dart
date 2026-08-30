@@ -7,10 +7,13 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart' show GeneralEmptyState;
+import 'package:kazumi/bean/widget/empty_state_widget.dart'
+    show GeneralEmptyState;
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/history/history_module.dart' show kLocalMediaAdapterName;
-import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
+import 'package:kazumi/modules/history/history_module.dart'
+    show kLocalMediaAdapterName;
+import 'package:kazumi/pages/magnet/magnet_page.dart'
+    show MagnetSearchRouteArgs;
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
@@ -18,6 +21,7 @@ import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:kazumi/utils/file_system.dart' show revealInFileManager;
+import 'package:kazumi/utils/format.dart' show formatBytes;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
@@ -159,9 +163,8 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
           IconButton(
             tooltip: '搜刮元数据',
             icon: const Icon(Icons.auto_awesome_outlined),
-            onPressed: controller.isScraping
-                ? null
-                : () => _confirmScrape(context),
+            onPressed:
+                controller.isScraping ? null : () => _confirmScrape(context),
           ),
           IconButton(
             tooltip: '文件夹管理',
@@ -445,7 +448,9 @@ class _SortMenu extends StatelessWidget {
             child: Row(
               children: [
                 Icon(
-                  desc ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                  desc
+                      ? Icons.arrow_downward_rounded
+                      : Icons.arrow_upward_rounded,
                   size: 18,
                 ),
                 const SizedBox(width: 12),
@@ -469,8 +474,8 @@ class _FolderView extends StatelessWidget {
   });
 
   final MediaController controller;
-  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap;
+  final Future<void> Function(
+      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
   final String query;
 
   @override
@@ -509,9 +514,8 @@ List<LocalMediaFolder> _filterFolders(
       result.add(folder);
       continue;
     }
-    final files = folder.files
-        .where((f) => f.name.toLowerCase().contains(q))
-        .toList();
+    final files =
+        folder.files.where((f) => f.name.toLowerCase().contains(q)).toList();
     if (files.isNotEmpty) {
       result.add(LocalMediaFolder(
         path: folder.path,
@@ -583,9 +587,7 @@ class _ScrapeProgressBar extends StatelessWidget {
       final colorScheme = theme.colorScheme;
       final total = controller.scrapeTotal;
       final done = controller.scrapeDone;
-      final progress = total > 0
-          ? (done / total).clamp(0.0, 1.0)
-          : null;
+      final progress = total > 0 ? (done / total).clamp(0.0, 1.0) : null;
       return Material(
         color: colorScheme.surfaceContainer,
         elevation: 8,
@@ -662,8 +664,8 @@ class _FolderSection extends StatefulWidget {
 
   final MediaController controller;
   final LocalMediaFolder folder;
-  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap;
+  final Future<void> Function(
+      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
 
   @override
   State<_FolderSection> createState() => _FolderSectionState();
@@ -710,8 +712,7 @@ class _FolderSectionState extends State<_FolderSection> {
                 ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
-                onSelected: (value) =>
-                    _handleFolderAction(value, folder, info),
+                onSelected: (value) => _handleFolderAction(value, folder, info),
                 itemBuilder: (_) => [
                   const PopupMenuItem(
                     value: 'match',
@@ -781,8 +782,7 @@ class _FolderSectionState extends State<_FolderSection> {
       builder: (_) => _ManualMatchDialog(
         controller: widget.controller,
         name: folder.name,
-        onMatch: (item) =>
-            widget.controller.setFolderMatch(folder.path, item),
+        onMatch: (item) => widget.controller.setFolderMatch(folder.path, item),
       ),
     );
   }
@@ -798,8 +798,8 @@ class _AnimeView extends StatelessWidget {
   });
 
   final MediaController controller;
-  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap;
+  final Future<void> Function(
+      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
   final String query;
 
   @override
@@ -846,8 +846,8 @@ class _AnimeGroupSection extends StatefulWidget {
 
   final MediaController controller;
   final AnimeGroup group;
-  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap;
+  final Future<void> Function(
+      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
 
   @override
   State<_AnimeGroupSection> createState() => _AnimeGroupSectionState();
@@ -862,125 +862,130 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     final group = widget.group;
     final info = group.info;
     final resume = widget.controller.resumePointForFolders(group.folders);
+    final header = InkWell(
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 封面
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 56,
+                height: 78,
+                child: info != null && info.coverUrl.isNotEmpty
+                    ? NetworkImgLayer(
+                        src: info.coverUrl,
+                        width: 56,
+                        height: 78,
+                      )
+                    : Container(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        child: const Icon(Icons.movie_outlined, size: 28),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // 标题信息
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    info?.displayName ?? '未匹配',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (info != null && info.airDate.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        info.airDate,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  if (resume != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _resumeSectionLabel(resume),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 2,
+                children: [
+                  Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+                  if (resume != null)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: () => widget.onFileTap(
+                        resume.file,
+                        resume.folder.files,
+                        widget.controller
+                            .getFileScrapeInfo(resume.file, resume.folder),
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                      label: Text(_resumeSectionButtonLabel(resume)),
+                    ),
+                  if (info != null && info.bangumiId != null)
+                    TextButton(
+                      onPressed: () => context.pushNamed(
+                        '/info/',
+                        arguments: info.toBangumiItem(),
+                      ),
+                      child: const Text('详情'),
+                    ),
+                  if (info != null && info.bangumiId != null)
+                    TextButton(
+                      onPressed: () => _showMissingEpisodesSheet(
+                          context, widget.controller, group),
+                      child: const Text('缺集'),
+                    ),
+                  if (info != null)
+                    TextButton(
+                      onPressed: () => _showManualMatchDialog(
+                        context,
+                        widget.controller,
+                        folder: group.folders.first,
+                        title: '修改识别结果',
+                      ),
+                      child: const Text('修改识别结果'),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 封面
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: SizedBox(
-                    width: 56,
-                    height: 78,
-                    child: info != null && info.coverUrl.isNotEmpty
-                        ? NetworkImgLayer(
-                            src: info.coverUrl,
-                            width: 56,
-                            height: 78,
-                          )
-                        : Container(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            child: const Icon(Icons.movie_outlined, size: 28),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // 标题信息
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        info?.displayName ?? '未匹配',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      if (info != null && info.airDate.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            info.airDate,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
-                      if (resume != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            _resumeSectionLabel(resume),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Flexible(
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 2,
-                    children: [
-                      Icon(
-                          _expanded ? Icons.expand_less : Icons.expand_more),
-                      if (resume != null)
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: () => widget.onFileTap(
-                            resume.file,
-                            resume.folder.files,
-                            widget.controller
-                                .getFileScrapeInfo(resume.file, resume.folder),
-                          ),
-                          icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                          label: Text(_resumeSectionButtonLabel(resume)),
-                        ),
-                      if (info != null && info.bangumiId != null)
-                        TextButton(
-                          onPressed: () => context.pushNamed(
-                            '/info/',
-                            arguments: info.toBangumiItem(),
-                          ),
-                          child: const Text('详情'),
-                        ),
-                      if (info != null && info.bangumiId != null)
-                        TextButton(
-                          onPressed: () => _showMissingEpisodesSheet(
-                              context, widget.controller, group),
-                          child: const Text('缺集'),
-                        ),
-                      if (info != null)
-                        TextButton(
-                          onPressed: () => _showManualMatchDialog(
-                            context,
-                            widget.controller,
-                            folder: group.folders.first,
-                            title: '修改识别结果',
-                          ),
-                          child: const Text('修改识别结果'),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+        // 右键番剧条目也能展开操作菜单（桌面端）。
+        GestureDetector(
+          onSecondaryTapUp: (details) =>
+              _showGroupContextMenu(context, details.globalPosition),
+          child: header,
         ),
         if (_expanded)
           Padding(
@@ -1057,6 +1062,36 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     );
   }
 
+  List<PopupMenuEntry<String>> _groupMenuItems() => [
+        const PopupMenuItem(
+          value: 'delete',
+          child: Text('删除', style: TextStyle(color: Colors.red)),
+        ),
+      ];
+
+  /// 右键（桌面端）在光标处弹出操作菜单。
+  Future<void> _showGroupContextMenu(
+    BuildContext context,
+    Offset position,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final local = overlay.globalToLocal(position);
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        local.dx,
+        local.dy,
+        overlay.size.width - local.dx,
+        overlay.size.height - local.dy,
+      ),
+      items: _groupMenuItems(),
+    );
+    if (!context.mounted) return;
+    if (value == 'delete') {
+      _confirmDeleteGroup(context, widget.controller, widget.group);
+    }
+  }
+
   String _resumeSectionLabel(MediaResumePoint resume) {
     final ep = resume.episode;
     final time = resume.positionLabel;
@@ -1081,8 +1116,8 @@ class _GridView extends StatelessWidget {
   });
 
   final MediaController controller;
-  final Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap;
+  final Future<void> Function(
+      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
   final String query;
 
   @override
@@ -1103,8 +1138,7 @@ class _GridView extends StatelessWidget {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             sliver: SliverGrid.builder(
-              gridDelegate:
-                  const SliverGridDelegateWithMaxCrossAxisExtent(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 // 桌面宽屏下自动铺满，窄屏至少两列
                 maxCrossAxisExtent: 168,
                 mainAxisSpacing: 16,
@@ -1297,7 +1331,8 @@ class _GridCardState extends State<_GridCard> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.55),
+                                      color:
+                                          Colors.black.withValues(alpha: 0.55),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Row(
@@ -1487,7 +1522,8 @@ Future<void> _showMissingEpisodesSheet(
                               context.pushNamed(
                                 '/magnet/',
                                 arguments: MagnetSearchRouteArgs(
-                                  query: '${info.displayName} ${ep.toString().padLeft(2, '0')}',
+                                  query:
+                                      '${info.displayName} ${ep.toString().padLeft(2, '0')}',
                                   anime: info.toBangumiItem(),
                                 ),
                               );
@@ -1546,8 +1582,10 @@ void _showGridItemSheet(
                                 height: 78,
                               )
                             : Container(
-                                color: theme.colorScheme.surfaceContainerHighest,
-                                child: const Icon(Icons.movie_outlined, size: 26),
+                                color:
+                                    theme.colorScheme.surfaceContainerHighest,
+                                child:
+                                    const Icon(Icons.movie_outlined, size: 26),
                               ),
                       ),
                     ),
@@ -1663,8 +1701,8 @@ void _showGridItemSheet(
                                     builder: (_) => _ManualMatchDialog(
                                       controller: controller,
                                       name: folder.name,
-                                      onMatch: (e) => controller
-                                          .setFolderMatch(folder.path, e),
+                                      onMatch: (e) => controller.setFolderMatch(
+                                          folder.path, e),
                                     ),
                                   );
                                 },
@@ -1755,8 +1793,7 @@ class _FileTile extends StatelessWidget {
     final kindLabel = localEpisodeKindLabel(classifyLocalEpisode(file.name));
     return ListTile(
       dense: true,
-      leading:
-          const Icon(Icons.play_circle_outline_rounded, size: 28),
+      leading: const Icon(Icons.play_circle_outline_rounded, size: 28),
       title: Row(
         children: [
           if (kindLabel.isNotEmpty) ...[
@@ -1863,8 +1900,7 @@ void _showFileActionSheet(
                   controller: controller,
                   title: '修改识别结果',
                   name: file.name,
-                  onMatch: (item) =>
-                      controller.setFileMatch(file, item),
+                  onMatch: (item) => controller.setFileMatch(file, item),
                 ),
               );
             },
@@ -1902,8 +1938,7 @@ void _showFileActionSheet(
               Navigator.pop(context);
               revealInFileManager(file.path).then((ok) {
                 if (!ok) {
-                  KazumiDialog.showToast(
-                      message: '无法打开文件管理器或文件不存在');
+                  KazumiDialog.showToast(message: '无法打开文件管理器或文件不存在');
                 }
               });
             },
@@ -1995,6 +2030,85 @@ void _confirmDelete(
         TextButton(
           onPressed: () {
             controller.deleteFile(file);
+            KazumiDialog.dismiss();
+          },
+          child: Text(
+            '删除',
+            style: TextStyle(color: Theme.of(dialogContext).colorScheme.error),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 番剧视图右键菜单的删除确认：列出将删除的文件夹与总体量，二次确认后
+/// 调用 [MediaController.deleteAnimeGroup] 删除全部本地关联文件和目录。
+void _confirmDeleteGroup(
+  BuildContext context,
+  MediaController controller,
+  AnimeGroup group,
+) {
+  final name = group.info?.displayName ?? '未匹配';
+  final totalSize = group.folders.fold<int>(
+    0,
+    (sum, f) => sum + f.files.fold<int>(0, (acc, file) => acc + file.size),
+  );
+  KazumiDialog.show(
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('删除番剧'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('确定要删除「$name」在本地关联的所有文件和目录吗？'),
+            const SizedBox(height: 8),
+            Text(
+              '${group.folders.length} 个文件夹 · ${group.fileCount} 个视频 · ${formatBytes(totalSize)}',
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 4),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 140),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final folder in group.folders)
+                      Text(
+                        '· ${folder.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(dialogContext).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '视频及其所在目录（含弹幕等关联数据）将被一并删除，此操作不可恢复。',
+              style: Theme.of(dialogContext)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Theme.of(dialogContext).colorScheme.error),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => KazumiDialog.dismiss(),
+          child: Text(
+            '取消',
+            style:
+                TextStyle(color: Theme.of(dialogContext).colorScheme.outline),
+          ),
+        ),
+        TextButton(
+          onPressed: () {
+            controller.deleteAnimeGroup(group);
             KazumiDialog.dismiss();
           },
           child: Text(

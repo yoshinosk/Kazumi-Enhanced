@@ -598,9 +598,9 @@ abstract class _MediaController with Store {
           }
           scrapeResults.remove(oldPath);
           changed = true;
-          KazumiLogger().i(
-              'MediaController: migrated scrape result $oldPath -> $newPath '
-              '(title grouping changed)');
+          KazumiLogger()
+              .i('MediaController: migrated scrape result $oldPath -> $newPath '
+                  '(title grouping changed)');
         }
       }
       if (changed) {
@@ -961,6 +961,167 @@ abstract class _MediaController with Store {
     }
   }
 
+  // ============ 番剧组操作 ============
+
+  /// 删除番剧组的全部本地关联文件和目录（番剧视图右键「删除」入口）。
+  ///
+  /// 对组内每个文件夹：
+  /// - 磁盘上真实存在、不是用户添加的媒体库根目录、且子树内没有其他
+  ///   番剧的库内文件时，整目录递归删除（视频、外挂字幕、弹幕侧车等
+  ///   一并清除），随后向上清理因此变空的祖先目录；
+  /// - 否则（目录是用户根目录 / 混有其他番剧的文件 / 是标题分组产生
+  ///   的逻辑路径）逐个删除本组视频文件；受影响目录在已无视频残留时
+  ///   清掉弹幕侧车并自底向上删除空目录（不越过媒体库根目录）。
+  ///
+  /// 同时移除按路径持久化的搜刮结果（组自身路径精确匹配 + 被整树删除
+  /// 目录的前缀清理），最后重扫使内存库与磁盘同步。
+  @action
+  Future<void> deleteAnimeGroup(AnimeGroup group) async {
+    final groupFileKeys = <String>{
+      for (final folder in group.folders)
+        for (final file in folder.files) localMediaPathKey(file.path),
+    };
+    // 其他番剧在库内的文件：用于判断某个目录能否安全整树删除。
+    final foreignFileKeys = <String>{
+      for (final folder in library)
+        for (final file in folder.files)
+          if (!groupFileKeys.contains(localMediaPathKey(file.path)))
+            localMediaPathKey(file.path),
+    };
+    final rootKeys = <String>{
+      for (final root in folders) localMediaPathKey(root),
+    };
+    final errors = <Object>[];
+    final deletedTreeKeys = <String>{};
+    final deletedTreeDirs = <String>[];
+    // 发生过逐文件删除的物理目录：路径键 → 代表路径。
+    final touchedDirs = <String, String>{};
+
+    Future<void> deleteFileQuietly(LocalMediaFile file) async {
+      try {
+        final f = File(file.path);
+        if (await f.exists()) {
+          await f.delete();
+          touchedDirs[localMediaPathKey(p.dirname(file.path))] =
+              p.dirname(file.path);
+        }
+      } catch (e) {
+        errors.add(e);
+        KazumiLogger()
+            .w('MediaController: deleteAnimeGroup file failed', error: e);
+      }
+    }
+
+    for (final folder in group.folders) {
+      final dirKey = localMediaPathKey(folder.path);
+      final dir = Directory(folder.path);
+      final canDeleteTree = await dir.exists() &&
+          !rootKeys.contains(dirKey) &&
+          !foreignFileKeys.any((key) => p.isWithin(dirKey, key));
+      if (canDeleteTree) {
+        try {
+          await dir.delete(recursive: true);
+          deletedTreeKeys.add(dirKey);
+          deletedTreeDirs.add(folder.path);
+          continue;
+        } catch (e) {
+          errors.add(e);
+          KazumiLogger()
+              .w('MediaController: deleteAnimeGroup tree failed', error: e);
+          // 整树删除失败回退为逐文件删除，尽量清掉能删的部分。
+        }
+      }
+      for (final file in folder.files) {
+        await deleteFileQuietly(file);
+      }
+    }
+
+    // 收尾：清掉失去宿主视频的弹幕侧车，并自底向上删除变空的目录。
+    final cleanupOrigins = <String>[
+      ...touchedDirs.values,
+      for (final dir in deletedTreeDirs) p.dirname(dir),
+    ];
+    for (final origin in cleanupOrigins) {
+      Directory current = Directory(origin);
+      var topLevel = true;
+      while (await current.exists()) {
+        final currentPath = current.path;
+        final parentPath = p.dirname(currentPath);
+        if (topLevel && !await _directoryHasVideo(current)) {
+          // 目录里已没有视频：本组的弹幕侧车随之失效，一并删除。
+          await _deleteDanmakuSidecars(current);
+        }
+        if (!await _isDirectoryEmpty(current)) break;
+        // 用户添加的媒体库根目录本身保留在磁盘上。
+        if (rootKeys.contains(localMediaPathKey(currentPath))) break;
+        try {
+          await current.delete();
+        } catch (e) {
+          KazumiLogger().w(
+              'MediaController: deleteAnimeGroup prune ${current.path}',
+              error: e);
+          break;
+        }
+        if (localMediaPathsEqual(parentPath, currentPath)) break;
+        if (rootKeys.contains(localMediaPathKey(parentPath))) break;
+        current = Directory(parentPath);
+        topLevel = false;
+      }
+    }
+
+    // 清理持久化搜刮结果：组自身路径精确匹配 + 整树删除目录的前缀清理。
+    final groupPaths = <String>[
+      for (final folder in group.folders) folder.path
+    ];
+    final scrapeCountBefore = scrapeResults.length;
+    final fileScrapeCountBefore = fileScrapeResults.length;
+    scrapeResults.removeWhere((key, _) =>
+        groupPaths.any((path) => localMediaPathsEqual(path, key)) ||
+        deletedTreeKeys.any((dirKey) => isLocalMediaPathWithin(dirKey, key)));
+    fileScrapeResults.removeWhere((key, _) =>
+        groupPaths.any((path) => localMediaPathsEqual(path, key)) ||
+        deletedTreeKeys.any((dirKey) => isLocalMediaPathWithin(dirKey, key)));
+    if (scrapeResults.length != scrapeCountBefore) {
+      await MediaScrapeStore.save(
+          Map<String, MediaScrapeInfo>.from(scrapeResults));
+    }
+    if (fileScrapeResults.length != fileScrapeCountBefore) {
+      await MediaScrapeStore.saveFileResults(
+          Map<String, MediaScrapeInfo>.from(fileScrapeResults));
+    }
+
+    // 未匹配文件夹的缩略图缓存条目（文件夹路径 → 缓存键）一并移除；
+    // 缓存键含修改时间无法反查对应 JPEG，残留图片由缓存目录自行承载。
+    thumbnails.removeWhere((path, _) =>
+        groupPaths.any((path2) => localMediaPathsEqual(path2, path)));
+
+    // 内存库即时移除，保证界面立刻刷新；随后的扫描与磁盘最终同步。
+    _removeFilesFromLibrary(groupFileKeys);
+
+    final label = group.info?.displayName ?? '未匹配';
+    if (errors.isEmpty) {
+      KazumiDialog.showToast(message: '已删除「$label」的本地文件');
+    } else {
+      KazumiDialog.showToast(message: '部分内容删除失败（${errors.length} 个），其余已完成');
+    }
+    await scan();
+  }
+
+  /// 从内存库中批量移除文件条目（按路径键匹配）；分组被清空时直接移除，
+  /// 交由后续扫描重建。
+  void _removeFilesFromLibrary(Set<String> filePathKeys) {
+    final updated = <LocalMediaFolder>[];
+    for (final folder in library) {
+      final files = folder.files
+          .where((f) => !filePathKeys.contains(localMediaPathKey(f.path)))
+          .toList();
+      if (files.isEmpty) continue;
+      updated.add(
+          LocalMediaFolder(path: folder.path, name: folder.name, files: files));
+    }
+    library = ObservableList.of(updated);
+  }
+
   // ============ 文件操作 ============
 
   /// 立即从内存库中移除文件条目，保证面板即时刷新；
@@ -1217,6 +1378,49 @@ abstract class _MediaController with Store {
     final sb = scraper.parseSeason(b.name) ?? 1;
     if (sa != sb) return sa.compareTo(sb);
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+}
+
+/// 判断文件名是否是弹幕侧车文件（`danmaku.json` / `danmaku_<ep>.json` /
+/// `danmaku_<ep>_<scope>.json`，见 DownloadController 的侧车命名规则）。
+bool _isDanmakuSidecarName(String name) {
+  final lower = name.toLowerCase();
+  return lower == 'danmaku.json' ||
+      (lower.startsWith('danmaku_') && lower.endsWith('.json'));
+}
+
+/// 目录的直接子项中是否还有视频文件（读取失败视为没有）。
+Future<bool> _directoryHasVideo(Directory dir) async {
+  try {
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is File && isSupportedVideoFile(entity.path)) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+/// 删除目录下所有弹幕侧车文件（单个失败忽略，不影响其余清理）。
+Future<void> _deleteDanmakuSidecars(Directory dir) async {
+  try {
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is File && _isDanmakuSidecarName(p.basename(entity.path))) {
+        try {
+          await entity.delete();
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+}
+
+/// 目录是否为空（读取失败按非空处理，避免误删）。
+Future<bool> _isDirectoryEmpty(Directory dir) async {
+  try {
+    await for (final _ in dir.list(followLinks: false)) {
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 

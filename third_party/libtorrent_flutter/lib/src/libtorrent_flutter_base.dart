@@ -257,6 +257,23 @@ class LibtorrentFlutter {
   /// Recheck torrent integrity.
   void recheckTorrent(int id) => _b.recheckTorrent(_session, id);
 
+  /// Export the torrent metadata as a .torrent file (requires metadata).
+  ///
+  /// Used to persist magnet metadata so restarts can re-mount instantly via
+  /// [addTorrentFile] instead of waiting for another DHT metadata fetch.
+  /// Returns true on success; always false when the native lib predates
+  /// `lt_export_torrent` (stale prebuilts).
+  bool exportTorrent(int id, String filePath) {
+    final export = _b.exportTorrent;
+    if (export == null) return false;
+    final p = filePath.toNativeUtf8();
+    try {
+      return export(_session, id, p) == 0;
+    } finally {
+      malloc.free(p);
+    }
+  }
+
   /// Add announce trackers to a torrent (deduplicated by URL natively).
   void addTrackers(int torrentId, List<String> trackers) {
     if (trackers.isEmpty) return;

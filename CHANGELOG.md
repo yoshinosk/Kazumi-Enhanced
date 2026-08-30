@@ -2,6 +2,97 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.8.30
+
+- 优化播放器弹幕轴推荐偏移算法：不再仅对比「弹幕轴总长度 vs 视频时长」（该方案把 ED 弹幕群后的片尾滚铭、片头安静开场等自然空窗误判为轴偏移，推荐出错误偏移量）。新方案改为基于弹幕时间分布头尾两端的「空白 / 越界」信号，并做密度形态校验与冲突检测：
+  - 四类候选信号：轴尾硬截断→延后、轴尾越界→提前、轴头越界→延后、轴头硬边界→提前（头空白仅在轴尾同时越界、构成整轴平移佐证时采信，避免安静开场误报）
+  - 密度形态校验区分「硬截断」与「自然空窗」：边界前弹幕相对前一窗口骤降（自然稀疏）或骤升（ED 弹幕群后戛然而止）时空白不可信、不产生信号
+  - 弹幕源错误判定改用轴「跨度」（头尾分位之差）与视频时长比较，并新增头尾信号方向冲突（单一偏移无法同时修复两端）即判定换源
+  - 同向信号按幅度加权融合为推荐偏移，输出置信度（多个同向信号互相印证时提升），弹窗展示轴头/轴尾空白与推荐可信度
+  - 有效弹幕样本数低于 30 条时不检测，避免小样本统计失真
+  - 相关文件: lib/utils/danmaku_axis_checker.dart, lib/pages/player/danmaku_axis_dialog.dart, test/danmaku_axis_checker_test.dart
+
+## 2026.8.30
+
+- 修复测试卡死问题：Windows 上 flutter_tester 环境中 `Directory.deleteSync(recursive: true)` 会死循环（同步删除与 flutter_tester 线程模型冲突，连仅含文件的目录也会挂死；纯 Dart CLI 与异步 `delete()` 均正常）。local_media_scanner_test 的「单个番剧文件夹保持整体（不拆分）」等用例断言本可通过，但 tearDown 的同步递归删除永不返回，导致整个测试文件挂起 19 分钟。将三处测试清理改为异步 `await delete(recursive: true)`，测试 1 秒内跑完
+  - 相关文件: test/local_media_scanner_test.dart, test/magnet_media_key_test.dart, test/magnet_download_entry_test.dart
+
+## 2026.8.30
+
+- 扩展超分辨率档位：由「关闭 / 效率 / 质量」两档扩展为 Anime4K 官方定义的六种模式（效率 Mode C、降噪 Mode C+A、均衡 Mode B、质量 Mode A、均衡增强 Mode B+B、极致 Mode A+A），补齐此前缺失的 Mode B 与三个增强模式。各档链路严格按上游 `md/GLSL_Instructions_Advanced.md` 的 `Restore / Restore_Soft / Upscale_Denoise -> Upscale` 组合编排，两个 Upscale 之间保留 AutoDownscalePre 以降采样到接近屏幕尺寸、避免在远大于显示尺寸的纹理上浪费算力；原质量档链路本就与上游 `GLSL_Windows_High-end` 模板一致，未作改动。枚举声明顺序即开销递增顺序，UI 直接按此顺序展示；已发布档位的 storageValue（off=1 / efficiency=2 / quality=3）保持不变，老用户设置不会错位。档位定义下沉为枚举的 `shaders` 字段，`setShader` 不再需要 switch 分支，今后新增档位只需改枚举一处
+  - 相关文件: lib/pages/player/controller/player_super_resolution.dart, lib/utils/constants.dart, lib/pages/player/controller/player_playback_controller.dart, lib/pages/player/player_item.dart, lib/pages/settings/super_resolution_settings.dart
+
+- 新增 Anime4K 着色器：Restore_CNN_Soft_M、Restore_CNN_Soft_S、Upscale_Denoise_CNN_x2_M、Upscale_Denoise_CNN_x2_S（取自 bloc97/Anime4K，MIT 协议，与仓库内既有 LICENSE 一致）。Soft 变体针对降采样产生的振铃与锯齿，Upscale_Denoise 在放大同时降噪且无额外性能开销
+  - 相关文件: assets/shaders/Anime4K_Restore_CNN_Soft_M.glsl, assets/shaders/Anime4K_Restore_CNN_Soft_S.glsl, assets/shaders/Anime4K_Upscale_Denoise_CNN_x2_M.glsl, assets/shaders/Anime4K_Upscale_Denoise_CNN_x2_S.glsl
+
+- 修复着色器升级后不生效的问题：此前 `ShaderAssetService` 只要目标文件存在就跳过拷贝，导致应用升级后老用户仍在使用旧着色器。现引入 `shaderBundleVersion` 版本文件（存于 `anime_shaders/.shader_bundle_version`），版本不匹配时整体覆盖重写；仅当全部文件拷贝成功才记录版本，失败的文件可在下次启动时补上。今后增删或替换着色器必须递增 `shaderBundleVersion`
+  - 相关文件: lib/services/shaders/shader_asset_service.dart
+
+- Windows 端新增视频渲染器选项（自动 / gpu / gpu-next）：随包分发的 libmpv 已内置 libplacebo 与 Vulkan，但此前 Windows 无渲染器设置、只能走 mpv 默认的 `gpu`。默认值为 auto，此时不向 mpv 传 `vo`，与引入该设置前的行为完全一致，老用户升级无回归；渲染器设置页按平台切换选项列表与存储键
+  - 相关文件: lib/services/storage/settings_keys.dart, lib/utils/constants.dart, lib/pages/settings/renderer_settings.dart, lib/pages/player/controller/player_playback_controller.dart
+
+- 新增超分档位单元测试：校验各档引用的着色器真实存在、Clamp_Highlights 位于链路首位、storageValue 唯一且已发布取值不漂移
+  - 相关文件: test/super_resolution_shaders_test.dart
+
+## 2026.8.26
+
+- 调整磁力下载设置界面：做种指定时长下拉项最低改为 1 小时（新增「1 小时」选项，原最低 6 小时）
+  - 相关文件: lib/pages/settings/magnet_settings.dart
+
+## 2026.8.26
+
+- 媒体库番剧视图的番剧条目新增右键菜单（桌面端），菜单提供「删除」功能：点击后弹出二次确认对话框（列出将删除的文件夹、视频数与总体量），确认后删除该番剧所有本地关联的文件和目录——组内文件夹为真实目录且不含其他番剧文件时整目录递归删除（含外挂字幕、弹幕侧车等）并向上清理变空的祖先目录；目录为用户添加的媒体库根目录、混有其他番剧文件或是标题分组产生的逻辑路径时退化为逐个删除本组视频，并在无视频残留的目录中清理弹幕侧车文件后自底向上删除空目录（不越过媒体库根目录）；同时清理按路径持久化的文件夹级 / 文件级搜刮结果与未匹配缩略图缓存条目，最后重扫同步内存库
+  - 相关文件: lib/pages/media/media_library_page.dart, lib/pages/media/media_controller.dart
+
+## 2026.8.25
+
+- 修复从磁力任务播放入库番剧时播放器选集面板只显示当前任务文件、看不到本地媒体库同番剧其他集数的问题：磁力任务播放（`_showCompletedPlayback`）此前只把任务自身落盘文件传给播放器，现按任务搜刮的 `bangumiId` 合并本地媒体库中同番剧文件（按路径去重、按文件名解析集数排序）后再传入，选集面板可见全部本地集数；任务文件已入库（原路径被移走）时回退直接用媒体库文件播放
+  - 相关文件: lib/pages/magnet/magnet_page.dart
+
+## 2026.8.23
+
+- 调整磁力下载页排序为固定按添加时间倒序（新添加的在前），不再随任务状态（下载中 / 做种 / 已完成等）变化而跳动：平铺列表与分组内任务统一按 `addedAt` 排序；分组模式下分组之间以「添加分组的时间」（组内最早任务的添加时间，即创建分组的时刻）倒序排列。服务层展示排序同步移除「已完成任务后置」逻辑
+  - 相关文件: lib/pages/magnet/magnet_page.dart, lib/services/magnet/magnet_download_service.dart
+
+- 修复已下载完成的任务在「已暂停 / 已停止」等状态下右键菜单仍显示「边下边播」的问题：新增 `MagnetDownloadEntry.hasCompleteFiles` 判定文件是否完整落盘——除 complete / seeding 外，还覆盖「下载完之后再被暂停」的任务（进入完成态时 verifiedLength 已对齐总量并持久化，据此与下载中途暂停区分），此类任务右键菜单一律显示「播放」并走媒体库本地播放流程；未完成任务才保留边下边播入口
+  - 相关文件: lib/pages/magnet/magnet_page.dart, lib/services/magnet/magnet_download_service.dart, test/magnet_download_entry_test.dart
+
+## 2026.8.23
+
+- 修复磁力下载页已完成但仍在做种的任务右键菜单误显示「边下边播」的问题：下载完成（含做种中，文件已完整落盘）的任务应走本地「播放」逻辑而非引擎边下边播。新增 `MagnetDownloadEntry.isFinished`（status 为 complete 或 seeding），并用于磁力下载列表任务条目的播放入口判定（菜单文案与点击回调统一按 `isFinished` 分支）
+  - 相关文件: lib/services/magnet/magnet_download_service.dart, lib/pages/magnet/magnet_page.dart
+
+- 修复磁力下载任务「磁力页已搜刮但媒体库未匹配」的问题：搜刮结果同步到媒体库时以任务真实落盘目录为键，但媒体库扫描器对混存多部番剧的目录（如单文件种子直接落盘的下载根目录）会按清洗后标题拆出逻辑分组文件夹（`<目录>/<清洗后标题>`），导致同步键与扫描产出的文件夹路径不一致、媒体库查表落空。现改为按扫描器同款分组口径（新增 `LocalMediaScanner.scanFoldersForDir`，列目录直接视频文件后走同一标题分组逻辑）计算任务所属的媒体库键，单文件种子混部场景也能命中；同时历史已搜刮任务不再要求 complete/seeding 状态（文件已落盘即同步，修复 queued/metadata 状态任务永不入库的问题），同步后清理旧版遗留的真实目录键死数据
+  - 相关文件: lib/services/media/local_media_scanner.dart, lib/pages/magnet/magnet_controller.dart, test/local_media_scanner_test.dart, test/magnet_media_key_test.dart
+
+## 2026.8.22
+
+- 修复磁力搜索页字幕组筛选选择列表的问题：选中某字幕组后会按该组重新搜索，而候选列表此前直接取自当前搜索结果，导致再次打开时只剩当前选中的字幕组、必须先清除筛选才能选其它组。现于控制器中按关键词缓存出现过的字幕组候选（搜索与加载更多时合并去重，切换关键词自动重置），筛选后仍展示完整候选
+  - 相关文件: lib/pages/magnet/magnet_controller.dart, lib/pages/magnet/magnet_page.dart
+
+## 2026.8.22
+
+- 修复重启后已完成未做种完的任务先显示「正在获取种子元数据」一段时间才恢复做种的问题：磁力链只含 info-hash，种子元数据（文件布局 + 分片哈希）只存在于引擎进程内存，之前缓存的 `files` 清单仅是 Dart 层展示数据、引擎无法据此恢复，重启重挂只能重新从 DHT/peer 拉取元数据。现于元数据首次到达时把引擎内元数据导出为 `.torrent` 持久化（按 info-hash 存于应用支持目录 `magnet/torrents/`，幂等），重挂（重启 reconcile / 错误重试 / 元数据超时重试）优先加载缓存的 `.torrent`，引擎立即拿到完整文件布局、直接校验磁盘续做种 / 续传，缓存损坏时自动回退磁力。新增原生接口 `lt_export_torrent`（create_torrent + bencode 落盘）并补齐 FFI 绑定与 `exportTorrent` 方法
+  - 相关文件: third_party/libtorrent_flutter/src/torrent_bridge.h, third_party/libtorrent_flutter/src/torrent_bridge.cpp, third_party/libtorrent_flutter/lib/src/ffi_bindings.dart, third_party/libtorrent_flutter/lib/src/libtorrent_flutter_base.dart, lib/services/magnet/magnet_download_service.dart
+
+## 2026.8.22
+
+- 按番剧分组的下载列表子条目精简：组头已展示番剧封面与番剧名，子条目不再重复显示封面和番剧名（标题改用文件名 / 任务名，便于区分集数），并隐藏冗余的「已搜刮」标记（「待确认」「已入库」保留），样式与未搜刮条目一致
+  - 相关文件: lib/pages/magnet/magnet_page.dart
+
+## 2026.8.22
+
+- 修复磁力任务菜单「播放」误走边下边播流程的问题：菜单项对已完成任务显示「播放」但实际仍调用引擎流（`startStream`），而已完成任务的引擎句柄在完成时已被移除（停止做种），点「播放」只会报「启动边下边播失败」。改为已完成任务走媒体库本地播放流程（`LocalMediaVideoPlaybackArgs`）：枚举任务已选择且真实落盘的视频文件（按存在性过滤，已入库 / 被移动的文件自动跳过），选择后经应用内播放器直接播放本地文件，弹幕、历史续播（与媒体库同路径互相续播）、Bangumi 进度联动均沿用媒体库链路；未完成任务仍走边下边播
+  - 相关文件: lib/pages/magnet/magnet_page.dart
+
+## 2026.8.22
+
+- 磁力下载任务列表交互优化：
+  - 任务条目新增集数范围标签（如「第 1 集」「第 1-12 集」），按文件名解析所选文件的集数，解决已搜刮任务按番剧分组后条目统一显示番剧名、无法区分集数的问题
+  - 种子内只有一个文件时隐藏「选择下载文件」菜单项（无部分下载余地）
+  - 支持右键任务条目直接展开操作菜单（与「⋯」按钮一致，Windows 桌面端）；已完成任务的菜单项显示「播放」而非「边下边播」，多文件选择面板标题同步调整为「选择要播放的文件」
+  - 相关文件: lib/pages/magnet/magnet_page.dart
+
 ## 2026.8.22
 
 - 修复磁力任务「边下边播后瞬间 100% / 已完成」的根因：libtorrent 官方语义中 `finished/seeding` 仅表示**优先级 > 0 的片段已下完**（可伴随「部分片段被过滤未下载」），而边下边播启动流时原生引擎（`lt_start_stream`）会把非流窗口片段全部降为 `dont_download`，流窗口（头部 + 尾部 + 起播关键片段，通常仅数十 MB）下完引擎即如实上报 `finished/progress=1.0`；应用层此前把它当作整包完成，`completedLength` 被对齐到整包大小导致假 100%，文件实际只有流窗口数据。新增完成态覆盖校验（`completionCoversExpected`）：引擎的 `totalWanted` 与 `totalDone` 未覆盖期望下载集（全部文件或已选择文件之和）的完成上报一律按下载中处理，任务保持真实进度，停止播放恢复优先级后继续下载剩余部分；已处于完成 / 做种态的任务不受影响。另将「原生完成上报」诊断日志改为 `forceLog` 持久化（INFO 默认不落盘，导致此前复现无据可查）
