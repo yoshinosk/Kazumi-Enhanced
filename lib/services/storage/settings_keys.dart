@@ -184,6 +184,15 @@ class SettingsKeys {
     '',
     group: SettingGroup.danmaku,
   );
+
+  /// 历史番剧级（`bangumiID:0`）作用域偏移的一次性迁移标记：
+  /// 旧版自动检测在 episodeId 未知时把推荐偏移写成了番剧级作用域，
+  /// 会污染同番剧所有分集，迁移时统一清除。
+  static const danmakuTimeOffsetScopeMigrated = SettingKey<bool>(
+    _SettingBoxKey.danmakuTimeOffsetScopeMigrated,
+    false,
+    group: SettingGroup.danmaku,
+  );
   static const danmakuEnabledByDefault = SettingKey<bool>(
     _SettingBoxKey.danmakuEnabledByDefault,
     false,
@@ -949,6 +958,7 @@ class SettingsKeys {
     danmakuLineHeight,
     danmakuTimeOffset,
     danmakuTimeOffsetByEpisode,
+    danmakuTimeOffsetScopeMigrated,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
@@ -1113,6 +1123,7 @@ class _SettingBoxKey {
       danmakuLineHeight = 'danmakuLineHeight',
       danmakuTimeOffset = 'danmakuTimeOffset',
       danmakuTimeOffsetByEpisode = 'danmakuTimeOffsetByEpisode',
+      danmakuTimeOffsetScopeMigrated = 'danmakuTimeOffsetScopeMigrated',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',

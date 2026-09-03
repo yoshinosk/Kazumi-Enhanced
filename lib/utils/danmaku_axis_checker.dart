@@ -120,6 +120,14 @@ class DanmakuAxisChecker {
   /// 硬边界判定所需的近端最小弹幕数，防止低密度弹幕池误判。
   static const int _edgeProbeMinCount = 2;
 
+  /// 轴尾覆盖判定：视频结尾容差窗口内存在的弹幕数达到该值时，视为
+  /// 弹幕池已覆盖到视频结尾（自然稀疏尾），轴尾空白不构成轴偏移证据。
+  ///
+  /// 典型场景：故事与 ED 结束后视频还剩片尾滚铭 / 下集预告，观众极少发
+  /// 弹幕，P99.5 分位的「轴尾空白」只是稀疏尾而非硬截断；此时池中往往
+  /// 仍有零星弹幕落到视频结尾附近，据此可以排除「整轴提前播完」。
+  static const int _tailCoverageMinCount = 2;
+
   static DanmakuAxisCheckResult check({
     required List<DanmakuEntry> danmakus,
     required Duration videoDuration,
@@ -169,8 +177,14 @@ class DanmakuAxisChecker {
         .clamp(_edgeProbeMinWindowSeconds, _edgeProbeMaxWindowSeconds);
     final headGapReliable =
         headGap > tolerance && _isHardEdge(times, head, probeWindow);
-    final tailGapReliable =
-        tailGap > tolerance && _isHardEdge(times, tail, probeWindow);
+    // 轴尾覆盖守卫：结尾容差窗口内仍有弹幕说明池覆盖到了视频结尾，
+    // P99.5 的空白只是稀疏尾（ED / 预告阶段少有人发弹幕），不是轴偏移。
+    final tailCoveredCount =
+        times.length - _lowerBound(times, durationSeconds - tolerance);
+    final tailCovered = tailCoveredCount >= _tailCoverageMinCount;
+    final tailGapReliable = tailGap > tolerance &&
+        !tailCovered &&
+        _isHardEdge(times, tail, probeWindow);
 
     // --- 候选偏移信号（正 = 弹幕应延后，负 = 弹幕应提前）---
     final signals = <double>[];

@@ -21,8 +21,9 @@ import 'package:kazumi/services/platform/android_storage_access.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/utils/disk_space.dart';
+import 'package:kazumi/utils/format.dart' show formatSpeed;
 import 'package:kazumi/utils/local_episode_parser.dart';
-import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+import 'package:libtorrent_flutter/libtorrent_flutter.dart' hide formatSpeed;
 import 'package:mobx/mobx.dart';
 import 'package:path/path.dart' as p;
 
@@ -70,6 +71,17 @@ abstract class _MagnetController with Store {
   final Set<String> _scrapeSyncingTaskIds = {};
   final Set<String> _autoImportedTaskIds = {};
   final Set<String> _autoImportingTaskIds = {};
+
+  /// 搜刮键缓存：taskId → (文件清单指纹, 键)。onChanged 每 2s 触发一次，
+  /// 未同步任务的键计算涉及目录分组扫描（同步 IO + 重量级 scraper），
+  /// 按指纹缓存避免重复计算；清单 / 选择 / 路径变化时指纹失效自动重算。
+  final Map<String, (int, String)> _scrapeKeyCache = {};
+
+  /// 搜刮结果同步到媒体库的连续失败计数（taskId → 次数）。
+  final Map<String, int> _scrapeSyncFailures = {};
+
+  /// 同步连续失败上限：超过后本会话不再重试，避免每 2s 一轮的无限重试。
+  static const int _maxScrapeSyncFailures = 3;
 
   /// 正在自动搜刮的任务 ID（防重入）。
   final Set<String> _autoScrapingTaskIds = {};
@@ -278,9 +290,7 @@ abstract class _MagnetController with Store {
     final total = entries.where((e) => e.isDownloading || e.isQueued).length;
     final speed =
         active.fold<int>(0, (sum, e) => sum + e.downloadSpeed);
-    final speedText = speed > 0
-        ? '${(speed / 1024 / 1024).toStringAsFixed(1)} MB/s'
-        : '等待中';
+    final speedText = speed > 0 ? formatSpeed(speed.toDouble()) : '等待中';
     final firstName = active.first.fileName.isNotEmpty
         ? active.first.fileName
         : active.first.title;
@@ -495,6 +505,12 @@ abstract class _MagnetController with Store {
     await _subscriptions.setAutoDownload(id, value);
   }
 
+  /// 是否已存在与 [item] 同源资源的下载任务（按 info-hash 规范化比较，
+  /// 忽略 tracker / 参数差异）。供剪贴板检测等入口在弹确认框前预判，
+  /// 与 [addDownload] 的去重口径保持一致。
+  bool isDownloadQueued(MagnetSearchItem item) =>
+      _downloads.alreadyQueued(item);
+
   @action
   Future<void> addDownload(
     MagnetSearchItem item, {
@@ -598,6 +614,8 @@ abstract class _MagnetController with Store {
     _scrapeSyncedTaskIds.removeWhere((key) => !ids.contains(key));
     _autoImportedTaskIds.removeWhere((key) => !ids.contains(key));
     _autoScrapingTaskIds.removeWhere((key) => !ids.contains(key));
+    _scrapeKeyCache.removeWhere((key, _) => !ids.contains(key));
+    _scrapeSyncFailures.removeWhere((key, _) => !ids.contains(key));
     for (final entry in entries) {
       final prev = _lastTaskStatuses[entry.taskId];
       _lastTaskStatuses[entry.taskId] = entry.status;
@@ -647,6 +665,11 @@ abstract class _MagnetController with Store {
     for (final entry in entries) {
       if (entry.savePath.isEmpty) continue;
       if (_scrapeSyncedTaskIds.contains(entry.taskId)) continue;
+      // 同步连续失败次数已达上限：本会话跳过，避免每 2s 一轮的
+      // existsSync / 分组扫描重复浪费（重启后可重新触发）。
+      if ((_scrapeSyncFailures[entry.taskId] ?? 0) >= _maxScrapeSyncFailures) {
+        continue;
+      }
       // 历史任务（本会话未进入终态）：已搜刮 / 已入库任务幂等同步到媒体库。
       // 不要求状态为 complete/seeding——文件已落盘但引擎状态尚未跳变
       // （queued / metadata 等）的任务也应尽早让媒体库显示匹配，避免
@@ -655,7 +678,7 @@ abstract class _MagnetController with Store {
         if (entry.importedPath.isNotEmpty) {
           _syncScrapeInfo(entry, entry.importedPath);
         } else if (entry.scrapeInfo != null && _hasDownloadedFiles(entry)) {
-          _syncScrapeInfo(entry, _scrapeKeyForEntry(entry));
+          _syncScrapeInfo(entry, _scrapeKeyCachedFor(entry));
         }
         continue;
       }
@@ -778,10 +801,28 @@ abstract class _MagnetController with Store {
     if (media == null) return;
     if (media.getScrapeInfo(folderPath) != null) {
       _scrapeSyncedTaskIds.add(entry.taskId);
+      _scrapeSyncFailures.remove(entry.taskId);
     } else if (!_scrapeSyncedTaskIds.contains(entry.taskId) &&
+        (_scrapeSyncFailures[entry.taskId] ?? 0) < _maxScrapeSyncFailures &&
         _scrapeSyncingTaskIds.add(entry.taskId)) {
       unawaited(_runScrapeSync(entry, folderPath));
     }
+  }
+
+  /// 带缓存的 [_scrapeKeyForEntry]：按文件清单指纹命中直接复用，
+  /// 避免每 2s 一轮的 onChanged 对未同步任务重复执行目录分组扫描。
+  String _scrapeKeyCachedFor(MagnetDownloadEntry entry) {
+    final fingerprint = Object.hash(
+      entry.savePath,
+      entry.fileName,
+      entry.files.length,
+      entry.selectedFileIndexes?.join(','),
+    );
+    final cached = _scrapeKeyCache[entry.taskId];
+    if (cached != null && cached.$1 == fingerprint) return cached.$2;
+    final key = _scrapeKeyForEntry(entry);
+    _scrapeKeyCache[entry.taskId] = (fingerprint, key);
+    return key;
   }
 
   Future<void> _runScrapeSync(
@@ -796,7 +837,12 @@ abstract class _MagnetController with Store {
         await _mediaController?.removeScrapeResult(rawDir);
       }
       _scrapeSyncedTaskIds.add(entry.taskId);
+      _scrapeSyncFailures.remove(entry.taskId);
     } catch (e) {
+      // 连续失败计数：超过上限后本会话不再重试（onChanged 每 2s
+      // 触发一次，不计数会无限重试）。
+      _scrapeSyncFailures[entry.taskId] =
+          (_scrapeSyncFailures[entry.taskId] ?? 0) + 1;
       KazumiLogger().w('MagnetController: sync scrape info failed', error: e);
     } finally {
       _scrapeSyncingTaskIds.remove(entry.taskId);

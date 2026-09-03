@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show AppLifecycleState;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:kazumi/request/core/network_config.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
@@ -44,6 +46,21 @@ class MagnetDownloadService {
   /// 持续刷新到 UI（插件流去重 / 订阅断档时的兜底）。
   Timer? _refreshTimer;
   static const Duration _refreshInterval = Duration(seconds: 2);
+
+  /// 应用退后台后的轮询间隔：降低 platform channel 与状态处理频率
+  /// （前台服务保活时持续 2s 轮询白白耗电），进度持久化与通知更新
+  /// 仍能以较低频率继续。
+  static const Duration _refreshIntervalBackground = Duration(seconds: 30);
+
+  /// 当前是否处于后台低频轮询模式。
+  bool _isBackgroundRefresh = false;
+
+  /// 应用生命周期监听：退后台切换低频轮询，回前台恢复。
+  AppLifecycleListener? _lifecycleListener;
+
+  /// 网络变化订阅：WiFi ↔ 移动数据切换时立即应用「仅 WiFi」策略，
+  /// 不必等最长一个策略周期（60s）的轮询。
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   /// 元数据获取超时：超过该时长仍未拿到种子元数据则自动重试。
   static const Duration _metadataTimeout = Duration(minutes: 10);
@@ -124,6 +141,28 @@ class MagnetDownloadService {
     _startTrackerScheduler();
     _startRefreshScheduler();
     _startPolicyScheduler();
+    _startLifecycleListener();
+    _startConnectivityListener();
+  }
+
+  /// 生命周期监听：退后台切低频轮询（省电），回前台恢复。
+  void _startLifecycleListener() {
+    _lifecycleListener ??= AppLifecycleListener(
+      onStateChange: (state) {
+        final background = state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.paused;
+        if (background == _isBackgroundRefresh) return;
+        _isBackgroundRefresh = background;
+        _startRefreshScheduler();
+      },
+    );
+  }
+
+  /// 网络变化监听：切换网络时立即应用「仅 WiFi」策略。
+  void _startConnectivityListener() {
+    _connectivitySub ??= Connectivity().onConnectivityChanged.listen((_) {
+      unawaited(_applyWifiOnlyPolicy());
+    });
   }
 
   Future<void> dispose() async {
@@ -135,6 +174,10 @@ class MagnetDownloadService {
     _refreshTimer = null;
     _policyTimer?.cancel();
     _policyTimer = null;
+    _lifecycleListener?.dispose();
+    _lifecycleListener = null;
+    await _connectivitySub?.cancel();
+    _connectivitySub = null;
     // 退出前持久化一次进度，供下次启动断点续传时恢复显示。
     await _saveEntries();
     await _engine.dispose();
@@ -237,9 +280,13 @@ class MagnetDownloadService {
   ///
   /// 引擎状态流由插件侧去重（字段不全时可能不推送），且订阅一旦断档
   /// 便不再更新；这里以固定间隔兜底，保证下载进度能实时刷到界面。
+  /// 应用退后台时按 [_refreshIntervalBackground] 低频轮询（省电）。
   void _startRefreshScheduler() {
     _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) => refresh());
+    _refreshTimer = Timer.periodic(
+      _isBackgroundRefresh ? _refreshIntervalBackground : _refreshInterval,
+      (_) => refresh(),
+    );
   }
 
   // ---------------- 环境策略（限速时段 / 仅 WiFi） ----------------
@@ -462,7 +509,12 @@ class MagnetDownloadService {
       final existing = LibtorrentFlutter.instance.torrents;
       var changed = false;
       final reconciled = <MagnetDownloadEntry>[];
-      for (final entry in _entries) {
+      // 快照迭代：循环体含 await（引擎重挂），期间用户可能新增 / 删除
+      // 任务，直接迭代 _entries 会抛 ConcurrentModificationError，且
+      // 结尾用旧快照整体覆盖会丢失并发变更。
+      final snapshot = List.of(_entries);
+      final snapshotIds = snapshot.map((e) => e.taskId).toSet();
+      for (final entry in snapshot) {
         final id = int.tryParse(entry.sessionGid ?? '');
         if (id != null && existing.containsKey(id)) {
           reconciled.add(entry);
@@ -552,9 +604,15 @@ class MagnetDownloadService {
         }
       }
       if (changed) {
+        // 合并循环期间的并发变更：保留仍存活的快照条目 + 循环期间
+        // 新增的任务，避免用旧快照整体覆盖丢数据 / 复活已删除任务。
+        final aliveIds = _entries.map((e) => e.taskId).toSet();
+        final addedDuringReconcile =
+            _entries.where((e) => !snapshotIds.contains(e.taskId)).toList();
         _entries
           ..clear()
-          ..addAll(reconciled);
+          ..addAll(reconciled.where((e) => aliveIds.contains(e.taskId)))
+          ..addAll(addedDuringReconcile);
         // 重启重挂后重算队列：所有任务默认恢复下载，超出上限的自动降级排队。
         _reconcileQueue();
         await _saveEntries();

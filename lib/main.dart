@@ -19,6 +19,7 @@ import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/platform/webview_feature_service.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/navigation.dart';
+import 'package:kazumi/utils/danmaku_time_offset_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,8 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
+    // 清理历史番剧级弹幕轴偏移（旧版自动检测误写，会污染同番剧所有分集）。
+    await DanmakuTimeOffsetStore.migrateLegacyBangumiScopes();
   } catch (e) {
     // Log the error for debugging (if logger is available)
     debugPrint('Storage initialization failed: $e');

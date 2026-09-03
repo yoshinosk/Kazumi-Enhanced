@@ -199,6 +199,7 @@ class _EpisodeDanmakuSheetState extends State<EpisodeDanmakuSheet> {
           ),
           const SizedBox(width: 10),
           DanmakuOffsetMenu(
+            danmakuController: playerController.danmaku,
             onChanged:
                 playerController.danmaku.clearAndInvalidateScheduledDanmakus,
             color: Theme.of(context).colorScheme.onSurface,

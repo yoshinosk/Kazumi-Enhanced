@@ -56,6 +56,33 @@ void main() {
       expect(sidecar.danmakus.first.time, 123.5);
     });
 
+    test('侧车回读弹弹分集 ID（danDanEpisodeId）', () async {
+      final danmaku = DanmakuEntry(
+        message: '测试',
+        time: 1.0,
+        type: 1,
+        color: Colors.white,
+        source: '',
+      );
+
+      await controller.writeDirectoryDanmaku(tempDir.path, [danmaku], 18562,
+          episode: 37, danDanEpisodeId: 185620013);
+
+      final sidecar = await controller.readDirectoryDanmaku(tempDir.path,
+          episode: 37);
+      expect(sidecar, isNotNull);
+      expect(sidecar!.danDanBangumiID, 18562);
+      expect(sidecar.danDanEpisodeId, 185620013,
+          reason: '文件匹配得到的 episodeId 应随侧车持久化');
+
+      // 未写入 episodeId 的旧侧车回读为 0
+      await controller.writeDirectoryDanmaku(tempDir.path, [danmaku], 18562,
+          episode: 38);
+      final legacy = await controller.readDirectoryDanmaku(tempDir.path,
+          episode: 38);
+      expect(legacy!.danDanEpisodeId, 0);
+    });
+
     test('不同集数互不覆盖', () async {
       await controller.writeDirectoryDanmaku(tempDir.path, [
         DanmakuEntry(

@@ -679,6 +679,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                     context: context,
                     danmakuController:
                         playerController.danmaku.canvasController,
+                    playerDanmakuController: playerController.danmaku,
                     onUpdateDanmakuSpeed: playerController.updateDanmakuSpeed,
                     onTimelineOffsetChanged: playerController
                         .danmaku.clearAndInvalidateScheduledDanmakus,
@@ -698,6 +699,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                   showAdaptiveBottomSheet<void>(
                     context: context,
                     builder: (context) => DanmakuTimeOffsetSheet(
+                      danmakuController: playerController.danmaku,
                       onTimelineOffsetChanged: playerController
                           .danmaku.clearAndInvalidateScheduledDanmakus,
                     ),

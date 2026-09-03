@@ -724,6 +724,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                               children: [
                                 _buildDanmakuToggleButton(context),
                                 DanmakuOffsetMenu(
+                                  danmakuController: playerController.danmaku,
                                   onChanged: playerController
                                       .danmaku.clearAndInvalidateScheduledDanmakus,
                                 ),
@@ -733,6 +734,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                                       context: context,
                                       danmakuController: playerController
                                           .danmaku.canvasController,
+                                      playerDanmakuController:
+                                          playerController.danmaku,
                                       onUpdateDanmakuSpeed:
                                           playerController.updateDanmakuSpeed,
                                       onTimelineOffsetChanged: playerController
@@ -770,6 +773,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                             context: context,
                             danmakuController:
                                 playerController.danmaku.canvasController,
+                            playerDanmakuController:
+                                playerController.danmaku,
                             onUpdateDanmakuSpeed:
                                 playerController.updateDanmakuSpeed,
                             onTimelineOffsetChanged: playerController

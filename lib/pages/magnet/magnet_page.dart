@@ -85,13 +85,21 @@ class _MagnetPageState extends State<MagnetPage>
 
   /// 检测剪贴板中的磁力 / 种子链接，弹窗一键添加下载。
   ///
-  /// 仅在进入磁力页时检查一次；与已有任务同源（磁力链相同）时跳过。
+  /// 仅在进入磁力页时检查一次；与已有任务同源（按 info-hash 规范化
+  /// 比较，与 addDownload 去重口径一致，忽略 tracker 参数差异）时跳过。
   Future<void> _checkClipboardForMagnetLink() async {
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text?.trim() ?? '';
       if (!_isMagnetLikeLink(text)) return;
-      if (controller.downloadTasks.any((t) => t.sourceUri == text)) return;
+      final item = MagnetSearchItem(
+        title: '剪贴板链接的任务',
+        magnetLink: text.startsWith('magnet:') ? text : '',
+        torrentUrl: text.startsWith('magnet:') ? '' : text,
+        size: '',
+        publishDate: DateTime.now(),
+      );
+      if (controller.isDownloadQueued(item)) return;
       if (!mounted) return;
       final theme = Theme.of(context);
       final confirmed = await KazumiDialog.show<bool>(
@@ -127,13 +135,6 @@ class _MagnetPageState extends State<MagnetPage>
         ),
       );
       if (confirmed != true || !mounted) return;
-      final item = MagnetSearchItem(
-        title: '剪贴板链接的任务',
-        magnetLink: text.startsWith('magnet:') ? text : '',
-        torrentUrl: text.startsWith('magnet:') ? '' : text,
-        size: '',
-        publishDate: DateTime.now(),
-      );
       controller.addDownload(item);
     } catch (e) {
       // 剪贴板不可用（权限等）时静默跳过。

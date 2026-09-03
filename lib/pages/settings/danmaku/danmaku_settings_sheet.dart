@@ -2,10 +2,11 @@ import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_shield_settings_sheet.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
 
 enum _DanmakuSettingsDestination {
@@ -15,6 +16,7 @@ enum _DanmakuSettingsDestination {
 Future<void> showDanmakuSettingsSheet({
   required BuildContext context,
   required DanmakuController danmakuController,
+  required PlayerDanmakuController playerDanmakuController,
   VoidCallback? onUpdateDanmakuSpeed,
   VoidCallback? onTimelineOffsetChanged,
 }) async {
@@ -24,6 +26,7 @@ Future<void> showDanmakuSettingsSheet({
     builder: (context) {
       return _DanmakuSettingsSheet(
         danmakuController: danmakuController,
+        playerDanmakuController: playerDanmakuController,
         onUpdateDanmakuSpeed: onUpdateDanmakuSpeed,
       );
     },
@@ -38,6 +41,7 @@ Future<void> showDanmakuSettingsSheet({
     context: context,
     builder: (context) {
       return DanmakuTimeOffsetSheet(
+        danmakuController: playerDanmakuController,
         onTimelineOffsetChanged: onTimelineOffsetChanged,
       );
     },
@@ -46,10 +50,12 @@ Future<void> showDanmakuSettingsSheet({
 
 class _DanmakuSettingsSheet extends StatefulWidget {
   final DanmakuController danmakuController;
+  final PlayerDanmakuController playerDanmakuController;
   final VoidCallback? onUpdateDanmakuSpeed;
 
   const _DanmakuSettingsSheet({
     required this.danmakuController,
+    required this.playerDanmakuController,
     this.onUpdateDanmakuSpeed,
   });
 
@@ -144,8 +150,8 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                         value: Text(
                           formatDanmakuTimeOffset(
                             normalizeDanmakuTimeOffset(
-                              GStorage.getSetting<double>(
-                                  SettingsKeys.danmakuTimeOffset),
+                              widget.playerDanmakuController
+                                  .timelineOffsetSeconds,
                             ),
                           ),
                         ),

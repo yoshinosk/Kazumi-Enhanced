@@ -1,4 +1,6 @@
-﻿import 'package:file_picker/file_picker.dart';
+import 'dart:async';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -9,7 +11,9 @@ import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
+import 'package:kazumi/services/platform/android_storage_access.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:path/path.dart' as p;
 
 class MagnetSettingsPage extends StatefulWidget {
   const MagnetSettingsPage({super.key});
@@ -18,7 +22,8 @@ class MagnetSettingsPage extends StatefulWidget {
   State<MagnetSettingsPage> createState() => _MagnetSettingsPageState();
 }
 
-class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
+class _MagnetSettingsPageState extends State<MagnetSettingsPage>
+    with WidgetsBindingObserver {
   late String mikanBaseUrl;
   late String defaultSourceId;
   late String animesGardenFansub;
@@ -56,6 +61,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late int subscriptionCheckIntervalMinutes;
   bool isPickingDir = false;
 
+  /// 等待用户从系统设置页返回（跳转申请「所有文件访问」后用）。
+  Completer<void>? _resumeCompleter;
+
   MagnetController get _controller => inject<MagnetController>();
 
   MediaController get _mediaController => inject<MediaController>();
@@ -63,6 +71,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     mikanBaseUrl = GStorage.getSetting(SettingsKeys.mikanBaseUrl);
     defaultSourceId = GStorage.getSetting(SettingsKeys.magnetDefaultSource);
     if (!MagnetSearchSources.all.any((s) => s.id == defaultSourceId)) {
@@ -70,6 +79,21 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     }
     animesGardenFansub = GStorage.getSetting(SettingsKeys.animesGardenFansub);
     _loadFromSettings();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _resumeCompleter?.complete();
+      _resumeCompleter = null;
+    }
   }
 
   void _loadFromSettings() {
@@ -627,7 +651,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         SettingsTile.switchTile(
           leading: Icons.image_outlined,
           title: const Text('未匹配卡片视频缩略图'),
-          description: const Text('用 ffmpeg 为未匹配番剧的文件夹生成视频首帧缩略图，替代默认占位图标'),
+          description: Text(Platform.isAndroid
+              ? '仅桌面端可用：Android 设备通常没有 ffmpeg，此开关不会生效'
+              : '用 ffmpeg 为未匹配番剧的文件夹生成视频首帧缩略图，替代默认占位图标'),
           initialValue: thumbnailsEnabled,
           onToggle: (value) async {
             final v = value ?? thumbnailsEnabled;
@@ -916,11 +942,80 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         dialogTitle: '选择默认下载目录',
       );
       if (dir == null) return;
+      // Android 11+ 写共享存储目录需要「所有文件访问」，先做写探测，
+      // 避免 libtorrent 落盘时 EACCES 卡死任务。
+      if (Platform.isAndroid && !await _ensureAndroidWritableDir(dir)) {
+        return;
+      }
       setState(() => downloadDir = dir);
       await GStorage.putSetting(SettingsKeys.magnetDownloadDir, dir);
       await _controller.applyMagnetSettingsChanged();
     } finally {
       if (mounted) setState(() => isPickingDir = false);
+    }
+  }
+
+  /// Android 写入探测：向所选目录写临时文件验证可写。
+  ///
+  /// 不可写且尚未授予「所有文件访问」时，引导跳转系统设置开启，
+  /// 用户返回应用后重新探测；仍不可写（或已授权却失败）则提示换目录。
+  /// 返回是否可写（可保存为下载目录）。
+  Future<bool> _ensureAndroidWritableDir(String dir) async {
+    if (await _probeWritableDir(dir)) return true;
+    if (await AndroidStorageAccess.hasAllFilesAccess()) {
+      // 已有全文件权限仍不可写（目录只读等），直接提示。
+      if (mounted) {
+        KazumiDialog.showToast(message: '所选目录不可写，请更换目录');
+      }
+      return false;
+    }
+    final goSettings = await KazumiDialog.show<bool>(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('目录不可写'),
+        content: const Text(
+          'Android 11 及以上写入共享存储目录需要「所有文件访问」权限。\n'
+          '是否前往系统设置开启？开启后返回应用会自动重新检测。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: true),
+            child: const Text('去开启'),
+          ),
+        ],
+      ),
+    );
+    if (goSettings != true) return false;
+    await AndroidStorageAccess.requestAllFilesAccess();
+    // 跳转系统设置后应用退后台；等待用户返回（最长 5 分钟）。
+    _resumeCompleter = Completer<void>();
+    try {
+      await _resumeCompleter!.future.timeout(const Duration(minutes: 5));
+    } on TimeoutException {
+      // 用户未返回设置完成授权，按不可写处理。
+      return false;
+    } finally {
+      _resumeCompleter = null;
+    }
+    if (await _probeWritableDir(dir)) return true;
+    if (mounted) {
+      KazumiDialog.showToast(message: '目录仍不可写，请更换目录或检查权限');
+    }
+    return false;
+  }
+
+  /// 向目录写入临时探测文件并清理，返回是否可写。
+  static Future<bool> _probeWritableDir(String dir) async {
+    final probe = File(p.join(dir, '.kazumi_write_probe'));
+    try {
+      await probe.writeAsString('');
+      await probe.delete();
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

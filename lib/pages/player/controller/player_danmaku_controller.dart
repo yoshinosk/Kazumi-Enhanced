@@ -1,7 +1,5 @@
 // ignore_for_file: library_private_types_in_public_api
 
-import 'dart:convert';
-
 import 'package:canvas_danmaku/canvas_danmaku.dart' as canvas;
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/pages/player/controller/player_models.dart';
@@ -9,8 +7,9 @@ import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/request/apis/danmaku_api.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
-import 'package:mobx/mobx.dart';
 import 'package:kazumi/utils/danmaku.dart';
+import 'package:kazumi/utils/danmaku_time_offset_store.dart';
+import 'package:mobx/mobx.dart';
 
 part 'player_danmaku_controller.g.dart';
 
@@ -30,6 +29,7 @@ class DanmakuLoadResult {
     required this.status,
     this.animeTitle = '',
     this.episodeTitle = '',
+    this.episodeId = 0,
   });
 
   factory DanmakuLoadResult.success({
@@ -37,6 +37,7 @@ class DanmakuLoadResult {
     required int bangumiID,
     String animeTitle = '',
     String episodeTitle = '',
+    int episodeId = 0,
   }) {
     return DanmakuLoadResult(
       danmakus: danmakus,
@@ -46,6 +47,7 @@ class DanmakuLoadResult {
           : DanmakuLoadStatus.success,
       animeTitle: animeTitle,
       episodeTitle: episodeTitle,
+      episodeId: episodeId,
     );
   }
 
@@ -72,6 +74,11 @@ class DanmakuLoadResult {
 
   /// 弹幕来源分集标题（弹弹 Play 侧）。
   final String episodeTitle;
+
+  /// 弹幕来源分集的弹弹 episodeId（文件匹配 / 分集解析可得，未知为 0）。
+  ///
+  /// 用于把弹幕轴偏移等按分集作用域的数据精确到单集。
+  final int episodeId;
 
   bool get hasDanmakus => status == DanmakuLoadStatus.success;
 
@@ -102,73 +109,7 @@ class DanmakuTimeline {
   }
 }
 
-/// 弹幕时间轴偏移的作用域读写。
-///
-/// 弹幕轴自动检测推荐的偏移按「bangumiID:episodeId」作用域存储：单集的
-/// 检测结果不再永久作用于之后所有剧集，其他番剧 / 分集仍会自动触发检测。
-/// 未命中作用域时回退到全局 [SettingsKeys.danmakuTimeOffset]（用户手动
-/// 调整的全局偏移）。episodeId 未知（自动加载弹幕）时为 0，同番剧共享
-/// 该番剧作用域。
-class DanmakuTimeOffsetStore {
-  DanmakuTimeOffsetStore._();
-
-  static const int _bangumiOnlyEpisodeId = 0;
-
-  static String _scopeKey(int bangumiID, int episodeId) =>
-      '$bangumiID:$episodeId';
-
-  /// 读取当前作用域的偏移：精确分集 → 同番剧（episodeId=0）→ 全局。
-  static double effectiveOffset(int bangumiID, int episodeId) {
-    final scoped = _readScoped();
-    final exact = scoped[_scopeKey(bangumiID, episodeId)];
-    if (exact != null) return exact;
-    final bangumi = scoped[_scopeKey(bangumiID, _bangumiOnlyEpisodeId)];
-    if (bangumi != null) return bangumi;
-    return GStorage.getSetting<double>(SettingsKeys.danmakuTimeOffset);
-  }
-
-  /// 写入作用域偏移；偏移为 0 时移除该作用域（回退全局）。
-  static Future<void> setScopedOffset(
-    int bangumiID,
-    int episodeId,
-    double offset,
-  ) async {
-    final scoped = _readScoped();
-    final key = _scopeKey(bangumiID, episodeId);
-    final normalized = offset.round().clamp(-180, 180).toDouble();
-    if (normalized == 0) {
-      scoped.remove(key);
-    } else {
-      scoped[key] = normalized;
-    }
-    await GStorage.putSetting<String>(
-      SettingsKeys.danmakuTimeOffsetByEpisode,
-      jsonEncode(scoped),
-    );
-  }
-
-  static Map<String, double> _readScoped() {
-    final raw =
-        GStorage.getSetting<String>(SettingsKeys.danmakuTimeOffsetByEpisode);
-    if (raw.isEmpty) return {};
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        return decoded.map(
-          (key, value) => MapEntry(
-            key.toString(),
-            value is num ? value.toDouble() : 0.0,
-          ),
-        );
-      }
-    } catch (e) {
-      KazumiLogger()
-          .w('DanmakuTimeOffsetStore: read scoped offset failed', error: e);
-    }
-    return {};
-  }
-}
-
+/// 弹幕时间轴偏移的作用域读写见 [DanmakuTimeOffsetStore]。
 abstract class _PlayerDanmakuController with Store {
   _PlayerDanmakuController({
     required this.isLocalPlayback,
@@ -216,6 +157,22 @@ abstract class _PlayerDanmakuController with Store {
 
   double get timelineOffsetSeconds {
     return DanmakuTimeOffsetStore.effectiveOffset(bangumiID, danmakuEpisodeId);
+  }
+
+  /// 手动设置当前弹幕池的时间轴偏移（写入当前番剧/分集作用域）。
+  ///
+  /// 手动调整必须作用于运行时实际读取的「有效偏移」：若只写全局设置，
+  /// 会被已存在的分集/番剧作用域偏移（如自动检测应用过的推荐值）遮蔽，
+  /// 表现为「调整不生效」。未绑定番剧（bangumiID<=0）时退回全局设置。
+  Future<void> setTimelineOffset(double offset) async {
+    final normalized = DanmakuTimeOffsetStore.normalize(offset);
+    if (bangumiID > 0) {
+      await DanmakuTimeOffsetStore.setScopedOffset(
+          bangumiID, danmakuEpisodeId, normalized);
+    } else {
+      await GStorage.putSetting<double>(
+          SettingsKeys.danmakuTimeOffset, normalized);
+    }
   }
 
   int? resolveDanmakuSecond(Duration playbackPosition) {
@@ -288,6 +245,11 @@ abstract class _PlayerDanmakuController with Store {
     String? episodeTitle,
   }) {
     bangumiID = result.bangumiID;
+    // 文件匹配 / 分集解析得到的 episodeId 一并落地，弹幕轴偏移等
+    // 分集作用域数据才能精确到单集（未知保持 0，同番剧共享作用域）。
+    if (result.episodeId > 0) {
+      danmakuEpisodeId = result.episodeId;
+    }
     addDanmakus(result.danmakus);
     danmakuOn = enableDanmaku;
     danmakuLoading = false;
@@ -390,6 +352,7 @@ abstract class _PlayerDanmakuController with Store {
             return DanmakuLoadResult.success(
               danmakus: sidecar.danmakus,
               bangumiID: sidecar.danDanBangumiID,
+              episodeId: sidecar.danDanEpisodeId,
             );
           }
           KazumiLogger().w(
@@ -402,12 +365,13 @@ abstract class _PlayerDanmakuController with Store {
         pluginName,
         episode,
       );
-      if (cachedDanmakus != null && cachedDanmakus.isNotEmpty) {
+      if (cachedDanmakus != null && cachedDanmakus.danmakus.isNotEmpty) {
         KazumiLogger().i(
-            'PlayerController: loaded ${cachedDanmakus.length} cached danmakus');
+            'PlayerController: loaded ${cachedDanmakus.danmakus.length} cached danmakus');
         return DanmakuLoadResult.success(
-          danmakus: cachedDanmakus,
+          danmakus: cachedDanmakus.danmakus,
           bangumiID: nextBangumiID,
+          episodeId: cachedDanmakus.danDanEpisodeId,
         );
       }
     } catch (e) {
@@ -422,22 +386,24 @@ abstract class _PlayerDanmakuController with Store {
     if (scrapedDanDanID != null && scrapedDanDanID > 0) {
       try {
         final res = await DanmakuApi.getDanDanmaku(scrapedDanDanID, episode);
-        if (res.isNotEmpty) {
+        if (res.danmakus.isNotEmpty) {
           KazumiLogger().i(
-              'PlayerController: fetched ${res.length} danmakus for scraped anime');
+              'PlayerController: fetched ${res.danmakus.length} danmakus for scraped anime');
           _saveDanmakuToCache(downloadController, bangumiId, pluginName,
-              episode, res, scrapedDanDanID);
+              episode, res.danmakus, scrapedDanDanID);
           return DanmakuLoadResult.success(
-            danmakus: res,
+            danmakus: res.danmakus,
             bangumiID: scrapedDanDanID,
+            episodeId: res.episodeId,
           );
         }
         // 映射成功但该集无弹幕：继续尝试文件匹配 / 标题回退，
         // 因为多季番很可能被映射到了错误的季度。
         if (!hasLocalDirectory) {
           return DanmakuLoadResult.success(
-            danmakus: res,
+            danmakus: res.danmakus,
             bangumiID: scrapedDanDanID,
+            episodeId: res.episodeId,
           );
         }
       } catch (e) {
@@ -513,13 +479,16 @@ abstract class _PlayerDanmakuController with Store {
       if (localDanmakuDirectory != null && localDanmakuDirectory.isNotEmpty) {
         await downloadController.writeDirectoryDanmaku(
             localDanmakuDirectory, res, match.animeId,
-            episode: episode, scope: danmakuScope ?? '');
+            episode: episode,
+            scope: danmakuScope ?? '',
+            danDanEpisodeId: match.episodeId);
       }
       return DanmakuLoadResult.success(
         danmakus: res,
         bangumiID: match.animeId,
         animeTitle: match.animeTitle,
         episodeTitle: match.episodeTitle,
+        episodeId: match.episodeId,
       );
     } catch (e) {
       KazumiLogger().w('PlayerController: dandan file match failed', error: e);
@@ -546,16 +515,19 @@ abstract class _PlayerDanmakuController with Store {
         final titleId = await DanmakuApi.getBangumiIDByTitle(candidate);
         if (titleId == 0) continue;
         final res = await DanmakuApi.getDanDanmaku(titleId, episode);
-        if (res.isEmpty) continue;
+        if (res.danmakus.isEmpty) continue;
         KazumiLogger().i(
-            'PlayerController: fetched ${res.length} danmakus via title "$candidate"');
+            'PlayerController: fetched ${res.danmakus.length} danmakus via title "$candidate"');
         await downloadController.writeDirectoryDanmaku(
-            localDanmakuDirectory, res, titleId,
-            episode: episode, scope: danmakuScope ?? '');
+            localDanmakuDirectory, res.danmakus, titleId,
+            episode: episode,
+            scope: danmakuScope ?? '',
+            danDanEpisodeId: res.episodeId);
         return DanmakuLoadResult.success(
-          danmakus: res,
+          danmakus: res.danmakus,
           bangumiID: titleId,
           animeTitle: candidate,
+          episodeId: res.episodeId,
         );
       } catch (e) {
         KazumiLogger().w(
@@ -605,8 +577,9 @@ abstract class _PlayerDanmakuController with Store {
       }
       var res = await DanmakuApi.getDanDanmaku(nextBangumiID, episode);
       return DanmakuLoadResult.success(
-        danmakus: res,
+        danmakus: res.danmakus,
         bangumiID: nextBangumiID,
+        episodeId: res.episodeId,
       );
     } catch (e) {
       KazumiLogger().w(

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/notification/app_notifications.dart';
 
 /// Android 后台下载服务
 ///
@@ -38,6 +40,12 @@ class BackgroundDownloadService {
   /// 期间若租约全部释放，release 必须等服务启动完成后才能判断停止，
   /// 否则服务会以「零租约」状态常驻。
   Future<void> _opQueue = Future.value();
+
+  /// 最近一次 startService 失败时间：失败后冷却期内不再重试，
+  /// 避免调用方（如磁力下载每 2s 一轮的租约同步）反复触发必败的
+  /// 原生调用与异常日志。
+  DateTime? _lastStartFailedAt;
+  static const Duration _startRetryCooldown = Duration(minutes: 5);
 
   Future<T> _serialized<T>(Future<T> Function() action) {
     final result = _opQueue.then((_) => action());
@@ -97,8 +105,41 @@ class BackgroundDownloadService {
 
     FlutterForegroundTask.initCommunicationPort();
 
+    // 前台服务事件统一在本类处理（服务超时停止等），
+    // 各 Controller 的回调只处理自己的按钮 / 导航消息，避免重复处理。
+    FlutterForegroundTask.addTaskDataCallback(_onForegroundServiceEvent);
+
     _isInitialized = true;
     KazumiLogger().i('BackgroundDownloadService: initialized');
+  }
+
+  /// 前台服务事件（主 isolate）：目前处理系统超时停止。
+  void _onForegroundServiceEvent(Object data) {
+    if (data is Map && data['action'] == 'service_timeout') {
+      _handleServiceTimeout();
+    }
+  }
+
+  /// 前台服务因达到系统时限被停止（Android 15+ 对 dataSync 类型
+  /// 前台服务有每日约 6 小时的限制）。
+  ///
+  /// 服务已实际停止但进程仍在运行：标记未运行并清空全部租约
+  /// （当天再启动会被系统拒绝，保留租约只会挡住调用方的重试门控），
+  /// 下载在进程存活期间仍继续；发通知告知用户。
+  void _handleServiceTimeout() {
+    if (!_isRunning) return;
+    _isRunning = false;
+    _leases.clear();
+    _leaseTitles.clear();
+    _leaseTexts.clear();
+    _renderLease = null;
+    KazumiLogger().w(
+        'BackgroundDownloadService: service stopped by system timeout');
+    unawaited(AppNotifications.show(
+      title: '后台下载已暂停',
+      body: '前台服务达到系统时限（Android 15+ 每日约 6 小时），'
+          '重新打开应用后可继续下载',
+    ));
   }
 
   Future<bool> needsNotificationPermission() async {
@@ -118,6 +159,16 @@ class BackgroundDownloadService {
   Future<bool> acquire(String lease) async {
     if (!isSupported) return false;
     return _serialized(() async {
+      if (!_isRunning) {
+        // 冷却期内（上次启动失败后 5 分钟）：不持有租约直接返回不可用，
+        // 避免调用方高频重入（磁力下载每 2s 同步一次租约）反复触发
+        // 必败的启动调用；冷却结束后下一轮 acquire 自动重试。
+        final lastFailed = _lastStartFailedAt;
+        if (lastFailed != null &&
+            DateTime.now().difference(lastFailed) < _startRetryCooldown) {
+          return false;
+        }
+      }
       final isNew = _leases.add(lease);
       if (isNew) {
         KazumiLogger().i('BackgroundDownloadService: acquired by "$lease"');
@@ -272,13 +323,16 @@ class BackgroundDownloadService {
       _isRunning = result is ServiceRequestSuccess;
 
       if (_isRunning) {
+        _lastStartFailedAt = null;
         KazumiLogger().i('BackgroundDownloadService: service started');
       } else {
+        _lastStartFailedAt = DateTime.now();
         KazumiLogger().w(
             'BackgroundDownloadService: service start returned non-success: $result');
       }
       return _isRunning;
     } catch (e) {
+      _lastStartFailedAt = DateTime.now();
       KazumiLogger()
           .e('BackgroundDownloadService: failed to start service', error: e);
       return false;
@@ -382,6 +436,11 @@ class _DownloadTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     debugPrint(
         'BackgroundDownloadService: task handler destroyed (isTimeout: $isTimeout)');
+    if (isTimeout) {
+      // Android 15+ dataSync 前台服务达到每日时限被系统停止：
+      // 通知主 isolate 标记服务已停止并提醒用户（进程仍在运行）。
+      FlutterForegroundTask.sendDataToMain({'action': 'service_timeout'});
+    }
   }
 
   @override

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
@@ -11,6 +10,7 @@ import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/danmaku_axis_checker.dart';
+import 'package:kazumi/utils/danmaku_time_offset_store.dart';
 
 /// 弹幕加载成功后执行弹幕轴对齐检测：
 /// 结合接口返回的弹幕时间轴与播放的视频时长判断是否对齐，

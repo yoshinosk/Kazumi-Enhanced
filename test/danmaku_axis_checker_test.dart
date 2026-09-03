@@ -175,6 +175,44 @@ void main() {
         expect(result.headGapSeconds, closeTo(73.8, 0.1));
       });
 
+      test('ED 后稀疏尾延伸到视频结尾不误报轴偏移', () {
+        // 真实场景（药屋 EP35/36）：正片弹幕到 ~1330s，ED 附近有弹幕群，
+        // 之后仅零星几条（<0.5%）落到视频结尾甚至略超出（更长版本的
+        // 观众）。P99.5 轴尾空白只是自然稀疏尾，不应推荐延后。
+        final times = <double>[];
+        for (var i = 0; i < 960; i++) {
+          times.add(1330 * i / 959);
+        }
+        // ED 弹幕群
+        for (var i = 0; i < 40; i++) {
+          times.add(1280 + i * 2.0);
+        }
+        // 稀疏尾：零星弹幕一直延伸到结尾及略超出（更长版本的观众）
+        times.addAll([1415.0, 1446.0, 1545.0, 2095.0]);
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+        expect(result.tailGapReliable, isFalse);
+      });
+
+      test('真实短轴（硬截断）仍推荐延后', () {
+        // 弹幕均匀分布到 1380s 后彻底消失（无结尾覆盖），只有一条离群
+        // 弹幕在 1500s：轴尾空白是硬截断，应推荐延后 60s。
+        final times = <double>[];
+        for (var i = 0; i < 101; i++) {
+          times.add(1380 * i / 100);
+        }
+        times.add(1500.0);
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.axisOffset);
+        expect(result.recommendedOffsetSeconds, closeTo(60, 0.01));
+      });
+
       test('整轴平移（轴头空白 + 轴尾越界互相印证）推荐提前', () {
         // 弹幕时间戳整体后移 60s：轴头出现硬空白、轴尾同时越界，
         // 两个同向信号互相印证，应融合出负偏移（提前）。
