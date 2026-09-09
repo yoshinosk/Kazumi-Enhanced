@@ -211,23 +211,39 @@ abstract class _CollectController with Store {
     loadCollectibles();
   }
 
-  Future<bool> syncCollectibles({bool showSuccessToast = true}) async {
+  /// 报告失败：同步对话框路径走 onError（避免 toast 与对话框状态重复），
+  /// 旧入口（无 onError）退回 toast。
+  void _reportSyncError(String message, ValueChanged<String>? onError,
+      {Object? error}) {
+    if (error != null) {
+      KazumiLogger().e(message, error: error);
+    }
+    if (onError != null) {
+      onError(message);
+    } else {
+      KazumiDialog.showToast(message: message);
+    }
+  }
+
+  Future<bool> syncCollectibles({
+    bool showSuccessToast = true,
+    ValueChanged<String>? onError,
+  }) async {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
     if (!webDavCollectEnable) {
-      KazumiDialog.showToast(message: '未开启WebDav收藏同步');
+      _reportSyncError('未开启WebDav收藏同步', onError);
       return false;
     }
     if (!WebDav().initialized) {
-      KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
+      _reportSyncError('未开启WebDav同步或配置无效', onError);
       return false;
     }
     bool flag = true;
     try {
       await WebDav().ping();
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDav connection failed', error: e);
-      KazumiDialog.showToast(message: 'WebDav连接失败: $e');
+      _reportSyncError('WebDav连接失败，请检查网络或配置', onError, error: e);
       flag = false;
     }
     if (!flag) {
@@ -239,7 +255,7 @@ abstract class _CollectController with Store {
         KazumiDialog.showToast(message: 'WebDav同步完成');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: 'WebDav同步失败 $e');
+      _reportSyncError('WebDav同步失败：$e', onError, error: e);
       return false;
     }
     loadCollectibles();
@@ -248,24 +264,25 @@ abstract class _CollectController with Store {
 
   /// Only upload local collectibles and change logs to WebDAV, without downloading and merging.
   /// Used by full sync to push Bangumi-updated local changes back to WebDAV.
-  Future<bool> uploadCollectiblesToWebDav(
-      {bool showSuccessToast = true}) async {
+  Future<bool> uploadCollectiblesToWebDav({
+    bool showSuccessToast = true,
+    ValueChanged<String>? onError,
+  }) async {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
     if (!webDavCollectEnable) {
-      KazumiDialog.showToast(message: '未开启WebDav收藏同步');
+      _reportSyncError('未开启WebDav收藏同步', onError);
       return false;
     }
     if (!WebDav().initialized) {
-      KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
+      _reportSyncError('未开启WebDav同步或配置无效', onError);
       return false;
     }
     bool flag = true;
     try {
       await WebDav().ping();
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDav connection failed', error: e);
-      KazumiDialog.showToast(message: 'WebDav连接失败: $e');
+      _reportSyncError('WebDav连接失败，请检查网络或配置', onError, error: e);
       flag = false;
     }
     if (!flag) {
@@ -277,7 +294,7 @@ abstract class _CollectController with Store {
         KazumiDialog.showToast(message: 'WebDav上传完成');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: 'WebDav上传失败 $e');
+      _reportSyncError('WebDav上传失败：$e', onError, error: e);
       return false;
     }
     return true;
@@ -329,22 +346,23 @@ abstract class _CollectController with Store {
   /// Sync Bangumi collectibles.
   Future<bool> syncCollectiblesBangumi(
       {void Function(String message, int current, int total)? onProgress,
-      bool showSuccessToast = true}) async {
+      bool showSuccessToast = true,
+      ValueChanged<String>? onError}) async {
     final bool syncEnable = GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (!syncEnable) {
-      KazumiDialog.showToast(message: '未开启Bangumi同步，请先在设置中启用');
+      _reportSyncError('未开启Bangumi同步，请先在设置中启用', onError);
       return false;
     }
 
     try {
       await BangumiSyncService().syncCollectibles(onProgress: onProgress);
-      if (showSuccessToast) {
+      if (showSuccessToast && onError == null) {
         KazumiDialog.showToast(message: 'Bangumi同步完成');
       }
     } catch (e) {
-      KazumiLogger().e('Bangumi: Bangumi sync failed', error: e);
-      KazumiDialog.showToast(
-          message: 'Bangumi 同步失败：${BangumiSyncService.describeError(e)}');
+      _reportSyncError(
+          'Bangumi 同步失败：${BangumiSyncService.describeError(e)}', onError,
+          error: e);
       return false;
     }
     loadCollectibles();
