@@ -38,19 +38,19 @@
 | ✅ | d658832d | chore: 设置页文案优化 | 2026.9.9 |
 | ✅ | 92e91e3d | fix(bangumi): 保留同步偏好并稳定连接状态 | 2026.9.9 |
 | ⬜ | 9b7d6458 | fix(info): 分离评论与播放操作 | |
-| ⬜ | 495bf11a | fix(images): 统一角色立绘加载 | |
-| ⬜ | 11b0cb76 | fix(history): 移除多余的卡片加载指示器 | |
-| ⬜ | 7d2d0d58 | fix(collect): 恢复封面 hero 转场 | |
-| ⬜ | e436ab76 | fix(collect): 修正滚动行为 | |
-| ⬜ | 99562de8 | fix(timeline): 对齐卡片封面 | |
-| ⬜ | edb7b526 | fix(timeline): 滚动时保持星期标签稳定 | |
-| ⬜ | aeae76d9 | perf(history): 惰性渲染日期 | |
-| ⬜ | 2c1dad2e | fix(search): 图片搜索结果滚动条对齐页面边缘 | |
-| ⬜ | 879eb849 | fix(timeline): 合并排序与筛选控件 | |
-| ⬜ | 22be2365 | fix(collect): 搜索栏随库内容滚动 | |
-| ⬜ | d5784deb | fix(collect): 库滚动条对齐页面边缘 | |
-| ⬜ | 50f83370(重复) | | |
-| ⬜ | 23610a52 | fix(search): 防止结果卡片标题被裁剪 | |
+| ⬜→批次4 | 495bf11a | fix(images): 统一角色立绘加载（character_info_view 为 2.3.x 重构新增，随批次 4） | |
+| ⬜→批次4 | 11b0cb76 | fix(history): 移除多余的卡片加载指示器（history_page 属 2.3.x 重构，随批次 4） | |
+| ⬜→批次4 | 7d2d0d58 | fix(collect): 恢复封面 hero 转场（collect_library_* 为 2.3.x 新增，随批次 4） | |
+| ⬜→批次4 | e436ab76 | fix(collect): 修正滚动行为（同上） | |
+| ⬜→批次4 | 99562de8 | fix(timeline): 对齐卡片封面（依赖 02f4b307 时间线重设计） | |
+| ⬜→批次4 | edb7b526 | fix(timeline): 滚动时保持星期标签稳定（同上） | |
+| ⬜→批次4 | aeae76d9 | perf(history): 惰性渲染日期（history_list_view 为 2.3.x 新增） | |
+| ⬜→批次4 | 2c1dad2e | fix(search): 图片搜索滚动条对齐（依赖 a71dfa21 图片搜索重设计） | |
+| ⬜→批次4 | 879eb849 | fix(timeline): 合并排序与筛选控件（timeline_options 为 2.3.x 新增） | |
+| ⬜→批次4 | 22be2365 | fix(collect): 搜索栏随库内容滚动（同上） | |
+| ⬜→批次4 | d5784deb | fix(collect): 库滚动条对齐页面边缘（同上） | |
+| ⬜→批次4 | 9b7d6458 | fix(info): 分离评论与播放操作（依赖 98e331c7 评论对话框重设计） | |
+| ⬜→批次4 | 23610a52 | fix(search): 防止结果卡片标题被裁剪（依赖 0aadad1e 搜索重设计） | |
 
 ## 批次 3:依赖升级
 
