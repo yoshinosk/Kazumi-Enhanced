@@ -13,6 +13,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/network/system_proxy_service.dart';
 import 'package:kazumi/services/player/playback_cache_policy.dart';
+import 'package:kazumi/services/player/player_error_mapper.dart';
 import 'package:kazumi/services/player/player_screenshot_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/video_source/video_source_format.dart';
@@ -442,14 +443,15 @@ abstract class _PlayerPlaybackController with Store {
 
       bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
       player.stream.error.listen((event) {
-        if (showPlayerError) {
-          if (!isCurrentPlayer(player)) {
-            return;
-          }
-          if (event.toString().contains('Failed to open') && playerBuffering) {
+        if (isCurrentPlayer(player)) {
+          final actionableMessage = PlayerErrorMapper.toActionableMessage(
+            event,
+            isBuffering: playerBuffering,
+          );
+          if (actionableMessage != null) {
             KazumiDialog.showToast(
-                message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
-          } else {
+                message: actionableMessage, showActionButton: true);
+          } else if (showPlayerError) {
             KazumiDialog.showToast(
                 message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
                 duration: const Duration(seconds: 5),

@@ -26,17 +26,17 @@
 | ⬜ | 6c3c46c9 | feat: 弹幕搜索 API v2 | |
 | ⬜ | c32db78c | fix(danmaku): 手动弹幕匹配使用搜索集数 | |
 | ⬜ | bd66ce55 | fix(danmaku): 修复存储时长编辑 | |
-| ⬜ | 5d1569b3 | feat(sync): Bangumi 收藏同步优化 | |
+| ✅ | 5d1569b3 | feat(sync): Bangumi 收藏同步优化 | 2026.9.9 |
 | ⬜ | 22f9ee13 | feat(player): 网络感知低内存模式 | |
-| ⬜ | 43e0fe80 | fix(windows): 检测到的 M3U 源强制 HLS demux | |
-| ⬜ | 50f83370 | fix: 仅自动展开第一个播放源 | |
-| ⬜ | a2fd8259 | fix(video): 选集网格中定位历史集数 | |
-| ⬜ | 3e86da15 | fix(player): 无效源错误提示改进 | |
-| ⬜ | 280a5adc | fix(player): 源失败 toast 移出错误 switch | |
-| ⬜ | 08905a38 | fix(player): 关闭播放线路菜单后恢复焦点 | |
-| ⬜ | 45201365 | feat(collect): 番剧计数从页脚移到标签页 | |
-| ⬜ | d658832d | chore: 设置页文案优化 | |
-| ⬜ | 92e91e3d | fix(bangumi): 保留同步偏好并稳定连接状态 | |
+| ❌ | 43e0fe80 | ~~fix(windows): 检测到的 M3U 源强制 HLS demux~~（已在 2.2.8 基线内，无需同步） | - |
+| ⬜→批次4 | 50f83370 | fix: 仅自动展开第一个播放源（与 1eab03f3 源选择重设计一并处理） | |
+| ✅ | a2fd8259 | fix(video): 选集网格中定位历史集数 | 2026.9.9 |
+| ✅ | 3e86da15 | fix(player): 无效源错误提示改进 | 2026.9.9 |
+| ✅ | 280a5adc | fix(player): 源失败 toast 移出错误 switch | 2026.9.9 |
+| ⬜→批次4 | 08905a38 | fix(player): 关闭播放线路菜单后恢复焦点（依赖 2.3.1 新选集面板，随批次 4 同步） | |
+| ⬜→批次4 | 45201365 | feat(collect): 番剧计数从页脚移到标签页（依赖收藏库重设计，随批次 4 同步） | |
+| ✅ | d658832d | chore: 设置页文案优化 | 2026.9.9 |
+| ✅ | 92e91e3d | fix(bangumi): 保留同步偏好并稳定连接状态 | 2026.9.9 |
 | ⬜ | 9b7d6458 | fix(info): 分离评论与播放操作 | |
 | ⬜ | 495bf11a | fix(images): 统一角色立绘加载 | |
 | ⬜ | 11b0cb76 | fix(history): 移除多余的卡片加载指示器 | |
@@ -56,12 +56,12 @@
 
 | 状态 | 上游提交 | 内容 | 完成日期 |
 |---|---|---|---|
-| ⬜ | 2eefde98 | deps: bump dio | |
-| ⬜ | 145feb99 | deps: bump media kit | |
+| ❌ | 2eefde98 | ~~deps: bump dio~~（已在 2.2.8 基线内） | - |
+| ❌ | 145feb99 | ~~deps: bump media kit~~（已在 2.2.8 基线内） | - |
 | ⬜ | 491482c1 / 794567ed | deps: bump canvas danmaku | |
-| ⬜ | b018c6ca | chore: bump 默认插件 | |
-| ⬜ | b0ce7c77 / 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2 | |
-| ⬜ | 76fc6ecf | chore: 从 appBuildName 派生应用版本号 | |
+| ❌ | b018c6ca | ~~chore: bump 默认插件~~（已在 2.2.8 基线内） | - |
+| ⬜ | 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2 | |
+| ❌ | 76fc6ecf | ~~chore: 从 appBuildName 派生应用版本号~~（已在 2.2.8 基线内） | - |
 
 ## 批次 4:M3E UI 重构浪潮(约 30 个提交,建议整体接收 2.3.x UI 后回移植本分支功能)
 

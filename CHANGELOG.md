@@ -4,6 +4,20 @@
 
 ## 2026.9.9
 
+- 同步上游 2.2.9 ~ 2.3.1（批次 2 第一部分：Bangumi 同步链路重构与播放器错误修复）
+  - Bangumi 收藏同步优化（5d1569b3）：收藏拉取改为全量单接口 + 3 并发分页 + 全局 200ms 速率调度（新增 `AsyncRateLimiter`），按服务端 limit 自适应步长，缺 total/空首包防御性抛错，条目按 `bangumiId` 去重；`BangumiCollection.fromJson` 解析加固（id/updated_at 校验、字段可空兜底）；同步冲突仲裁新增「最新优先」（timeFirst）策略，按更新时间比较
+    - 相关文件: lib/utils/async_rate_limiter.dart（新增）, lib/modules/bangumi/bangumi_collection.dart, lib/modules/bangumi/sync_priority.dart, lib/modules/collect/collect_sync_merger.dart, lib/request/apis/bangumi_api.dart, lib/request/config/api_endpoints.dart, lib/services/sync/bangumi_sync_service.dart, test/async_rate_limiter_test.dart（新增）, test/collect_sync_test.dart
+  - 保留同步偏好并稳定连接状态（92e91e3d）：`BangumiSyncService` 重构为 `ChangeNotifier`（连接状态/错误可监听），失败不再自动关闭同步开关；新增 `saveToken`（先验证后保存）与 `describeError`（401/403/429 等友好错误文案）；新增 `BangumiSyncSettings` 设置区块（连接状态展示、测试/重试连接）；Bangumi 配置页新增「验证并保存」FAB 与 Token 输入校验提示；Bangumi API 支持显式 accessToken 传参、`getBangumiCollectibles` 改为必传 username；手动同步失败提示改用统一错误文案
+    - 相关文件: lib/bean/settings/bangumi_sync_settings.dart（新增）, lib/services/sync/bangumi_sync_service.dart, lib/pages/bangumi/bangumi_setting.dart, lib/pages/collect/collect_controller.dart, lib/pages/init_page.dart, lib/pages/webdav_editor/webdav_setting.dart, lib/request/apis/bangumi_api.dart, lib/request/clients/bangumi_client.dart, test/bangumi_sync_service_test.dart（新增）
+  - 选集网格正确定位历史集数（a2fd8259）：跳转索引修正为 `episode - 1`、等待 GridViewObserver 绑定后跳转、非桌面端 GridViewObserver 仅包裹移动端布局
+    - 相关文件: lib/pages/video/video_page.dart
+  - 无效源错误提示改进（3e86da15）+ 源失败 toast 移出错误开关（280a5adc）：新增 `PlayerErrorMapper`，识别「无法识别文件格式」与缓冲期「Failed to open」给出可操作提示；源失败提示不再受「显示播放器内部错误」开关影响；该开关默认值改为关闭
+    - 相关文件: lib/services/player/player_error_mapper.dart（新增）, lib/pages/player/controller/player_playback_controller.dart, lib/services/storage/settings_keys.dart
+  - 设置页文案优化（d658832d）
+    - 相关文件: lib/pages/settings/interface_settings.dart, lib/pages/webdav_editor/webdav_setting.dart
+
+## 2026.9.9
+
 - 同步上游 2.2.9 ~ 2.3.1（批次 1：低冲突功能，共 7 项）
   - 插件支持批量规则导入：新增 `PluginImportParser`，支持一次粘贴多条 `kazumi://` 规则链接（含跨行换行、大写协议头、尾随文本容错）或 JSON 数组，去重并逐条报告失败原因；规则名比较统一为大小写不敏感的 `pluginNameKey`
     - 相关文件: lib/services/plugin/plugin_import_parser.dart（新增）, lib/plugins/plugins.dart, lib/plugins/plugins_controller.dart, lib/utils/encoding.dart, lib/pages/plugin_editor/plugin_view_page.dart, test/plugin_import_parser_test.dart（新增）, test/plugin_api_config_test.dart

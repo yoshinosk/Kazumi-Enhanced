@@ -125,11 +125,6 @@ abstract class _CollectController with Store {
       return _BangumiDeleteSyncAction.deleteLocalOnly;
     }
 
-    final bangumi = BangumiSyncService();
-    if (!bangumi.initialized) {
-      return _BangumiDeleteSyncAction.deleteLocalOnly;
-    }
-
     return KazumiDialog.show<_BangumiDeleteSyncAction>(
       clickMaskDismiss: true,
       builder: (context) => AlertDialog(
@@ -181,14 +176,6 @@ abstract class _CollectController with Store {
     }
 
     final bangumi = BangumiSyncService();
-    if (!bangumi.initialized) {
-      KazumiDialog.showToast(message: 'Bangumi 未初始化，同步失败，已取消本次状态修改');
-      KazumiLogger().w(
-        'Bangumi: immediate collect sync skipped because Bangumi is not initialized. '
-        'bangumiId=$bangumiId, type=$localType',
-      );
-      return false;
-    }
     try {
       if (showImmediateSyncToast) {
         KazumiDialog.showToast(message: '正在同步到 Bangumi...');
@@ -207,7 +194,9 @@ abstract class _CollectController with Store {
       }
       return true;
     } catch (e, stackTrace) {
-      KazumiDialog.showToast(message: '同步到 Bangumi 失败，已取消本次状态修改: $e');
+      KazumiDialog.showToast(
+          message:
+              '同步到 Bangumi 失败，已取消本次状态修改：${BangumiSyncService.describeError(e)}');
       KazumiLogger().e(
         'Bangumi: immediate collect sync failed. bangumiId=$bangumiId, type=$localType',
         error: e,
@@ -347,27 +336,15 @@ abstract class _CollectController with Store {
       return false;
     }
 
-    if (!BangumiSyncService().initialized) {
-      KazumiDialog.showToast(message: 'Bangumi同步已开启但未初始化，请检查Token后重试');
-      return false;
-    }
     try {
-      await BangumiSyncService().ping();
-      try {
-        final hasChanges =
-            await BangumiSyncService().syncCollectibles(onProgress: onProgress);
-        if (showSuccessToast) {
-          KazumiDialog.showToast(
-            message: hasChanges ? 'Bangumi同步完成' : '未发现状态差异，无需同步',
-          );
-        }
-      } catch (e) {
-        KazumiDialog.showToast(message: 'Bangumi同步失败 $e');
-        return false;
+      await BangumiSyncService().syncCollectibles(onProgress: onProgress);
+      if (showSuccessToast) {
+        KazumiDialog.showToast(message: 'Bangumi同步完成');
       }
     } catch (e) {
-      KazumiLogger().e('Bangumi: Bangumi connection failed', error: e);
-      KazumiDialog.showToast(message: 'Bangumi访问失败: $e');
+      KazumiLogger().e('Bangumi: Bangumi sync failed', error: e);
+      KazumiDialog.showToast(
+          message: 'Bangumi 同步失败：${BangumiSyncService.describeError(e)}');
       return false;
     }
     loadCollectibles();
