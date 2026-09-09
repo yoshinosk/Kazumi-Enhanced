@@ -588,6 +588,13 @@ class SettingsKeys {
     group: SettingGroup.magnet,
   );
 
+  /// 添加磁力任务时是否弹窗确认（弹窗内可为该任务单独指定下载目录）。
+  static const magnetAskDirOnAdd = SettingKey<bool>(
+    'magnetAskDirOnAdd',
+    true,
+    group: SettingGroup.magnet,
+  );
+
   /// Animes Garden 搜索条件：字幕组名称（可空）。
   static const animesGardenFansub = SettingKey<String>(
     'animesGardenFansub',
@@ -973,6 +980,7 @@ class SettingsKeys {
     danmakuTimeOffsetByEpisode,
     danmakuTimeOffsetScopeMigrated,
     danmakuTimeOffsetGlobalMigrated,
+    magnetAskDirOnAdd,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
@@ -1139,6 +1147,7 @@ class _SettingBoxKey {
       danmakuTimeOffsetByEpisode = 'danmakuTimeOffsetByEpisode',
       danmakuTimeOffsetScopeMigrated = 'danmakuTimeOffsetScopeMigrated',
       danmakuTimeOffsetGlobalMigrated = 'danmakuTimeOffsetGlobalMigrated',
+      magnetAskDirOnAdd = 'magnetAskDirOnAdd',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',

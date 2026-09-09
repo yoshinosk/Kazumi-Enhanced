@@ -25,4 +25,5 @@
 - 修改前阅读 `analysis_options.yaml`，遵循项目 Dart / Flutter 规范。
 - 修改完成后运行 `flutter analyze`，确保无新增警告或错误。
 - 有相关测试时运行 `flutter test` 验证。
+- 每次修改完后提交改动的代码。
 - 运行`tools/build_windows_local.ps1`，确保在 Windows 本地构建成功。

@@ -8,6 +8,24 @@
 
   * 相关文件: lib/utils/danmaku_time_offset_store.dart, lib/services/storage/settings_keys.dart, lib/main.dart, test/danmaku_time_offset_store_test.dart
 
+## 2026.9.5
+
+* 磁力下载支持在创建任务时选择下载目录：新增「添加下载任务」确认弹窗，展示资源信息与目标目录，可临时为单个任务指定保存位置（含「使用默认目录」一键还原）；本次会话手动选过的目录会作为后续任务的默认值，批量下载无需重复选择
+
+  * 相关文件: lib/pages/magnet/magnet\_download\_dialog.dart, lib/pages/magnet/magnet\_page.dart
+
+* 统一各创建任务入口：搜索结果、订阅条目、剪贴板磁力检测、手动添加链接四个入口全部走同一套目录选择逻辑；订阅条目沿用订阅自带下载目录作为初始值
+
+  * 相关文件: lib/pages/magnet/magnet\_page.dart
+
+* 抽取目录选择公共工具 lib/utils/directory\_picker.dart：picker + 可写探测 + Android「所有文件访问」授权引导，设置页磁力下载目录、订阅下载目录、入库根目录统一复用；新增设置项「添加任务时询问下载目录」（默认开启，关闭后直接按默认目录提交）
+
+  * 相关文件: lib/utils/directory\_picker.dart, lib/pages/settings/magnet\_settings.dart, lib/services/storage/settings\_keys.dart
+
+* 提交下载前确保目标目录存在，避免用户指定的新目录因路径不存在导致落盘失败
+
+  * 相关文件: lib/services/magnet/magnet\_download\_service.dart
+
 ## 2026.9.2
 
 * 修复本地媒体库弹幕轴偏移手动调整不生效的问题：手动调整（快速菜单 / 详细调整面板 / 弹幕设置页）此前只读写全局偏移，会被已存在的分集 / 番剧作用域偏移（弹幕轴自动检测应用过的推荐值）遮蔽，表现为"调整提前 1 分 22 秒没有反应"。现在手动调整基于当前作用域的有效偏移增减并写回当前作用域，菜单与设置页同步展示有效偏移；"恢复无偏移"在作用域内显式写入 0（可遮蔽番剧级与全局偏移），确保清零立即生效

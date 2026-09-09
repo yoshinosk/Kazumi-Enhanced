@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -14,6 +13,7 @@ import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/history/history_module.dart'
     show kLocalMediaAdapterName;
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
+import 'package:kazumi/pages/magnet/magnet_download_dialog.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
@@ -25,6 +25,7 @@ import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/directory_picker.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 
@@ -101,41 +102,13 @@ class _MagnetPageState extends State<MagnetPage>
       );
       if (controller.isDownloadQueued(item)) return;
       if (!mounted) return;
-      final theme = Theme.of(context);
-      final confirmed = await KazumiDialog.show<bool>(
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('检测到磁力链接'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                text,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '是否添加到下载队列？',
-                style: theme.textTheme.bodyMedium,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => KazumiDialog.dismiss(popWith: false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => KazumiDialog.dismiss(popWith: true),
-              child: const Text('添加下载'),
-            ),
-          ],
-        ),
+      await confirmAndAddMagnetDownload(
+        context,
+        controller: controller,
+        item: item,
+        dialogTitle: '检测到磁力链接',
+        hint: text,
       );
-      if (confirmed != true || !mounted) return;
-      controller.addDownload(item);
     } catch (e) {
       // 剪贴板不可用（权限等）时静默跳过。
       KazumiLogger().w('MagnetPage: clipboard check failed', error: e);
@@ -500,8 +473,10 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                     final item = controller.searchResults[index];
                     return _MagnetSearchTile(
                       item: item,
-                      onDownload: () => controller.addDownload(
-                        item,
+                      onDownload: () => confirmAndAddMagnetDownload(
+                        context,
+                        controller: controller,
+                        item: item,
                         scrapeInfo: _animeScrapeInfo,
                       ),
                     );
@@ -937,8 +912,11 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
                     for (final item in feed.take(20))
                       _MagnetSearchTile(
                         item: item,
-                        onDownload: () => widget.controller.addDownload(
-                          item,
+                        onDownload: () => confirmAndAddMagnetDownload(
+                          context,
+                          controller: widget.controller,
+                          item: item,
+                          presetDir: widget.subscription.downloadPath,
                           scrapeInfo: widget.scrapeInfo,
                         ),
                       ),
@@ -1365,7 +1343,8 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   Future<void> _showAddMagnetDialog(BuildContext context) async {
     final linkCtrl = TextEditingController();
     final titleCtrl = TextEditingController();
-    String? saveDir;
+    // 沿用本次会话选过的目录，连续手动添加时无需重复选择。
+    String? saveDir = MagnetSessionDownloadDir.lastPicked;
     KazumiDialog.show(
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
@@ -1404,13 +1383,21 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                         style: theme.textTheme.bodySmall,
                       ),
                     ),
+                    if (saveDir != null)
+                      IconButton(
+                        tooltip: '恢复默认下载目录',
+                        icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                        onPressed: () => setDialogState(() => saveDir = null),
+                      ),
                     TextButton.icon(
                       onPressed: () async {
-                        final picked = await FilePicker.platform
-                            .getDirectoryPath(dialogTitle: '选择保存目录');
-                        if (picked != null) {
-                          setDialogState(() => saveDir = picked);
-                        }
+                        final picked = await pickWritableDirectory(
+                          dialogTitle: '选择保存目录',
+                          initialDirectory: saveDir,
+                        );
+                        if (picked == null || !dialogContext.mounted) return;
+                        setDialogState(() => saveDir = picked);
+                        MagnetSessionDownloadDir.lastPicked = picked;
                       },
                       icon: const Icon(Icons.folder_open_rounded, size: 18),
                       label: const Text('选择目录'),
@@ -2915,8 +2902,10 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
   }
 
   Future<void> _pickDownloadDir() async {
-    final path = await FilePicker.platform.getDirectoryPath(
+    final path = await pickWritableDirectory(
       dialogTitle: '选择下载目录',
+      initialDirectory:
+          _pathCtrl.text.trim().isEmpty ? null : _pathCtrl.text.trim(),
     );
     if (path != null && mounted) {
       setState(() => _pathCtrl.text = path);

@@ -691,6 +691,8 @@ class MagnetDownloadService {
     final savePath = (dir != null && dir.trim().isNotEmpty)
         ? dir.trim()
         : await LibtorrentEngine.resolveDownloadDir();
+    // 用户临时指定的目录可能尚未创建，交给引擎会因路径不存在而落盘失败。
+    await _ensureDownloadDir(savePath);
     // 添加前检查可用空间：明显不足时提示，避免无谓的元数据下载与写盘失败。
     unawaited(_warnLowDiskSpace(savePath));
     final sessionGid = await _engineAdd(uri, savePath: savePath);
@@ -711,6 +713,21 @@ class MagnetDownloadService {
     await _saveEntries();
     onChanged?.call(_entries);
     return entry.taskId;
+  }
+
+  /// 确保下载目录存在，创建失败时记录日志但不阻断任务提交
+  /// （引擎仍可能在其他位置给出更明确的错误）。
+  Future<void> _ensureDownloadDir(String dir) async {
+    try {
+      final directory = Directory(dir);
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+    } catch (e) {
+      KazumiLogger().w(
+          'MagnetDownloadService: create download dir failed: $dir',
+          error: e);
+    }
   }
 
   Future<bool> pause(String taskId) async {
