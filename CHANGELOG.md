@@ -4,6 +4,12 @@
 
 ## 2026.9.9
 
+- 同步上游 2.2.9 ~ 2.3.1（批次 2 第二部分：网络感知低内存模式）
+  - 播放器低内存模式升级为三档策略（跟随网络/始终开启/始终关闭，新增 `LowMemoryMode` 枚举与 `lowMemoryPolicy` 设置，兼容旧 `lowMemoryMode` 布尔值）：新增低内存模式选择弹窗（设置页点击进入），播放器缓存策略按策略 + 计量网络 + 本地播放自动计算，设置或网络状态变化时自动应用；应用启动与回前台时刷新计量网络状态；移动数据自动开启时的提示文案更新
+    - 相关文件: lib/services/player/low_memory_mode.dart（新增）, lib/pages/settings/low_memory_mode_settings.dart（新增）, lib/services/player/playback_cache_policy.dart, lib/services/network/metered_network_service.dart, lib/services/storage/settings_keys.dart, lib/services/storage/storage.dart, lib/pages/settings/player_settings.dart, lib/pages/player/controller/player_playback_controller.dart, lib/app_widget.dart, lib/main.dart
+
+## 2026.9.9
+
 - 同步上游 2.2.9 ~ 2.3.1（批次 2 第一部分：Bangumi 同步链路重构与播放器错误修复）
   - Bangumi 收藏同步优化（5d1569b3）：收藏拉取改为全量单接口 + 3 并发分页 + 全局 200ms 速率调度（新增 `AsyncRateLimiter`），按服务端 limit 自适应步长，缺 total/空首包防御性抛错，条目按 `bangumiId` 去重；`BangumiCollection.fromJson` 解析加固（id/updated_at 校验、字段可空兜底）；同步冲突仲裁新增「最新优先」（timeFirst）策略，按更新时间比较
     - 相关文件: lib/utils/async_rate_limiter.dart（新增）, lib/modules/bangumi/bangumi_collection.dart, lib/modules/bangumi/sync_priority.dart, lib/modules/collect/collect_sync_merger.dart, lib/request/apis/bangumi_api.dart, lib/request/config/api_endpoints.dart, lib/services/sync/bangumi_sync_service.dart, test/async_rate_limiter_test.dart（新增）, test/collect_sync_test.dart

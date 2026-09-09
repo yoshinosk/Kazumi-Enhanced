@@ -8,6 +8,7 @@ import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/network/metered_network_service.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
@@ -306,6 +307,7 @@ class _AppWidgetState extends State<AppWidget>
     } else if (state == AppLifecycleState.resumed) {
       KazumiLogger()
           .i("AppLifecycleState.resumed: Application moved to foreground");
+      await MeteredNetworkService.refresh();
     } else if (state == AppLifecycleState.inactive) {
       KazumiLogger().i("AppLifecycleState.inactive: Application is inactive");
     }
