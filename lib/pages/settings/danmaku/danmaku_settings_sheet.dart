@@ -17,7 +17,7 @@ Future<void> showDanmakuSettingsSheet({
   required BuildContext context,
   required DanmakuController danmakuController,
   required PlayerDanmakuController playerDanmakuController,
-  VoidCallback? onUpdateDanmakuSpeed,
+  required VoidCallback onUpdateDanmakuSpeed,
   VoidCallback? onTimelineOffsetChanged,
 }) async {
   final destination =
@@ -51,12 +51,12 @@ Future<void> showDanmakuSettingsSheet({
 class _DanmakuSettingsSheet extends StatefulWidget {
   final DanmakuController danmakuController;
   final PlayerDanmakuController playerDanmakuController;
-  final VoidCallback? onUpdateDanmakuSpeed;
+  final VoidCallback onUpdateDanmakuSpeed;
 
   const _DanmakuSettingsSheet({
     required this.danmakuController,
     required this.playerDanmakuController,
-    this.onUpdateDanmakuSpeed,
+    required this.onUpdateDanmakuSpeed,
   });
 
   @override
@@ -64,7 +64,17 @@ class _DanmakuSettingsSheet extends StatefulWidget {
 }
 
 class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
+  /// The stored duration, before playback speed scales it. The running option
+  /// carries the scaled value, so it can't back this slider.
+  late double _duration;
+
   DanmakuOption get _option => widget.danmakuController.option;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = GStorage.getSetting(SettingsKeys.danmakuDuration);
+  }
 
   void _applyOption(DanmakuOption option) {
     setState(() => widget.danmakuController.updateOption(option));
@@ -173,16 +183,17 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                       SettingsSliderTile(
                         leading: Icons.timer_rounded,
                         title: Text('持续时间'),
-                        value: _option.duration.toDouble(),
+                        value: _duration,
                         min: 2,
                         max: 16,
                         divisions: 14,
-                        valueLabel: '${_option.duration.round()} 秒',
+                        valueLabel: '${_duration.round()} 秒',
                         onChanged: (value) {
-                          _applyOption(_option.copyWith(duration: value));
+                          final duration = value.roundToDouble();
+                          setState(() => _duration = duration);
                           GStorage.putSetting<double>(
-                              SettingsKeys.danmakuDuration,
-                              value.roundToDouble());
+                              SettingsKeys.danmakuDuration, duration);
+                          widget.onUpdateDanmakuSpeed();
                         },
                       ),
                       SettingsSliderTile(
@@ -243,7 +254,7 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                                   SettingsKeys.danmakuFollowSpeed);
                           GStorage.putSetting<bool>(
                               SettingsKeys.danmakuFollowSpeed, followSpeed);
-                          widget.onUpdateDanmakuSpeed?.call();
+                          widget.onUpdateDanmakuSpeed();
                           setState(() {});
                         },
                         title: Text('跟随视频倍速'),

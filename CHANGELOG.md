@@ -4,6 +4,16 @@
 
 ## 2026.9.9
 
+- 同步上游 2.2.9 ~ 2.3.1（批次 2 第三部分：弹幕搜索链路）
+  - 弹幕搜索 API v2（6c3c46c9）：自动匹配的 `/api/v2/search/anime` 请求追加 `v2=true` 参数提升匹配质量
+    - 相关文件: lib/request/apis/danmaku_api.dart
+  - 手动弹幕匹配改用搜索集数接口（c32db78c）：新增 `DanmakuApi.searchAnimes`（`/api/v2/search/episodes` + `v2=true`，结果不截断，解决柯南等大系列主条目被 25 条上限挤掉的问题）；`DanmakuSearchResponse` 模型精简并新增 `hasMore`（保留 `errorCode/success/errorMessage` 可空字段以兼容自动匹配路径，本分支自动匹配仍走 `/search/anime`）；手动切换弹幕结果列表显示条目截断提示与类型副标题
+    - 相关文件: lib/modules/danmaku/danmaku_search_response.dart, lib/request/apis/danmaku_api.dart, lib/request/config/api_endpoints.dart, lib/pages/player/danmaku_switch_dialog.dart
+  - 修复弹幕「持续时间」设置（bd66ce55）：设置面板滑块改为编辑存储的原始时长（不再读被倍速缩放后的运行值），保存后统一通过 `updateDanmakuSpeed` 重新应用倍速；`onUpdateDanmakuSpeed` 回调改为必传
+    - 相关文件: lib/pages/settings/danmaku/danmaku_settings_sheet.dart, lib/pages/player/player_item.dart
+
+## 2026.9.9
+
 - 同步上游 2.2.9 ~ 2.3.1（批次 2 第二部分：网络感知低内存模式）
   - 播放器低内存模式升级为三档策略（跟随网络/始终开启/始终关闭，新增 `LowMemoryMode` 枚举与 `lowMemoryPolicy` 设置，兼容旧 `lowMemoryMode` 布尔值）：新增低内存模式选择弹窗（设置页点击进入），播放器缓存策略按策略 + 计量网络 + 本地播放自动计算，设置或网络状态变化时自动应用；应用启动与回前台时刷新计量网络状态；移动数据自动开启时的提示文案更新
     - 相关文件: lib/services/player/low_memory_mode.dart（新增）, lib/pages/settings/low_memory_mode_settings.dart（新增）, lib/services/player/playback_cache_policy.dart, lib/services/network/metered_network_service.dart, lib/services/storage/settings_keys.dart, lib/services/storage/storage.dart, lib/pages/settings/player_settings.dart, lib/pages/player/controller/player_playback_controller.dart, lib/app_widget.dart, lib/main.dart

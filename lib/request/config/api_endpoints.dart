@@ -126,6 +126,9 @@ class ApiEndpoints {
   /// 检索弹弹番剧元数据
   static const String dandanAPISearch = "/api/v2/search/anime";
 
+  /// 检索弹弹番剧集数（v2，结果不截断）
+  static const String dandanAPISearchEpisodes = "/api/v2/search/episodes";
+
   /// 获取弹弹番剧元数据
   static const String dandanAPIInfo = "/api/v2/bangumi/";
 

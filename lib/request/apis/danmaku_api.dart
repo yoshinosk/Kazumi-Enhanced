@@ -142,12 +142,32 @@ class DanmakuApi {
     var endPoint = ApiEndpoints.dandanAPIDomain + path;
     Map<String, String> keywordMap = {
       'keyword': title,
+      'v2': 'true',
     };
 
     final jsonData = await _client.get(endPoint, queryParameters: keywordMap);
     DanmakuSearchResponse danmakuSearchResponse =
         DanmakuSearchResponse.fromJson(jsonData);
     return danmakuSearchResponse;
+  }
+
+  /// Manual search entry point.
+  ///
+  /// `/api/v2/search/anime` caps results at 25 with no paging parameter, which
+  /// drops the main series of large franchises (Detective Conan has 48 entries).
+  /// This endpoint is uncapped, but only under `v2`: the legacy engine collapses
+  /// a keyword to a single anime. Its inline episode lists are truncated, so
+  /// episodes still come from [getDanDanEpisodesByDanDanBangumiID].
+  static Future<DanmakuSearchResponse> searchAnimes(String title) async {
+    var path = ApiEndpoints.dandanAPISearchEpisodes;
+    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    Map<String, String> keywordMap = {
+      'anime': title,
+      'v2': 'true',
+    };
+
+    final jsonData = await _client.get(endPoint, queryParameters: keywordMap);
+    return DanmakuSearchResponse.fromJson(jsonData);
   }
 
   /// 按番剧 ID + 集数拉取弹幕，同时返回定位到的弹弹分集 ID。
