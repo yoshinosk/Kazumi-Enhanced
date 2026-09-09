@@ -57,10 +57,11 @@
 | 状态 | 上游提交 | 内容 | 完成日期 |
 |---|---|---|---|
 | ❌ | 2eefde98 | ~~deps: bump dio~~（已在 2.2.8 基线内） | - |
-| ❌ | 145feb99 | ~~deps: bump media kit~~（已在 2.2.8 基线内） | - |
-| ⬜ | 491482c1 / 794567ed | deps: bump canvas danmaku | |
+| ❌ | 145feb99 | ~~deps: bump media kit~~（本分支与上游 main 的 media-kit ref 一致 994465d，无需变更） | - |
+| ✅ | 491482c1 / 794567ed | deps: bump canvas danmaku（^0.3.1 → ^0.3.3） | 2026.9.9 |
+| ✅ | （补充） | deps: dio 约束提升至 ^5.11.0（与上游 main 对齐） | 2026.9.9 |
 | ❌ | b018c6ca | ~~chore: bump 默认插件~~（已在 2.2.8 基线内） | - |
-| ⬜ | 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2 | |
+| ⬜ | 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2（**需工具链决策**：本机为 3.44.9，fastlane/.flutter 子模块需同步更新，且 ghproxy 拉取 d3b14c8 失败，建议单独处理） | |
 | ❌ | 76fc6ecf | ~~chore: 从 appBuildName 派生应用版本号~~（已在 2.2.8 基线内） | - |
 
 ## 批次 4:M3E UI 重构浪潮(约 30 个提交,建议整体接收 2.3.x UI 后回移植本分支功能)

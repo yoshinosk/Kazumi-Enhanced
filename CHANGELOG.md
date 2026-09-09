@@ -4,6 +4,13 @@
 
 ## 2026.9.9
 
+- 同步上游 2.2.9 ~ 2.3.1（批次 3：依赖升级）
+  - canvas_danmaku ^0.3.1 → ^0.3.3（对齐上游 491482c1/794567ed）；dio 约束 ^5.0.0 → ^5.11.0（对齐上游 main）
+    - 相关文件: pubspec.yaml, pubspec.lock
+  - 说明: media-kit git ref 与上游 main 一致（994465d）无需变更；Flutter SDK 3.47.x 升级涉及本机工具链与 fastlane/.flutter 子模块更新，暂缓并记录于 UPSTREAM_SYNC.md
+
+## 2026.9.9
+
 - 同步上游 2.2.9 ~ 2.3.1（批次 2 第三部分：弹幕搜索链路）
   - 弹幕搜索 API v2（6c3c46c9）：自动匹配的 `/api/v2/search/anime` 请求追加 `v2=true` 参数提升匹配质量
     - 相关文件: lib/request/apis/danmaku_api.dart
