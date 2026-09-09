@@ -77,6 +77,30 @@ class DanmakuTimeOffsetStore {
     );
   }
 
+  /// 一次性迁移：清零遗留的全局弹幕轴偏移 [SettingsKeys.danmakuTimeOffset]。
+  ///
+  /// 更早版本的手动调整（快速菜单 / 详细调整面板 / 自动检测「应用推荐偏移」）
+  /// 全部直接写入全局设置，且当时会被已存在的番剧级作用域偏移遮蔽「看似无效」，
+  /// 用户反复点击后全局累积出从未生效的偏移（如 -82 秒）。偏移作用域化后，
+  /// 该遗留值作为 `effectiveOffset` 的兜底作用于所有未命中作用域的视频，
+  /// 表现为「所有视频弹幕提前 / 延后固定时长」。迁移统一清零；
+  /// 此后用户重新调整的全局偏移（弹幕未绑定番剧时写入）不再清除。
+  static Future<void> migrateLegacyGlobalOffset() async {
+    if (GStorage
+        .getSetting<bool>(SettingsKeys.danmakuTimeOffsetGlobalMigrated)) {
+      return;
+    }
+    final legacy = GStorage.getSetting<double>(SettingsKeys.danmakuTimeOffset);
+    if (legacy != 0) {
+      await GStorage.putSetting<double>(SettingsKeys.danmakuTimeOffset, 0.0);
+      KazumiLogger().i(
+          'DanmakuTimeOffsetStore: cleared legacy global offset ${legacy}s',
+          forceLog: true);
+    }
+    await GStorage.putSetting<bool>(
+        SettingsKeys.danmakuTimeOffsetGlobalMigrated, true);
+  }
+
   static Map<String, double> _readScoped() {
     final raw =
         GStorage.getSetting<String>(SettingsKeys.danmakuTimeOffsetByEpisode);

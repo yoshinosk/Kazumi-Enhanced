@@ -41,8 +41,11 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
-    // 清理历史番剧级弹幕轴偏移（旧版自动检测误写，会污染同番剧所有分集）。
+    // 清理历史弹幕轴偏移污染：番剧级作用域偏移（旧版自动检测误写）与
+    // 遗留全局偏移（旧版手动调整 / 应用推荐偏移误写，会让所有视频弹幕
+    // 提前 / 延后固定时长）。
     await DanmakuTimeOffsetStore.migrateLegacyBangumiScopes();
+    await DanmakuTimeOffsetStore.migrateLegacyGlobalOffset();
   } catch (e) {
     // Log the error for debugging (if logger is available)
     debugPrint('Storage initialization failed: $e');

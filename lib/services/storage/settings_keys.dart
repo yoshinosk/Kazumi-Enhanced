@@ -193,6 +193,17 @@ class SettingsKeys {
     false,
     group: SettingGroup.danmaku,
   );
+
+  /// 遗留全局弹幕轴偏移的一次性迁移标记：
+  /// 更早版本的手动调整与自动检测「应用推荐偏移」均直接写入全局设置，
+  /// 且会被当时的作用域偏移遮蔽「看似无效」，在全局累积出从未生效的值；
+  /// 偏移作用域化后该遗留值作为兜底污染所有未命中作用域的视频，
+  /// 迁移时统一清零（此后用户主动调整的全局偏移不再清除）。
+  static const danmakuTimeOffsetGlobalMigrated = SettingKey<bool>(
+    _SettingBoxKey.danmakuTimeOffsetGlobalMigrated,
+    false,
+    group: SettingGroup.danmaku,
+  );
   static const danmakuEnabledByDefault = SettingKey<bool>(
     _SettingBoxKey.danmakuEnabledByDefault,
     false,
@@ -623,6 +634,8 @@ class SettingsKeys {
     group: SettingGroup.magnet,
   );
 
+
+
   /// BitTorrent 对等节点监听端口，0 表示使用默认。
   static const magnetListenPort = SettingKey<int>(
     'magnetListenPort',
@@ -959,6 +972,7 @@ class SettingsKeys {
     danmakuTimeOffset,
     danmakuTimeOffsetByEpisode,
     danmakuTimeOffsetScopeMigrated,
+    danmakuTimeOffsetGlobalMigrated,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
@@ -1124,6 +1138,7 @@ class _SettingBoxKey {
       danmakuTimeOffset = 'danmakuTimeOffset',
       danmakuTimeOffsetByEpisode = 'danmakuTimeOffsetByEpisode',
       danmakuTimeOffsetScopeMigrated = 'danmakuTimeOffsetScopeMigrated',
+      danmakuTimeOffsetGlobalMigrated = 'danmakuTimeOffsetGlobalMigrated',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',
