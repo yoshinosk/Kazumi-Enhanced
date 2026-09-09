@@ -4,6 +4,25 @@
 
 ## 2026.9.9
 
+- 同步上游 2.2.9 ~ 2.3.1（批次 1：低冲突功能，共 7 项）
+  - 插件支持批量规则导入：新增 `PluginImportParser`，支持一次粘贴多条 `kazumi://` 规则链接（含跨行换行、大写协议头、尾随文本容错）或 JSON 数组，去重并逐条报告失败原因；规则名比较统一为大小写不敏感的 `pluginNameKey`
+    - 相关文件: lib/services/plugin/plugin_import_parser.dart（新增）, lib/plugins/plugins.dart, lib/plugins/plugins_controller.dart, lib/utils/encoding.dart, lib/pages/plugin_editor/plugin_view_page.dart, test/plugin_import_parser_test.dart（新增）, test/plugin_api_config_test.dart
+  - 修复批量规则更新提示一闪而过：改用持久提示展示批量规则更新状态
+    - 相关文件: lib/pages/plugin_editor/plugin_update_actions.dart
+  - 下载选集面板自动滚动到正在播放的集
+    - 相关文件: lib/pages/download/download_episode_sheet.dart
+  - 禁用相关番剧卡片的 Hero 动画，避免转场闪烁
+    - 相关文件: lib/pages/info/info_tabview.dart
+  - 重构 Android 画中画（PiP）入口：新增 `onModeChanged` 模式回调、`sourceRectHint` 展开动画源区域、宽高比钳制（1:2.39 ~ 2.39:1）防止 `enterPictureInPictureMode` 抛异常、PiP/播放页期间窗口背景强制黑色避免过渡闪白、退出 PiP 后正确恢复系统栏状态、参数更新加异常保护、`seamlessResizeEnabled` 改为 true
+    - 相关文件: android/app/src/main/kotlin/com/example/kazumi/MainActivity.kt, lib/services/player/pip_utils.dart, lib/pages/player/player_item.dart, lib/pages/player/player_item_panel.dart, lib/pages/player/smallest_player_item_panel.dart, lib/pages/video/video_page.dart
+  - 修复 Android 媒体会话销毁后复现：音频会话生命周期管理与播放器 teardown 解耦
+    - 相关文件: android/app/src/main/kotlin/com/example/kazumi/MainActivity.kt, lib/services/player/audio_controller.dart, lib/pages/player/player_item.dart
+  - Android 应用切后台时挂起 demuxer 预取，降低后台内存与带宽
+    - 相关文件: lib/pages/player/controller/player_playback_controller.dart, lib/pages/player/player_item.dart
+- 新增上游同步进度文档 UPSTREAM_SYNC.md
+
+## 2026.9.9
+
 * 修复所有视频弹幕都提前 1:22 的问题：遗留全局弹幕轴偏移（-82 秒）未被清理。旧版（偏移作用域化之前）的手动调整（快速菜单 / 详细调整面板）与自动检测「应用推荐偏移」全部直接写入全局设置 `danmakuTimeOffset`，且当时会被已存在的番剧级作用域偏移遮蔽「看似无效」，用户反复点击「提前」后在全局累积出从未生效的 -82 秒；偏移作用域化后该遗留值作为 `effectiveOffset` 的兜底作用于所有未命中作用域的视频，表现为「播放任何视频弹幕都提前 1:22」。新增一次性迁移清零遗留全局偏移（新标记 `danmakuTimeOffsetGlobalMigrated` 门控，只执行一次，此后用户主动设置的全局偏移保留），分集 / 番剧作用域偏移不受影响；新增迁移测试用例
 
   * 相关文件: lib/utils/danmaku_time_offset_store.dart, lib/services/storage/settings_keys.dart, lib/main.dart, test/danmaku_time_offset_store_test.dart
