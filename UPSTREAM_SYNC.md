@@ -1,9 +1,29 @@
 # 上游功能同步进度
 
-- 基线:上游 `2.2.8`(640dfdcb)
-- 目标:同步上游 `2.2.9` / `2.3.0` / `2.3.1` / `main` 的全部功能(共 72 个提交)
-- 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
+- 基线:上游 `2.2.7`(内容层面;另手动摘取了 2.2.8 的部分修复,如 Windows HLS demux)
+- 目标:同步上游 `2.2.9` / `2.3.0` / `2.3.1` / `main` 的全部功能
+- 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因) / 🔒 已整合但保留在 WIP 分支
 - 每完成一项,在对应条目标记 ✅ 并注明日期
+
+> **当前状态(2026.9.10)**:批次 1~3 已全部完成并在 `dev` 分支提交(全部通过 analyze / test / Windows 构建)。
+> 批次 4(M3E UI 整体接收)按「整体接收 2.3.1 UI + 回移植本分支功能」策略开工后**中途暂停**:
+> 未完成的工作树快照已保存到 `sync-upstream-batch4-wip` 分支(commit 2326d28,**不可编译**),
+> `dev` 分支保持在批次 3 完成后的绿色状态。继续时请检出该分支接着做。
+>
+> 批次 4 前置条件:Flutter 3.47.2 SDK(上游 pubspec environment 要求)。
+> 本机为 3.44.9;GitHub clone 与 ghproxy 均失败,官方 zip(storage.googleapis.com)直连可下载但速度极慢
+> (1.93GB,已中止;可用 `curl.exe -L -C - -o flutter_windows_3.47.2-stable.zip https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.47.2-stable.zip` 断点续传)。
+
+## 批次 4 进度快照(已保存到 `sync-upstream-batch4-wip` 分支)
+
+| 状态 | 内容 | 说明 |
+|---|---|---|
+| ✅(WIP) | 基础组件/弹窗/设置列表/卡片统一(ba52a11c 等) | 已拷贝上游版本:bean/widget、bean/dialog、bean/settings、bean/card、analysis_options、licenses/m3e_core.txt、pubspec(material_new_shapes + flutter 3.47.2) |
+| ✅(WIP) | 61 个 fork 未改动的页面/服务直接采用上游版本 | about/onboarding/download 页/logs/proxy/theme/webdav 服务/my 页/search_controller 等 |
+| ✅(WIP) | player_item 三方合并(保留 fork 侧)、details_sheet/video_page 采用上游 | video_page:新增弹幕第三标签(EpisodeDanmakuSheet)、选集面板 episodeTrailingBuilder 承载本地媒体角标 |
+| ✅(WIP) | collect 库视图+本地/缓存角标、timeline 重设计+仅日本动画筛选、搜索页+本地匹配横幅、info 页+磁力入口/本地剧集区、settings 新路由+磁力设置入口 | fork 功能已回植到新 UI |
+| ✅(WIP) | collect_controller 增加 onError 接口(兼容上游新同步对话框)、auto_updater 采用上游并保留 explorer /select 修复、bangumi_api 采用上游并保留镜像回退与单条目进度接口 | |
+| 🔒 | 遗留待办 | player_settings/danmaku 三表单与上游 M3E 版本未合并(暂用 fork 版本);timeline_controller.g.dart 手工合并后建议跑 build_runner 校验;search 页角标统计逐卡计算(性能待优化);导航入口最终合并需在新 SDK 下编译调试 |
 
 ## 批次 1:低冲突功能
 
