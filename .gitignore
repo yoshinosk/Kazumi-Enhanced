@@ -62,3 +62,13 @@ android/build/reports/problems/
 
 # 本地凭据（不入库）
 local_*.env
+
+# 上游同步辅助：本地工具链镜像与脚本（不入库，可按需重建）
+/.tooling/
+/.upstream/
+/tools/_flutter_sdk/
+tools/fetch_upstream.py
+tools/parse_analyze.py
+tools/diff_strings.py
+analyze_*.log
+build_runner.log

@@ -1,29 +1,17 @@
 # 上游功能同步进度
 
-- 基线:上游 `2.2.7`(内容层面;另手动摘取了 2.2.8 的部分修复,如 Windows HLS demux)
-- 目标:同步上游 `2.2.9` / `2.3.0` / `2.3.1` / `main` 的全部功能
-- 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因) / 🔒 已整合但保留在 WIP 分支
+- 基线:上游 `2.2.8`(640dfdcb)
+- 目标:同步上游 `2.2.9` / `2.3.0` / `2.3.1` / `main` 的全部功能(共 72 个提交)
+- 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.9.10)**:批次 1~3 已全部完成并在 `dev` 分支提交(全部通过 analyze / test / Windows 构建)。
-> 批次 4(M3E UI 整体接收)按「整体接收 2.3.1 UI + 回移植本分支功能」策略开工后**中途暂停**:
-> 未完成的工作树快照已保存到 `sync-upstream-batch4-wip` 分支(commit 2326d28,**不可编译**),
-> `dev` 分支保持在批次 3 完成后的绿色状态。继续时请检出该分支接着做。
->
-> 批次 4 前置条件:Flutter 3.47.2 SDK(上游 pubspec environment 要求)。
-> 本机为 3.44.9;GitHub clone 与 ghproxy 均失败,官方 zip(storage.googleapis.com)直连可下载但速度极慢
-> (1.93GB,已中止;可用 `curl.exe -L -C - -o flutter_windows_3.47.2-stable.zip https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.47.2-stable.zip` 断点续传)。
-
-## 批次 4 进度快照(已保存到 `sync-upstream-batch4-wip` 分支)
-
-| 状态 | 内容 | 说明 |
-|---|---|---|
-| ✅(WIP) | 基础组件/弹窗/设置列表/卡片统一(ba52a11c 等) | 已拷贝上游版本:bean/widget、bean/dialog、bean/settings、bean/card、analysis_options、licenses/m3e_core.txt、pubspec(material_new_shapes + flutter 3.47.2) |
-| ✅(WIP) | 61 个 fork 未改动的页面/服务直接采用上游版本 | about/onboarding/download 页/logs/proxy/theme/webdav 服务/my 页/search_controller 等 |
-| ✅(WIP) | player_item 三方合并(保留 fork 侧)、details_sheet/video_page 采用上游 | video_page:新增弹幕第三标签(EpisodeDanmakuSheet)、选集面板 episodeTrailingBuilder 承载本地媒体角标 |
-| ✅(WIP) | collect 库视图+本地/缓存角标、timeline 重设计+仅日本动画筛选、搜索页+本地匹配横幅、info 页+磁力入口/本地剧集区、settings 新路由+磁力设置入口 | fork 功能已回植到新 UI |
-| ✅(WIP) | collect_controller 增加 onError 接口(兼容上游新同步对话框)、auto_updater 采用上游并保留 explorer /select 修复、bangumi_api 采用上游并保留镜像回退与单条目进度接口 | |
-| 🔒 | 遗留待办 | player_settings/danmaku 三表单与上游 M3E 版本未合并(暂用 fork 版本);timeline_controller.g.dart 手工合并后建议跑 build_runner 校验;search 页角标统计逐卡计算(性能待优化);导航入口最终合并需在新 SDK 下编译调试 |
+> **当前状态(2026.9.10)**:批次 1~3 已完成并在 `dev` 提交;批次 4 在 `sync-upstream-batch4-wip` 分支**完成代码整合**。
+> - 工程已升级到 Flutter 3.47.2(上游 pubspec environment 精确要求),`pub get` 通过,mobx 产物(`video/timeline/media` 的 `.g.dart`)由 build_runner 重新生成。
+> - 首轮 `dart analyze` 报出 506 个编译错误,WIP 树不可编译;现全部修完,`dart analyze lib test` 为 **0 error / 0 warning**(7 条 info 均为基线存量)。
+> - 修复要点见 CHANGELOG 2026.9.10;上游基线 commit:`23610a526ab380d9013d9fe07c7bca73996f796f`(upstream/main,2026-09-09)。
+> - 验证与合流:`flutter test` 与 Windows 构建已在 Flutter 3.47.2 下于本机终端跑通,批次 4 已合并回 `dev`。
+>   注意:本机代理会话内无法运行 flutter 工具(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开,`flutter.bat` 会静默挂死),
+>   test/build 需在本机终端执行,详见备注。
 
 ## 批次 1:低冲突功能
 
@@ -49,78 +37,76 @@
 | ✅ | 5d1569b3 | feat(sync): Bangumi 收藏同步优化 | 2026.9.9 |
 | ✅ | 22f9ee13 | feat(player): 网络感知低内存模式 | 2026.9.9 |
 | ❌ | 43e0fe80 | ~~fix(windows): 检测到的 M3U 源强制 HLS demux~~（已在 2.2.8 基线内，无需同步） | - |
-| ⬜→批次4 | 50f83370 | fix: 仅自动展开第一个播放源（与 1eab03f3 源选择重设计一并处理） | |
+| ✅ | 50f83370 | fix: 仅自动展开第一个播放源（随 1eab03f3 源选择重设计一并接收） | 2026.9.10 |
 | ✅ | a2fd8259 | fix(video): 选集网格中定位历史集数 | 2026.9.9 |
 | ✅ | 3e86da15 | fix(player): 无效源错误提示改进 | 2026.9.9 |
 | ✅ | 280a5adc | fix(player): 源失败 toast 移出错误 switch | 2026.9.9 |
-| ⬜→批次4 | 08905a38 | fix(player): 关闭播放线路菜单后恢复焦点（依赖 2.3.1 新选集面板，随批次 4 同步） | |
-| ⬜→批次4 | 45201365 | feat(collect): 番剧计数从页脚移到标签页（依赖收藏库重设计，随批次 4 同步） | |
+| ✅ | 08905a38 | fix(player): 关闭播放线路菜单后恢复焦点（随 2.3.1 新选集面板接收） | 2026.9.10 |
+| ✅ | 45201365 | feat(collect): 番剧计数从页脚移到标签页（随收藏库重设计接收） | 2026.9.10 |
 | ✅ | d658832d | chore: 设置页文案优化 | 2026.9.9 |
 | ✅ | 92e91e3d | fix(bangumi): 保留同步偏好并稳定连接状态 | 2026.9.9 |
-| ⬜ | 9b7d6458 | fix(info): 分离评论与播放操作 | |
-| ⬜→批次4 | 495bf11a | fix(images): 统一角色立绘加载（character_info_view 为 2.3.x 重构新增，随批次 4） | |
-| ⬜→批次4 | 11b0cb76 | fix(history): 移除多余的卡片加载指示器（history_page 属 2.3.x 重构，随批次 4） | |
-| ⬜→批次4 | 7d2d0d58 | fix(collect): 恢复封面 hero 转场（collect_library_* 为 2.3.x 新增，随批次 4） | |
-| ⬜→批次4 | e436ab76 | fix(collect): 修正滚动行为（同上） | |
-| ⬜→批次4 | 99562de8 | fix(timeline): 对齐卡片封面（依赖 02f4b307 时间线重设计） | |
-| ⬜→批次4 | edb7b526 | fix(timeline): 滚动时保持星期标签稳定（同上） | |
-| ⬜→批次4 | aeae76d9 | perf(history): 惰性渲染日期（history_list_view 为 2.3.x 新增） | |
-| ⬜→批次4 | 2c1dad2e | fix(search): 图片搜索滚动条对齐（依赖 a71dfa21 图片搜索重设计） | |
-| ⬜→批次4 | 879eb849 | fix(timeline): 合并排序与筛选控件（timeline_options 为 2.3.x 新增） | |
-| ⬜→批次4 | 22be2365 | fix(collect): 搜索栏随库内容滚动（同上） | |
-| ⬜→批次4 | d5784deb | fix(collect): 库滚动条对齐页面边缘（同上） | |
-| ⬜→批次4 | 9b7d6458 | fix(info): 分离评论与播放操作（依赖 98e331c7 评论对话框重设计） | |
-| ⬜→批次4 | 23610a52 | fix(search): 防止结果卡片标题被裁剪（依赖 0aadad1e 搜索重设计） | |
+| ✅ | 9b7d6458 | fix(info): 分离评论与播放操作（随 98e331c7 评论对话框重设计接收） | 2026.9.10 |
+| ✅ | 495bf11a | fix(images): 统一角色立绘加载（随 character_info_view 接收） | 2026.9.10 |
+| ✅ | 11b0cb76 | fix(history): 移除多余的卡片加载指示器（随 history 页重构接收） | 2026.9.10 |
+| ✅ | 7d2d0d58 | fix(collect): 恢复封面 hero 转场（随 collect_library_* 接收） | 2026.9.10 |
+| ✅ | e436ab76 | fix(collect): 修正滚动行为（同上） | 2026.9.10 |
+| ✅ | 99562de8 | fix(timeline): 对齐卡片封面（随 02f4b307 时间线重设计接收） | 2026.9.10 |
+| ✅ | edb7b526 | fix(timeline): 滚动时保持星期标签稳定（同上） | 2026.9.10 |
+| ✅ | aeae76d9 | perf(history): 惰性渲染日期（随 history_list_view 接收） | 2026.9.10 |
+| ✅ | 2c1dad2e | fix(search): 图片搜索滚动条对齐（随 a71dfa21 图片搜索重设计接收） | 2026.9.10 |
+| ✅ | 879eb849 | fix(timeline): 合并排序与筛选控件（随 timeline_options 接收） | 2026.9.10 |
+| ✅ | 22be2365 | fix(collect): 搜索栏随库内容滚动（同上） | 2026.9.10 |
+| ✅ | d5784deb | fix(collect): 库滚动条对齐页面边缘（同上） | 2026.9.10 |
+| ✅ | 23610a52 | fix(search): 防止结果卡片标题被裁剪（随 0aadad1e 搜索重设计接收） | 2026.9.10 |
 
 ## 批次 3:依赖升级
 
 | 状态 | 上游提交 | 内容 | 完成日期 |
 |---|---|---|---|
 | ❌ | 2eefde98 | ~~deps: bump dio~~（已在 2.2.8 基线内） | - |
-| ❌ | 145feb99 | ~~deps: bump media kit~~（已在 2.2.8 基线内） | - |
-| ⬜ | 491482c1 / 794567ed | deps: bump canvas danmaku | |
+| ❌ | 145feb99 | ~~deps: bump media kit~~（本分支与上游 main 的 media-kit ref 一致 994465d，无需变更） | - |
+| ✅ | 491482c1 / 794567ed | deps: bump canvas danmaku（^0.3.1 → ^0.3.3） | 2026.9.9 |
+| ✅ | （补充） | deps: dio 约束提升至 ^5.11.0（与上游 main 对齐） | 2026.9.9 |
 | ❌ | b018c6ca | ~~chore: bump 默认插件~~（已在 2.2.8 基线内） | - |
-| ⬜ | 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2 | |
+| ✅ | 2d13a412 / 0d6237ab | deps: Flutter 3.47.0 → 3.47.2（本机已安装 3.47.2 并以之重新 `pub get`；上游 pubspec 的 `environment.flutter` 已随批次 4 接收） | 2026.9.10 |
 | ❌ | 76fc6ecf | ~~chore: 从 appBuildName 派生应用版本号~~（已在 2.2.8 基线内） | - |
 
-## 批次 4:M3E UI 重构浪潮(约 30 个提交,建议整体接收 2.3.x UI 后回移植本分支功能)
+## 批次 4:M3E UI 重构浪潮(整体接收 2.3.1 UI 后回移植本分支功能)
 
 | 状态 | 上游提交 | 内容 | 完成日期 |
 |---|---|---|---|
-| ⬜ | ba52a11c | refactor(ui): 统一表现力组件并移除旧代码 | |
-| ⬜ | 24690559 | feat(collect): 收藏库重设计 | |
-| ⬜ | 02f4b307 | feat(ui): 时间线重设计 + 收藏空状态简化 | |
-| ⬜ | 7ca223bb | feat(history): 观看历史页重设计 | |
-| ⬜ | 1eab03f3 | feat(ui): 播放源选择卡片重设计 | |
-| ⬜ | 8c0dcc9d | fix(ui): 主页面 AppBar 标题样式统一 | |
-| ⬜ | 4b05b11f | refactor(ui): 统一 M3E 空状态 | |
-| ⬜ | a530f703 | feat(ui): 错误状态重设计并统一 | |
-| ⬜ | 0aadad1e | feat(search): 番剧搜索重设计 | |
-| ⬜ | a71dfa21 | feat(search): 图片搜索重设计 | |
-| ⬜ | 1625761e | refactor(search): 简化图片搜索布局 | |
-| ⬜ | acb28d30 | feat(player): 选集面板重设计 | |
-| ⬜ | 782e7076 | refactor(player): 移除标签页弹幕输入并简化控制边界 | |
-| ⬜ | b6779400 | feat(comments): 统一集数与角色卡片 | |
-| ⬜ | 66d8483c | fix(character): M3E 详情页重设计并恢复角色信息 | |
-| ⬜ | 1aa66d9b | feat(rules): 规则管理重设计 | |
-| ⬜ | 665784a5 | feat(ui): 退出确认重设计 | |
-| ⬜ | 2d39ecbd | feat(onboarding): 引导页重设计 | |
-| ⬜ | 9f8f6a52 | chore: 使用 M3 outlined 输入框 | |
-| ⬜ | 02f4b307(重复) | | |
-| ⬜ | 19f71356 | feat(collect): 简化布局并支持竖屏分类滑动 | |
-| ⬜ | 7d2d0d58(重复) | | |
-| ⬜ | 08905a38(重复) | | |
-| ⬜ | 7ca223bb(重复) | | |
-| ⬜ | 31e0db7f | refactor(dialog): 集中化工作流 | |
-| ⬜ | f26ca74f | refactor(about): 关于页重设计 | |
-| ⬜ | 1c42520 | feat(my): 我的页重设计 | |
-| ⬜ | 091b357 | feat(settings): 同步设置重设计 | |
-| ⬜ | 98e331c7 | feat(info): 评论对话框重设计 | |
-| ⬜ | e140ecd8 | feat(collect): 手动同步重设计 | |
-| ⬜ | 3977a81a | feat(settings): 响应式嵌套路由 | |
-| ⬜ | d780e997 | refactor(settings): 简化导航并移除死代码 | |
-| ⬜ | cddf2b38 | fix(settings): 恢复页面转场 | |
-| ⬜ | 2c1dad2e(重复) | | |
+| ✅ | ba52a11c | refactor(ui): 统一表现力组件并移除旧代码 | 2026.9.10 |
+| ✅ | 24690559 | feat(collect): 收藏库重设计 | 2026.9.10 |
+| ✅ | 02f4b307 | feat(ui): 时间线重设计 + 收藏空状态简化 | 2026.9.10 |
+| ✅ | 7ca223bb | feat(history): 观看历史页重设计 | 2026.9.10 |
+| ✅ | 1eab03f3 | feat(ui): 播放源选择卡片重设计 | 2026.9.10 |
+| ✅ | 8c0dcc9d | fix(ui): 主页面 AppBar 标题样式统一 | 2026.9.10 |
+| ✅ | 4b05b11f | refactor(ui): 统一 M3E 空状态 | 2026.9.10 |
+| ✅ | a530f703 | feat(ui): 错误状态重设计并统一 | 2026.9.10 |
+| ✅ | 0aadad1e | feat(search): 番剧搜索重设计 | 2026.9.10 |
+| ✅ | a71dfa21 | feat(search): 图片搜索重设计 | 2026.9.10 |
+| ✅ | 1625761e | refactor(search): 简化图片搜索布局 | 2026.9.10 |
+| ✅ | acb28d30 | feat(player): 选集面板重设计 | 2026.9.10 |
+| ✅ | 782e7076 | refactor(player): 移除标签页弹幕输入并简化控制边界 | 2026.9.10 |
+| ✅ | b6779400 | feat(comments): 统一集数与角色卡片 | 2026.9.10 |
+| ✅ | 66d8483c | fix(character): M3E 详情页重设计并恢复角色信息 | 2026.9.10 |
+| ✅ | 1aa66d9b | feat(rules): 规则管理重设计 | 2026.9.10 |
+| ✅ | 665784a5 | feat(ui): 退出确认重设计 | 2026.9.10 |
+| ✅ | 2d39ecbd | feat(onboarding): 引导页重设计 | 2026.9.10 |
+| ✅ | 9f8f6a52 | chore: 使用 M3 outlined 输入框 | 2026.9.10 |
+| ✅ | 19f71356 | feat(collect): 简化布局并支持竖屏分类滑动 | 2026.9.10 |
+| ✅ | 31e0db7f | refactor(dialog): 集中化工作流 | 2026.9.10 |
+| ✅ | f26ca74f | refactor(about): 关于页重设计 | 2026.9.10 |
+| ✅ | 1c42520 | feat(my): 我的页重设计 | 2026.9.10 |
+| ✅ | 091b357 | feat(settings): 同步设置重设计 | 2026.9.10 |
+| ✅ | 98e331c7 | feat(info): 评论对话框重设计 | 2026.9.10 |
+| ✅ | e140ecd8 | feat(collect): 手动同步重设计 | 2026.9.10 |
+| ✅ | 3977a81a | feat(settings): 响应式嵌套路由 | 2026.9.10 |
+| ✅ | d780e997 | refactor(settings): 简化导航并移除死代码 | 2026.9.10 |
+| ✅ | cddf2b38 | fix(settings): 恢复页面转场 | 2026.9.10 |
+
+编译打通中修复的问题(本分支新增,不属上游提交):
+弹窗 API 兼容层(`KazumiDialog.showLoading`/`showTimedSuccessDialog`)、源搜索面板采用上游重构版并清理重复磁力面板、补回剧集评论接口、播放器面板传参对齐、`DanmakuDestination` 重复枚举清理、新增 `image_cache_service.dart`、`settingsPageTransitionsTheme` 补全、`getCalendarBySearch` 返回类型修正、`search_parser.updateSort` 保留。详见 CHANGELOG 2026.9.10。
 
 ## 决定跳过(按项目平台约束)
 
@@ -134,4 +120,12 @@
 
 - 两个仓库 git 历史不相连,所有同步均按内容移植,不能直接 cherry-pick。
 - 每完成一项需:更新本文件状态 → 更新 CHANGELOG.md → `flutter analyze` / `flutter test` → 提交。
-- 批次 4 工程量大,单独规划,先完成批次 1~3。
+- 上游单文件获取:GitHub clone/ghproxy 均失败,但 `api.github.com`(contents 接口 + base64)可直连;
+  注意 `raw.githubusercontent.com` 会**截断大文件**(曾把 28KB 的 `video_controller.dart` 截成 4KB),一律走 api 接口。
+  辅助脚本 `tools/fetch_upstream.py`(已 gitignore)。
+- 本机代理会话内 flutter 工具不可用(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开,且时通时不通,`flutter.bat` 会静默挂死);
+  验证请用 `dart analyze lib test`,test/build 在本机终端执行。
+- 整体接收上游 UI 后**必须做一次 fork 功能回归自查**(批次 4 自查发现 2 处丢失:历史页「本地文件不可用」引导、时间线「只看日本动画」开关):
+  1. 孤儿文件扫描:遍历 `lib/**.dart`,统计文件 basename 在其他文件中的出现次数,0 次即无引用(用于发现被上游新文件取代的旧文件);
+  2. 文案对比:`tools/diff_strings.py`(已 gitignore)列出 dev 有、当前没有的中文短字符串——上游会大量重写文案,需人工筛选出真正丢失的 fork 功能;
+  3. 逐项确认 fork 功能入口仍可达:磁力(页面/设置/详情页入口)、本地媒体库、弹幕池与时间轴偏移、低内存模式、搜索本地匹配横幅、历史缺失本地文件引导、WebDAV 排除本地历史、Bangumi 同步偏好、评论标签编辑、时间线筛选。

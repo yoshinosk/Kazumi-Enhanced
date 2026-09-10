@@ -52,8 +52,6 @@ class PlayerItem extends StatefulWidget {
     required this.changeEpisode,
     required this.onBackPressed,
     required this.keyboardFocus,
-    required this.sendDanmaku,
-    required this.showDanmakuDestinationPickerAndSend,
     required this.pauseForTimedShutdown,
     this.disableAnimations = false,
   });
@@ -66,10 +64,8 @@ class PlayerItem extends StatefulWidget {
   final Future<void> Function(int episode, {int currentRoad, int offset})
       changeEpisode;
   final void Function(BuildContext) onBackPressed;
-  final bool Function(String) sendDanmaku;
   final FocusNode keyboardFocus;
   final bool disableAnimations;
-  final Future<bool> Function(String) showDanmakuDestinationPickerAndSend;
   final VoidCallback pauseForTimedShutdown;
 
   @override
@@ -77,7 +73,11 @@ class PlayerItem extends StatefulWidget {
 }
 
 class _PlayerItemState extends State<PlayerItem>
-    with WindowListener, WidgetsBindingObserver, TickerProviderStateMixin {
+    with
+        WindowListener,
+        WidgetsBindingObserver,
+        TickerProviderStateMixin,
+        KazumiDialogOwner {
   late final PlayerController playerController;
   late final VideoPageController videoPageController =
       widget.videoPageController;
@@ -111,12 +111,11 @@ class _PlayerItemState extends State<PlayerItem>
   late bool _danmakuUseSystemFont;
   late double _danmakuBorderSize;
 
-  late bool haEnable;
   late bool autoPlayNext;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
 
-  /// Idle timeout before the player panel auto-hides, in milliseconds.
+  // Auto-hide delay in milliseconds.
   late int playerControllerLayerDisappearTime;
 
   Timer? hideTimer;
@@ -438,8 +437,6 @@ class _PlayerItemState extends State<PlayerItem>
       episode: targetEpisode,
       road: currentRoad,
     );
-    // Resolution failures surface through the controller's failed state;
-    // the toast here is progress feedback only.
     final targetRef = videoPageController.resolveEpisode(targetSelection);
     if (targetRef != null) {
       KazumiDialog.showToast(message: '正在加载${targetRef.displayTitle}');
@@ -511,7 +508,7 @@ class _PlayerItemState extends State<PlayerItem>
     if (playerController.panel.showVideoController) {
       hideVideoController();
     } else {
-      displayVideoController();
+      showVideoController();
     }
   }
 
@@ -819,7 +816,7 @@ class _PlayerItemState extends State<PlayerItem>
             actions: [
               TextButton(
                 onPressed: () {
-                  KazumiDialog.dismiss();
+                  KazumiDialog.dismiss(context: context);
                 },
                 child: const Text('确定'),
               ),
@@ -878,7 +875,8 @@ class _PlayerItemState extends State<PlayerItem>
                       true,
                     );
                   }
-                  KazumiDialog.dismiss();
+                  if (!context.mounted) return;
+                  KazumiDialog.dismiss(context: context);
                 },
                 child: const Text('取消'),
               ),
@@ -891,7 +889,8 @@ class _PlayerItemState extends State<PlayerItem>
                       true,
                     );
                   }
-                  KazumiDialog.dismiss();
+                  if (!context.mounted) return;
+                  KazumiDialog.dismiss(context: context);
                 },
                 child: const Text('确认'),
               ),
@@ -900,7 +899,7 @@ class _PlayerItemState extends State<PlayerItem>
         });
       });
 
-      if (confirmed) {
+      if (confirmed && mounted) {
         playerController.setShader(mode);
       }
     } else {
@@ -933,10 +932,6 @@ class _PlayerItemState extends State<PlayerItem>
     }
   }
 
-  void displayVideoController() {
-    showVideoController();
-  }
-
   void hideVideoController() {
     if (!_canHidePlayerPanel) {
       return;
@@ -946,7 +941,6 @@ class _PlayerItemState extends State<PlayerItem>
     playerController.panel.showVideoController = false;
   }
 
-  // All temporary panel blockers flow through this single lease registry.
   PlayerPanelHold acquirePlayerPanelHold() {
     late final PlayerPanelHold hold;
     hold = PlayerPanelHold(
@@ -974,8 +968,7 @@ class _PlayerItemState extends State<PlayerItem>
     }
   }
 
-  // Fullscreen and system overlay changes can tear down panel interactions, so
-  // the parent owns an emergency release path for every outstanding hold.
+  // Fullscreen and system overlays can dispose controls before their holds are released.
   void _releasePlayerPanelHolds() {
     for (final hold in _playerPanelHolds.toList()) {
       hold.releaseSilently();
@@ -1215,8 +1208,7 @@ class _PlayerItemState extends State<PlayerItem>
           videoPageController.roadList[playingSelection.road];
       if (playerController.playback.completed && !videoPageController.loading) {
         if (playerController.playback.resumedNearEnd) {
-          // Completion of a stale near-end resume is not a real watch;
-          // replay from the beginning instead of advancing.
+          // Replay stale near-end resumes instead of advancing to the next episode.
           unawaited(playerController.playback.restartFromBeginning());
         } else {
           if (playingSelection.episode < playingRoadData.data.length &&
@@ -1349,32 +1341,17 @@ class _PlayerItemState extends State<PlayerItem>
     );
   }
 
-  /// Used to decide which panel is used.
-  /// It's too complicated to write these in conditional sentence.
-  /// * true: use [PlayerItemPanel]
-  /// * false: use [SmallestPlayerItemPanel]
-  bool needFullPanel(BuildContext context) {
-    // windows too small, workaround for ohos floating window
-    if (MediaQuery.sizeOf(context).width < LayoutBreakpoint.compact['width']!) {
+  bool _needsFullPanel(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    if (size.width < LayoutBreakpoint.compact['width']!) {
       return false;
     }
-    // in desktop pip mode
     if (videoPageController.isPip) {
       return false;
     }
-    // does not meet Google's phone landscape height and tablet landscape width requirements.
     if (!isDesktop() &&
-        (MediaQuery.sizeOf(context).height >
-                LayoutBreakpoint.compact['height']! &&
-            MediaQuery.sizeOf(context).width <
-                LayoutBreakpoint.medium['width']!)) {
-      return false;
-    }
-    if (isDesktop() &&
-        (MediaQuery.sizeOf(context).height >
-                LayoutBreakpoint.compact['height']! &&
-            MediaQuery.sizeOf(context).width <
-                LayoutBreakpoint.compact['width']!)) {
+        size.height > LayoutBreakpoint.compact['height']! &&
+        size.width < LayoutBreakpoint.medium['width']!) {
       return false;
     }
     return true;
@@ -1472,7 +1449,6 @@ class _PlayerItemState extends State<PlayerItem>
     _danmakuFontWeight = GStorage.getSetting(SettingsKeys.danmakuFontWeight);
     _danmakuUseSystemFont = GStorage.getSetting(SettingsKeys.useSystemFont);
     _danmakuBorderSize = GStorage.getSetting(SettingsKeys.danmakuBorderSize);
-    haEnable = GStorage.getSetting(SettingsKeys.hAenable);
     autoPlayNext = GStorage.getSetting(SettingsKeys.autoPlayNext);
     backgroundPlayback = GStorage.getSetting(SettingsKeys.backgroundPlayback);
     brightnessVolumeGesture =
@@ -1484,13 +1460,12 @@ class _PlayerItemState extends State<PlayerItem>
     unawaited(_bindAudioService());
     playerTimer = getPlayerTimer();
     windowManager.addListener(this);
-    displayVideoController();
+    showVideoController();
   }
 
   @override
   void dispose() {
-    // Playback lifetime is owned by the route-scoped PlayerController.
-    // This widget only detaches UI listeners and timers.
+    // The route-scoped PlayerController owns playback disposal.
     _fullscreenListener();
     _playerSizeListener();
     WidgetsBinding.instance.removeObserver(this);
@@ -1524,13 +1499,12 @@ class _PlayerItemState extends State<PlayerItem>
                   ? SystemMouseCursors.none
                   : SystemMouseCursors.basic,
               onHover: (PointerEvent pointerEvent) {
-                // workaround for android.
-                // I don't know why, but android tap event will trigger onHover event.
+                // Android taps can emit hover events.
                 if (isDesktop()) {
                   if (pointerEvent.position.dy > 50 &&
                       pointerEvent.position.dy <
                           MediaQuery.of(context).size.height - 70) {
-                    displayVideoController();
+                    showVideoController();
                   } else {
                     if (!playerController.panel.showVideoController) {
                       _panelVisibilityController.forward();
@@ -1671,14 +1645,13 @@ class _PlayerItemState extends State<PlayerItem>
                     (Platform.isAndroid &&
                             (videoPageController.isPip || _pipEnterRequested))
                         ? const SizedBox.shrink()
-                        : (needFullPanel(context))
+                        : (_needsFullPanel(context))
                             ? PlayerItemPanel(
                                 playerController: playerController,
                                 videoPageController: videoPageController,
                                 onBackPressed: widget.onBackPressed,
                                 setPlaybackSpeed: setPlaybackSpeed,
                                 showDanmakuSwitch: showDanmakuSwitch,
-                                changeEpisode: widget.changeEpisode,
                                 toggleMenu: widget.toggleMenu,
                                 handleFullscreen: handleFullscreen,
                                 enterAndroidPictureInPicture:
@@ -1692,15 +1665,12 @@ class _PlayerItemState extends State<PlayerItem>
                                 panelVisibilityController:
                                     _panelVisibilityController,
                                 keyboardFocus: widget.keyboardFocus,
-                                sendDanmaku: widget.sendDanmaku,
                                 acquirePlayerPanelHold: acquirePlayerPanelHold,
                                 onMenuVisibilityChanged:
                                     _handlePlayerMenuVisibilityChanged,
                                 handleDanmaku: handleDanmaku,
                                 showVideoInfo: showVideoInfo,
                                 showSyncPlayPanel: showSyncPlayPanel,
-                                showDanmakuDestinationPickerAndSend:
-                                    widget.showDanmakuDestinationPickerAndSend,
                                 pauseForTimedShutdown:
                                     widget.pauseForTimedShutdown,
                                 disableAnimations: widget.disableAnimations,
@@ -1788,7 +1758,6 @@ class _PlayerItemState extends State<PlayerItem>
                                 final double delta = details.delta.dy;
 
                                 if (tapPosition < sectionWidth) {
-                                  // Left half adjusts brightness.
                                   playerController.panel.brightnessSeeking =
                                       true;
                                   _showBrightnessAdjustmentHud();
@@ -1801,7 +1770,6 @@ class _PlayerItemState extends State<PlayerItem>
                                   setBrightness(result);
                                   playerController.panel.brightness = result;
                                 } else {
-                                  // Right half adjusts volume.
                                   _showVolumeAdjustmentHud();
                                   if (!playerController.panel.volumeSeeking) {
                                     playerController.panel.volumeSeeking = true;

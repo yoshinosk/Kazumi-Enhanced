@@ -361,6 +361,15 @@ mixin _$MediaController on _MediaController, Store {
         .run(() => super.removeScrapeResult(folderPath));
   }
 
+  late final _$deleteAnimeGroupAsyncAction =
+      AsyncAction('_MediaController.deleteAnimeGroup', context: context);
+
+  @override
+  Future<void> deleteAnimeGroup(AnimeGroup group) {
+    return _$deleteAnimeGroupAsyncAction
+        .run(() => super.deleteAnimeGroup(group));
+  }
+
   late final _$deleteFileAsyncAction =
       AsyncAction('_MediaController.deleteFile', context: context);
 

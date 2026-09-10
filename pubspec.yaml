@@ -20,7 +20,7 @@ version: 0.0.1+1
 
 environment:
   sdk: ">=3.3.4 <4.0.0"
-  flutter: 3.44.9
+  flutter: 3.47.2
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -40,7 +40,7 @@ dependencies:
   flutter_modular: ^7.1.0
   mobx: ^2.6.0
   flutter_mobx: ^2.3.0
-  dio: ^5.0.0
+  dio: ^5.11.0
   cookie_jar: ^4.0.9
   crypto: ^3.0.6
   connectivity_plus: ^6.0.5
@@ -69,7 +69,7 @@ dependencies:
       url: https://github.com/Predidit/audio_service_win.git
       ref: 8ad650c6eb487208b9861d44755c8e58db061c88
   audio_session: ^0.2.2
-  dynamic_color: ^1.8.1
+  dynamic_color: ^1.9.0
   flutter_displaymode: ^0.6.0
 
   url_launcher: ^6.3.0
@@ -78,7 +78,7 @@ dependencies:
   xpath_selector_html_parser: ^3.0.1
   json_path: ^0.9.0
 
-  canvas_danmaku: ^0.3.1
+  canvas_danmaku: ^0.3.3
   webdav_client: ^1.2.2
   tray_manager: ^0.5.0
   dlna_dart: ^0.0.8
@@ -92,6 +92,7 @@ dependencies:
   screen_brightness_platform_interface: ^2.1.0
   synchronized: any
   xml: ^6.5.0
+  material_new_shapes: ^1.0.0
   flutter_svg: ^2.2.3
   antlr4: ^4.13.2
   fl_chart: ^1.1.1

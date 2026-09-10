@@ -76,10 +76,31 @@ class BangumiApi {
       final url = ApiEndpoints.formatUrl(
           ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiRankSearch,
           [limit, offset]);
-      final jsonData = await _client.post(
-        url,
-        data: params,
-      );
+      dynamic jsonData;
+      try {
+        jsonData = await _client.post(
+          url,
+          data: params,
+        );
+      } catch (e) {
+        // Mirror search failed (e.g. the private app signature is missing in a
+        // local build, or the mirror is unreachable). Fall back to the official
+        // Bangumi API using the user's personal token when signed in.
+        KazumiLogger().w(
+          'BangumiApi: mirror search failed, trying official API',
+          error: e,
+        );
+        try {
+          jsonData = await BangumiClient.instance.postDirect(
+            url,
+            data: params,
+            requiresAuth: true,
+          );
+        } catch (e2) {
+          KazumiLogger().e('Network: unknown search problem', error: e2);
+          return bangumiCalendar;
+        }
+      }
       final jsonList = jsonData['data'];
       for (dynamic jsonItem in jsonList) {
         if (jsonItem is Map<String, dynamic>) {
@@ -344,7 +365,7 @@ class BangumiApi {
         error: e,
       );
       try {
-        jsonData = await _client.postDirect(
+        jsonData = await BangumiClient.instance.postDirect(
           ApiEndpoints.formatUrl(
               ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiRankSearch,
               [limit, offset]),
@@ -356,9 +377,8 @@ class BangumiApi {
         return null;
       }
     }
-
-    final jsonList = jsonData['data'];
     try {
+      final jsonList = jsonData['data'];
       for (dynamic jsonItem in jsonList) {
         if (jsonItem is Map<String, dynamic>) {
           try {
@@ -566,7 +586,6 @@ class BangumiApi {
     return null;
   }
 
-  /// Get the Bangumi collection of the current user
   static Future<List<BangumiCollection>> getBangumiCollectibles({
     List<BangumiCollectionType> includeBangumiTypes = const [
       BangumiCollectionType.planToWatch,
@@ -585,8 +604,7 @@ class BangumiApi {
     int progressTotal = 0;
 
     try {
-      final rateLimiter =
-          AsyncRateLimiter(const Duration(milliseconds: 200));
+      final rateLimiter = AsyncRateLimiter(const Duration(milliseconds: 200));
       const int concurrency = 3;
 
       Future<Map> fetchPageData(int offset, int pageLimit) async {
@@ -695,7 +713,8 @@ class BangumiApi {
             progressTotal,
           );
 
-          if (jsonList.length < serverLimit && offset + jsonList.length >= total) {
+          if (jsonList.length < serverLimit &&
+              offset + jsonList.length >= total) {
             offsetsQueue.clear();
             break;
           }
@@ -763,7 +782,6 @@ class BangumiApi {
     }
   }
 
-  /// Update the Bangumi collection by ID
   static Future<bool> updateBangumiById(
       int id, Map<String, dynamic> data) async {
     await _writeRateLimiter.acquire();
@@ -801,7 +819,6 @@ class BangumiApi {
     }
   }
 
-  /// Update the Bangumi collection by Type
   static Future<bool> updateBangumiByType(int id, int localType) async {
     final type = CollectType.fromValue(localType).toBangumiCollectionType();
     if (type == null) {
@@ -810,7 +827,6 @@ class BangumiApi {
     return await updateBangumiById(id, {'type': type.value});
   }
 
-  /// update or add Bangumi evaluation by subjectID
   static Future<bool> addOrUpdateBangumiEvaluationBySubjectID(
     int subjectID,
     int localType, {
