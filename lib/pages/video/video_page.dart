@@ -29,7 +29,6 @@ import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
 import 'package:kazumi/modules/history/history_module.dart'
     show kLocalMediaAdapterName;
-import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/platform/display_mode_service.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
 import 'package:kazumi/services/player/timed_shutdown_service.dart';

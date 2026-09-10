@@ -144,6 +144,29 @@ mixin _$TimelineController on _TimelineController, Store {
     });
   }
 
+  late final _$onlyShowJapaneseBangumisAtom = Atom(
+      name: '_TimelineController.onlyShowJapaneseBangumis', context: context);
+
+  @override
+  bool get onlyShowJapaneseBangumis {
+    _$onlyShowJapaneseBangumisAtom.reportRead();
+    return super.onlyShowJapaneseBangumis;
+  }
+
+  bool _onlyShowJapaneseBangumisIsInitialized = false;
+
+  @override
+  set onlyShowJapaneseBangumis(bool value) {
+    _$onlyShowJapaneseBangumisAtom.reportWrite(
+        value,
+        _onlyShowJapaneseBangumisIsInitialized
+            ? super.onlyShowJapaneseBangumis
+            : null, () {
+      super.onlyShowJapaneseBangumis = value;
+      _onlyShowJapaneseBangumisIsInitialized = true;
+    });
+  }
+
   late final _$_sortAtom =
       Atom(name: '_TimelineController._sort', context: context);
 
@@ -200,29 +223,6 @@ mixin _$TimelineController on _TimelineController, Store {
         .run(() => super.setNotShowWatchedBangumis(value));
   }
 
-  late final _$onlyShowJapaneseBangumisAtom = Atom(
-      name: '_TimelineController.onlyShowJapaneseBangumis', context: context);
-
-  @override
-  bool get onlyShowJapaneseBangumis {
-    _$onlyShowJapaneseBangumisAtom.reportRead();
-    return super.onlyShowJapaneseBangumis;
-  }
-
-  bool _onlyShowJapaneseBangumisIsInitialized = false;
-
-  @override
-  set onlyShowJapaneseBangumis(bool value) {
-    _$onlyShowJapaneseBangumisAtom.reportWrite(
-        value,
-        _onlyShowJapaneseBangumisIsInitialized
-            ? super.onlyShowJapaneseBangumis
-            : null, () {
-      super.onlyShowJapaneseBangumis = value;
-      _onlyShowJapaneseBangumisIsInitialized = true;
-    });
-  }
-
   late final _$setOnlyShowWatchingBangumisAsyncAction = AsyncAction(
       '_TimelineController.setOnlyShowWatchingBangumis',
       context: context);
@@ -231,14 +231,6 @@ mixin _$TimelineController on _TimelineController, Store {
   Future<void> setOnlyShowWatchingBangumis(bool value) {
     return _$setOnlyShowWatchingBangumisAsyncAction
         .run(() => super.setOnlyShowWatchingBangumis(value));
-  }
-
-  late final _$clearFiltersAsyncAction =
-      AsyncAction('_TimelineController.clearFilters', context: context);
-
-  @override
-  Future<void> clearFilters() {
-    return _$clearFiltersAsyncAction.run(() => super.clearFilters());
   }
 
   late final _$setOnlyShowJapaneseBangumisAsyncAction = AsyncAction(
@@ -251,6 +243,13 @@ mixin _$TimelineController on _TimelineController, Store {
         .run(() => super.setOnlyShowJapaneseBangumis(value));
   }
 
+  late final _$clearFiltersAsyncAction =
+      AsyncAction('_TimelineController.clearFilters', context: context);
+
+  @override
+  Future<void> clearFilters() {
+    return _$clearFiltersAsyncAction.run(() => super.clearFilters());
+  }
 
   late final _$_TimelineControllerActionController =
       ActionController(name: '_TimelineController', context: context);
@@ -275,7 +274,7 @@ isTimeOut: ${isTimeOut},
 notShowAbandonedBangumis: ${notShowAbandonedBangumis},
 notShowWatchedBangumis: ${notShowWatchedBangumis},
 onlyShowWatchingBangumis: ${onlyShowWatchingBangumis},
-        onlyShowJapaneseBangumis: ${onlyShowJapaneseBangumis}
+onlyShowJapaneseBangumis: ${onlyShowJapaneseBangumis}
     ''';
   }
 }

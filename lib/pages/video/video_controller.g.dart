@@ -9,6 +9,22 @@ part of 'video_controller.dart';
 // ignore_for_file: non_constant_identifier_names, unnecessary_brace_in_string_interps, unnecessary_lambdas, prefer_expression_function_bodies, lines_longer_than_80_chars, avoid_as, avoid_annotating_with_dynamic, no_leading_underscores_for_local_identifiers
 
 mixin _$VideoPageController on _VideoPageController, Store {
+  late final _$episodeCommentsListAtom =
+      Atom(name: '_VideoPageController.episodeCommentsList', context: context);
+
+  @override
+  ObservableList<EpisodeCommentItem> get episodeCommentsList {
+    _$episodeCommentsListAtom.reportRead();
+    return super.episodeCommentsList;
+  }
+
+  @override
+  set episodeCommentsList(ObservableList<EpisodeCommentItem> value) {
+    _$episodeCommentsListAtom.reportWrite(value, super.episodeCommentsList, () {
+      super.episodeCommentsList = value;
+    });
+  }
+
   late final _$_loadingAtom =
       Atom(name: '_VideoPageController._loading', context: context);
 
@@ -77,6 +93,22 @@ mixin _$VideoPageController on _VideoPageController, Store {
     });
   }
 
+  late final _$commentsEpisodeAtom =
+      Atom(name: '_VideoPageController.commentsEpisode', context: context);
+
+  @override
+  int get commentsEpisode {
+    _$commentsEpisodeAtom.reportRead();
+    return super.commentsEpisode;
+  }
+
+  @override
+  set commentsEpisode(int value) {
+    _$commentsEpisodeAtom.reportWrite(value, super.commentsEpisode, () {
+      super.commentsEpisode = value;
+    });
+  }
+
   late final _$isFullscreenAtom =
       Atom(name: '_VideoPageController.isFullscreen', context: context);
 
@@ -90,6 +122,22 @@ mixin _$VideoPageController on _VideoPageController, Store {
   set isFullscreen(bool value) {
     _$isFullscreenAtom.reportWrite(value, super.isFullscreen, () {
       super.isFullscreen = value;
+    });
+  }
+
+  late final _$isCommentsAscendingAtom =
+      Atom(name: '_VideoPageController.isCommentsAscending', context: context);
+
+  @override
+  bool get isCommentsAscending {
+    _$isCommentsAscendingAtom.reportRead();
+    return super.isCommentsAscending;
+  }
+
+  @override
+  set isCommentsAscending(bool value) {
+    _$isCommentsAscendingAtom.reportWrite(value, super.isCommentsAscending, () {
+      super.isCommentsAscending = value;
     });
   }
 
@@ -314,6 +362,29 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
+  void _applyEpisodeComments(
+      int episode, EpisodeInfo info, List<EpisodeCommentItem> comments) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._applyEpisodeComments');
+    try {
+      return super._applyEpisodeComments(episode, info, comments);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
+  void toggleSortOrder() {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController.toggleSortOrder');
+    try {
+      return super.toggleSortOrder();
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   void _finishLoading() {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(
         name: '_VideoPageController._finishLoading');
@@ -338,9 +409,12 @@ mixin _$VideoPageController on _VideoPageController, Store {
   @override
   String toString() {
     return '''
+episodeCommentsList: ${episodeCommentsList},
 selectedEpisode: ${selectedEpisode},
 playingEpisode: ${playingEpisode},
+commentsEpisode: ${commentsEpisode},
 isFullscreen: ${isFullscreen},
+isCommentsAscending: ${isCommentsAscending},
 isPip: ${isPip},
 showTabBody: ${showTabBody},
 historyOffset: ${historyOffset},

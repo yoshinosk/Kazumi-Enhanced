@@ -29,12 +29,24 @@ const SliderThemeData sliderTheme2024 = SliderThemeData(
 /// Flutter-managed platform transitions. Route-level Modular transitions should
 /// avoid overriding these unless the native page transition is intentionally bypassed.
 const PageTransitionsTheme pageTransitionsTheme2024 = PageTransitionsTheme(
+  builders: _pageTransitionBuilders,
+);
+
+const Map<TargetPlatform, PageTransitionsBuilder> _pageTransitionBuilders =
+    <TargetPlatform, PageTransitionsBuilder>{
+  TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+  TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+};
+
+/// Applied only to the settings navigator; fullscreen routes use the app theme.
+final PageTransitionsTheme settingsPageTransitionsTheme = PageTransitionsTheme(
   builders: {
-    TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
-    TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+    ..._pageTransitionBuilders,
+    TargetPlatform.linux: const FadeForwardsPageTransitionsBuilder(),
+    TargetPlatform.windows: const FadeForwardsPageTransitionsBuilder(),
   },
 );
 

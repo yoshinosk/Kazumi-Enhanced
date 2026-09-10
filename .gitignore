@@ -62,3 +62,27 @@ android/build/reports/problems/
 
 # 本地凭据（不入库）
 local_*.env
+
+# 同步上游时用的本地工具链镜像与临时产物（不入库，可随时删除）
+/.tooling/
+/.upstream/
+/tools/_flutter_sdk/
+tools/probe*.dart
+tools/cleanup_probe.dart
+tools/fetch_upstream.py
+tools/parse_analyze.py
+tools/flutter_runner.py
+analyze_*.log
+build_runner.log
+robocopy.log
+proc*.txt
+fa_rc.txt
+/.tmp/
+__probe*.txt
+tools/_idx*
+tools/_gidx*
+tools/_p1.txt
+tools/probe_dir/
+tools/diff_strings.py
+perm.txt
+git_run*.log

@@ -9,6 +9,8 @@ import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/history/history_list_view.dart';
 import 'package:kazumi/pages/history/history_record_tile.dart';
+import 'package:kazumi/pages/magnet/magnet_page.dart'
+    show MagnetSearchRouteArgs;
 import 'package:kazumi/services/player/history_playback_service.dart';
 import 'package:kazumi/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
@@ -183,6 +185,7 @@ class _HistoryCardState extends State<_HistoryCard> with KazumiDialogOwner {
 
   Future<void> _play() async {
     if (widget.editing || widget.busy || dialogs.isRunning) return;
+    String? unavailableReason;
     await dialogs.run((task) async {
       final cancelToken = RuleCancelToken();
       final result = await task.loading(
@@ -197,9 +200,64 @@ class _HistoryCardState extends State<_HistoryCard> with KazumiDialogOwner {
           task.withContext(
               (context) => context.pushNamed('/video/', arguments: args));
         case HistoryPlaybackUnavailable(:final reason):
-          KazumiDialog.showToast(message: reason);
+          // 引导弹窗须等加载对话框关闭后再弹，因此延后到 dialogs.run 之外处理。
+          unavailableReason = reason;
       }
     }, errorMessage: '暂时无法继续播放，请稍后重试');
+    final reason = unavailableReason;
+    if (!mounted || reason == null) return;
+    if (isLocalMediaHistory(widget.history)) {
+      await _showMissingLocalFileDialog(reason);
+    } else {
+      KazumiDialog.showToast(message: reason);
+    }
+  }
+
+  /// 本地媒体库文件缺失时的引导：提供「详情页 / 磁力搜索」两个去向。
+  Future<void> _showMissingLocalFileDialog(String reason) async {
+    final bangumiItem = widget.history.bangumiItem;
+    final theme = Theme.of(context);
+    final action = await KazumiDialog.show<String>(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('本地文件不可用'),
+        content: Text(
+          '$reason\n\n可以选择回到番剧详情页重新匹配本地文件，'
+          '或直接搜索磁力资源补下该番剧。',
+          style: theme.textTheme.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: 'close'),
+            child: Text(
+              '取消',
+              style: TextStyle(color: theme.colorScheme.outline),
+            ),
+          ),
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: 'magnet'),
+            child: const Text('搜索磁力'),
+          ),
+          FilledButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: 'info'),
+            child: const Text('去详情页'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null || action == 'close') return;
+    if (action == 'info') {
+      context.pushNamed('/info/', arguments: bangumiItem);
+    } else {
+      context.pushNamed(
+        '/magnet/',
+        arguments: MagnetSearchRouteArgs(
+          query: bangumiItem.nameCn.isNotEmpty
+              ? bangumiItem.nameCn
+              : bangumiItem.name,
+          anime: bangumiItem,
+        ),
+      );
+    }
   }
 
   Future<void> _changeCollect(CollectType type) async {

@@ -122,6 +122,12 @@ class _TimelineOptionsSheet extends StatelessWidget {
                       value: controller.onlyShowWatchingBangumis,
                       onChanged: controller.setOnlyShowWatchingBangumis,
                     ),
+                    SwitchListTile(
+                      title: const Text('只看日本动画'),
+                      subtitle: const Text('过滤掉国漫等其他地区条目'),
+                      value: controller.onlyShowJapaneseBangumis,
+                      onChanged: controller.setOnlyShowJapaneseBangumis,
+                    ),
                   ],
                 ),
               ],

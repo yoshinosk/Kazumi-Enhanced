@@ -2,6 +2,33 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.10
+
+- 同步上游 2.2.9 ~ 2.3.1（批次 4：M3E UI 重构浪潮，按「整体接收 2.3.1 UI + 回移植本分支功能」策略收尾）
+  - 打通前置条件：工程升级到 Flutter 3.47.2（上游 pubspec environment 精确要求）；用 Flutter 3.47.2 重新 `pub get`，并重新生成 mobx 产物
+    - 相关文件: pubspec.lock, lib/pages/video/video_controller.g.dart, lib/pages/timeline/timeline_controller.g.dart, lib/pages/media/media_controller.g.dart
+  - 修复批次 4 WIP 树的全部编译错误（首轮 analyze 506 个 error → 0 error / 0 warning）
+    - 相关文件: lib/bean/dialog/dialog.dart, lib/pages/info/source_sheet.dart, lib/pages/info/info_page.dart, lib/pages/video/video_controller.dart, lib/pages/video/video_page.dart, lib/pages/player/player_item.dart, lib/pages/player/danmaku_destination_sheet.dart, lib/request/apis/bangumi_api.dart, lib/utils/constants.dart, lib/utils/search_parser.dart, lib/services/storage/settings_keys.dart
+  - 新版 M3E 弹窗体系（`KazumiDialog.show/showToast/dismiss` + `KazumiDialogController`）下，补回 fork 仍在调用的 `KazumiDialog.showLoading` 兼容实现（含加载弹窗组件与 `dismiss` 对加载句柄的处理），避免改动弹幕库切换弹窗等调用点；顺带删除已无人使用的 `showTimedSuccessDialog`（原调用方 `source_sheet` 已改为上游实现）
+    - 相关文件: lib/bean/dialog/dialog.dart
+  - 详情页源搜索面板改用上游重构版（`source_sheet.dart` + `source_alias_dialog/source_captcha_flow/source_sheet_view` 三个 part）；本分支仅调整过 import 顺序，无功能损失；同时清理 `info_page.dart` 中误粘贴到 `_InfoHeaderBackground` 的重复磁力搜索面板，并移除新版 `showAdaptiveBottomSheet` 已不支持的 `backgroundColor` 参数
+    - 相关文件: lib/pages/info/source_sheet.dart, lib/pages/info/info_page.dart
+  - 从上游补回剧集评论相关状态与接口（`episodeInfo`/`episodeCommentsList`/`commentsEpisode`/`isCommentsAscending`/`toggleSortOrder`/`queryBangumiEpisodeCommentsByID`/`commentEpisodeForSelection`/`_resetEpisodeComments` 及独立 `_commentSessions` 取消域），接入切集与销毁流程，供 `episode_comments_sheet`/`video_page` 使用
+    - 相关文件: lib/pages/video/video_controller.dart
+  - 播放器控制面板对齐上游：`needFullPanel` → `_needsFullPanel`；移除上游面板已内置的 `changeEpisode`/`sendDanmaku`/`showDanmakuDestinationPickerAndSend` 三个传参；删除 `danmaku_destination_sheet.dart` 中与 `player_models.dart` 重复的 `DanmakuDestination` 枚举改为导入
+    - 相关文件: lib/pages/player/player_item.dart, lib/pages/player/danmaku_destination_sheet.dart
+  - 补齐上游新增依赖与工具：新增 `image_cache_service.dart`（存储设置页图片缓存统计/清理）、`constants.dart` 补 `settingsPageTransitionsTheme`（设置页嵌套路由转场）、`bangumi_api.getCalendarBySearch` 失败分支返回空表、`search_parser.updateSort` 保留（搜索测试依赖）
+    - 相关文件: lib/services/storage/image_cache_service.dart, lib/utils/constants.dart, lib/request/apis/bangumi_api.dart, lib/utils/search_parser.dart
+  - 清理编译告警：`video_page.dart` 移除未用导入；`settings_keys.dart` 的 `magnetAskDirOnAdd` 改用 `_SettingBoxKey` 常量消除 unused_field
+    - 相关文件: lib/pages/video/video_page.dart, lib/services/storage/settings_keys.dart
+  - 回植合并中丢失的两处 fork 功能（新 UI 采用上游版本后入口消失）：
+    - 本地媒体库历史记录在文件缺失时，恢复「本地文件不可用」引导弹窗（搜索磁力 / 去详情页），原先随旧历史卡片 `bangumi_history_card` 一起丢失；现移入新历史页，普通历史仍保持 toast 提示
+      - 相关文件: lib/pages/history/history_page.dart
+    - 时间线筛选恢复「只看日本动画」（`timelineOnlyShowJapaneseBangumis` 过滤逻辑与控制器字段都还在，只是新 M3E 选项面板漏了开关）
+      - 相关文件: lib/pages/timeline/timeline_options.dart
+  - 验证状态：`dart analyze lib test` 通过（0 error / 0 warning，7 条 info 均为基线存量）。因本机代理会话无法运行 flutter 工具（SDK 缓存写入被安全层拦截），`flutter test` 与 Windows 构建待在本机终端补跑
+    - 相关文件: .gitignore
+
 ## 2026.9.9
 
 - 同步上游 2.2.9 ~ 2.3.1（批次 3：依赖升级）

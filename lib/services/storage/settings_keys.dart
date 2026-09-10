@@ -596,7 +596,7 @@ class SettingsKeys {
 
   /// 添加磁力任务时是否弹窗确认（弹窗内可为该任务单独指定下载目录）。
   static const magnetAskDirOnAdd = SettingKey<bool>(
-    'magnetAskDirOnAdd',
+    _SettingBoxKey.magnetAskDirOnAdd,
     true,
     group: SettingGroup.magnet,
   );

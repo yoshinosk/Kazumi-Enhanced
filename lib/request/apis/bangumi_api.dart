@@ -98,7 +98,7 @@ class BangumiApi {
           );
         } catch (e2) {
           KazumiLogger().e('Network: unknown search problem', error: e2);
-          return null;
+          return bangumiCalendar;
         }
       }
       final jsonList = jsonData['data'];

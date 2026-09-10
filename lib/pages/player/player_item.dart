@@ -1645,14 +1645,13 @@ class _PlayerItemState extends State<PlayerItem>
                     (Platform.isAndroid &&
                             (videoPageController.isPip || _pipEnterRequested))
                         ? const SizedBox.shrink()
-                        : (needFullPanel(context))
+                        : (_needsFullPanel(context))
                             ? PlayerItemPanel(
                                 playerController: playerController,
                                 videoPageController: videoPageController,
                                 onBackPressed: widget.onBackPressed,
                                 setPlaybackSpeed: setPlaybackSpeed,
                                 showDanmakuSwitch: showDanmakuSwitch,
-                                changeEpisode: widget.changeEpisode,
                                 toggleMenu: widget.toggleMenu,
                                 handleFullscreen: handleFullscreen,
                                 enterAndroidPictureInPicture:
@@ -1666,15 +1665,12 @@ class _PlayerItemState extends State<PlayerItem>
                                 panelVisibilityController:
                                     _panelVisibilityController,
                                 keyboardFocus: widget.keyboardFocus,
-                                sendDanmaku: widget.sendDanmaku,
                                 acquirePlayerPanelHold: acquirePlayerPanelHold,
                                 onMenuVisibilityChanged:
                                     _handlePlayerMenuVisibilityChanged,
                                 handleDanmaku: handleDanmaku,
                                 showVideoInfo: showVideoInfo,
                                 showSyncPlayPanel: showSyncPlayPanel,
-                                showDanmakuDestinationPickerAndSend:
-                                    widget.showDanmakuDestinationPickerAndSend,
                                 pauseForTimedShutdown:
                                     widget.pauseForTimedShutdown,
                                 disableAnimations: widget.disableAnimations,

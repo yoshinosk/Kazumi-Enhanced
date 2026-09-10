@@ -35,8 +35,32 @@ class KazumiDialogHandle<T> {
 class KazumiDialog {
   static final KazumiDialogObserver observer = KazumiDialogObserver();
   static int _toastRevision = 0;
+  static KazumiDialogHandle<dynamic>? _loadingHandle;
 
   KazumiDialog._internal();
+
+  /// Shows the shared loading dialog. Dismiss it with [KazumiDialog.dismiss].
+  static void showLoading({
+    BuildContext? context,
+    String? msg,
+    bool barrierDismissible = false,
+    FutureOr<void> Function()? onDismiss,
+  }) {
+    final handle = KazumiDialogHandle<dynamic>();
+    _loadingHandle?.dismiss();
+    _loadingHandle = handle;
+    unawaited(
+      KazumiDialog.show<dynamic>(
+        context: context,
+        handle: handle,
+        clickMaskDismiss: barrierDismissible,
+        onDismiss: onDismiss,
+        builder: (_) => _SimpleLoadingDialog(message: msg),
+      ).whenComplete(() {
+        if (identical(_loadingHandle, handle)) _loadingHandle = null;
+      }),
+    );
+  }
 
   static Future<T?> show<T>({
     BuildContext? context,
@@ -127,6 +151,12 @@ class KazumiDialog {
 
   static void dismiss<T>({BuildContext? context, T? popWith}) {
     if (context != null && !context.mounted) return;
+    final loading = _loadingHandle;
+    if (context == null && loading != null) {
+      _loadingHandle = null;
+      loading.dismiss(popWith: popWith);
+      return;
+    }
     final route =
         context == null ? observer._lastDialogRoute : ModalRoute.of(context);
     if (route != null && route.settings.name == 'KazumiDialog') {
@@ -230,3 +260,31 @@ class KazumiDialogObserver extends NavigatorObserver {
     });
   }
 }
+
+class _SimpleLoadingDialog extends StatelessWidget {
+  const _SimpleLoadingDialog({this.message});
+
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Card(
+          elevation: 8,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(message ?? 'Loading...',
+                    style: const TextStyle(fontSize: 16)),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+

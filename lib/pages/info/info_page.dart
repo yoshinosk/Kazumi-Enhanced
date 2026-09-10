@@ -328,7 +328,6 @@ class _InfoPageState extends State<InfoPage>
       return;
     }
     showAdaptiveBottomSheet<void>(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       context: context,
       builder: (context) {
         return SafeArea(
@@ -552,59 +551,6 @@ class _InfoHeaderBackground extends StatelessWidget {
   static const double _bottomFeatherHeight = 48.0;
 
   final String imageUrl;
-
-  /// 弹出磁力搜索关键词选择面板，按番剧的几个标题进行搜索。
-  void _showMagnetSearchSheet() {
-    final item = infoController.bangumiItem;
-    final titles = <String>[
-      if (item.nameCn.isNotEmpty) item.nameCn,
-      if (item.name.isNotEmpty && item.name != item.nameCn) item.name,
-      ...item.alias.where(
-          (a) => a.isNotEmpty && a != item.nameCn && a != item.name),
-    ];
-    if (titles.isEmpty) {
-      KazumiDialog.showToast(message: '没有可用的标题用于搜索');
-      return;
-    }
-    if (titles.length == 1) {
-      context.pushNamed(
-        '/magnet/',
-        arguments: MagnetSearchRouteArgs(query: titles.first, anime: item),
-      );
-      return;
-    }
-    showAdaptiveBottomSheet<void>(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('选择搜索关键词',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ),
-              for (final title in titles)
-                ListTile(
-                  leading: const Icon(Icons.search_rounded),
-                  title: Text(title),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    this.context.pushNamed(
-                      '/magnet/',
-                      arguments: MagnetSearchRouteArgs(query: title, anime: item),
-                    );
-                  },
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {

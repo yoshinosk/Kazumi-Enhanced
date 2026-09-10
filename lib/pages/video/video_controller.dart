@@ -7,6 +7,10 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/player/danmaku_axis_dialog.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/modules/bangumi/episode_item.dart';
+import 'package:kazumi/modules/comments/comment_item.dart';
+import 'package:kazumi/modules/comments/comment_response.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/repositories/download_repository.dart';
@@ -65,6 +69,12 @@ abstract class _VideoPageController with Store implements Disposable {
 
   late BangumiItem bangumiItem;
 
+  /// Bangumi 剧集信息（评论面板使用）。
+  EpisodeInfo episodeInfo = EpisodeInfo.fromTemplate();
+
+  @observable
+  var episodeCommentsList = ObservableList<EpisodeCommentItem>();
+
   // Resolution state machine: [_beginEpisodeSwitch] enters the loading state;
   // [_finishLoading] and [_failLoading] are the only terminal transitions.
   // [_errorMessage] is non-null only in the failed state.
@@ -81,11 +91,15 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   VideoEpisodeSelection? playingEpisode;
 
+  @observable
+  int commentsEpisode = 1;
+
   @action
   void resetEpisodeState({int episode = 1, int road = 0}) {
     final selection = VideoEpisodeSelection(episode: episode, road: road);
     selectedEpisode = selection;
     playingEpisode = null;
+    commentsEpisode = commentEpisodeForSelection(selection);
   }
 
   VideoEpisodeSelection get playbackEpisode =>
@@ -94,10 +108,15 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   bool isFullscreen = false;
 
-  // Playback and automatic danmaku loading have separate owners. Manual
-  // danmaku selection can cancel auto danmaku without touching playback.
+  @observable
+  bool isCommentsAscending = false;
+
+  // Playback, automatic danmaku loading, and comment loading have separate
+  // owners. Manual danmaku selection can cancel auto danmaku without touching
+  // playback; comment refreshes never cancel playback.
   final AsyncSessionOwner _playbackSessions = AsyncSessionOwner();
   final AsyncSessionOwner _danmakuSessions = AsyncSessionOwner();
+  final AsyncSessionOwner _commentSessions = AsyncSessionOwner();
 
   @observable
   bool isPip = false;
@@ -559,12 +578,25 @@ abstract class _VideoPageController with Store implements Disposable {
     );
   }
 
+  int commentEpisodeForSelection(VideoEpisodeSelection selection) {
+    final resolvedEpisode = resolveEpisode(selection);
+    return resolvedEpisode?.danmakuEpisodeNumber ?? selection.episode;
+  }
+
   /// Resets pre-switch state as a single transaction so observers see one
   /// notification instead of one per field.
   @action
   void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
+    final targetCommentsEpisode = commentEpisodeForSelection(selection);
     selectedEpisode = selection;
     playingEpisode = null;
+    // The comments sheet only re-queries when [commentsEpisode] changes, so
+    // resetting comment state here without changing it would blank the sheet
+    // permanently.
+    if (targetCommentsEpisode != commentsEpisode) {
+      commentsEpisode = targetCommentsEpisode;
+      _resetEpisodeComments();
+    }
     _loading = true;
     _errorMessage = null;
   }
@@ -574,6 +606,75 @@ abstract class _VideoPageController with Store implements Disposable {
     selectedEpisode = VideoEpisodeSelection(
       episode: resolvedEpisode.listIndex,
       road: resolvedEpisode.roadIndex,
+    );
+    commentsEpisode = commentEpisodeForSelection(selectedEpisode);
+  }
+
+  void _resetEpisodeComments() {
+    _commentSessions.cancel();
+    episodeInfo.reset();
+    episodeCommentsList.clear();
+  }
+
+  Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
+    final session = _commentSessions.begin();
+    final EpisodeInfo latestEpisodeInfo;
+    try {
+      latestEpisodeInfo = await BangumiApi.getBangumiEpisodeByID(id, episode);
+    } catch (_) {
+      if (session.isStale) {
+        return false;
+      }
+      rethrow;
+    }
+    if (session.isStale) {
+      return false;
+    }
+    final EpisodeCommentResponse value;
+    try {
+      value =
+          await BangumiApi.getBangumiCommentsByEpisodeID(latestEpisodeInfo.id);
+    } catch (_) {
+      if (session.isStale) {
+        return false;
+      }
+      rethrow;
+    }
+    if (session.isStale) {
+      return false;
+    }
+    final commentsList = value.commentList;
+    if (!isCommentsAscending) {
+      commentsList
+          .sort((a, b) => b.comment.createdAt.compareTo(a.comment.createdAt));
+    } else {
+      commentsList
+          .sort((a, b) => a.comment.createdAt.compareTo(b.comment.createdAt));
+    }
+    _applyEpisodeComments(episode, latestEpisodeInfo, commentsList);
+    KazumiLogger().i(
+        'VideoPageController: loaded comments list length ${episodeCommentsList.length}');
+    return true;
+  }
+
+  @action
+  void _applyEpisodeComments(
+    int episode,
+    EpisodeInfo info,
+    List<EpisodeCommentItem> comments,
+  ) {
+    commentsEpisode = episode;
+    episodeInfo = info;
+    episodeCommentsList = ObservableList.of(comments);
+  }
+
+  @action
+  void toggleSortOrder() {
+    isCommentsAscending = !isCommentsAscending;
+    episodeCommentsList.sort(
+      (a, b) => isCommentsAscending
+          ? a.comment.createdAt.compareTo(b.comment.createdAt)
+          : b.comment.createdAt.compareTo(a.comment.createdAt),
     );
   }
 
@@ -1063,6 +1164,7 @@ abstract class _VideoPageController with Store implements Disposable {
   void dispose() {
     _playbackSessions.cancel();
     _danmakuSessions.cancel();
+    _commentSessions.cancel();
     _logSubscription?.cancel();
     _logSubscription = null;
     if (!_logStreamController.isClosed) {
