@@ -2,6 +2,11 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.13
+
+- 新增首页「继续观看」区域：打开 app 即可在默认的推荐（时间表）页顶部看到最近在看的一部番剧（封面 + 上次集数 + 断点进度），点击卡片或「继续播放」按钮直接恢复上次集数和进度开始播放；更早的记录以横滑封面列表展示（最多 10 条），可快速切换；右上角提供「历史记录」入口直达完整历史页。同时把历史页卡片的恢复播放逻辑抽为共用函数供两处复用，行为不变。
+  - 相关文件: lib/pages/history/continue_watching_section.dart（新增）, lib/pages/history/history_resume.dart（新增，共用恢复播放逻辑）, lib/pages/timeline/timeline_page.dart, lib/pages/history/history_page.dart
+
 ## 2026.9.10
 
 - 同步上游 2.2.9 ~ 2.3.1（批次 4：M3E UI 重构浪潮，按「整体接收 2.3.1 UI + 回移植本分支功能」策略收尾）

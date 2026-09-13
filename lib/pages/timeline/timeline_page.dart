@@ -12,6 +12,7 @@ import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/pages/history/continue_watching_section.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/anime_season.dart';
@@ -208,6 +209,12 @@ class _TimelinePageState extends State<TimelinePage> {
                         scrollbars: false,
                       ),
                       headerSliverBuilder: (context, innerBoxIsScrolled) => [
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(inset, 8, inset, 16),
+                            child: const ContinueWatchingSection(),
+                          ),
+                        ),
                         if (seasonHeader != null)
                           SliverToBoxAdapter(
                             child: Padding(
