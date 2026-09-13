@@ -177,10 +177,12 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                           onPressed: _canLocate ? revealCurrentEpisode : null,
                           icon: const Icon(Icons.my_location_rounded, size: 20),
                         ),
-                        if (!widget.isOffline)
+                        // 缓存入口只在调用方提供 onDownload 时展示
+                        // （在线模式专属；离线 / 本地媒体 / 边下边播不显示）。
+                        if (widget.onDownload != null)
                           IconButton.filledTonal(
                             tooltip: '缓存剧集',
-                            onPressed: count > 0 && widget.onDownload != null
+                            onPressed: count > 0
                                 ? () => widget.onDownload!(_visibleRoad)
                                 : null,
                             icon: const Icon(Icons.download_rounded, size: 20),

@@ -155,7 +155,11 @@ class _VideoPageState extends State<VideoPage>
   }
 
   void _initializePlayback() {
-    if (videoPageController.isOfflineMode) {
+    // 离线 / 本地媒体 / 边下边播三种模式都走本地初始化路径：
+    // 它们没有 currentPlugin（late 字段未赋值），误入 _initOnlineMode
+    // 会抛 LateInitializationError，changeEpisode 永远不会执行，
+    // 播放页表现为一直黑屏卡死。
+    if (!videoPageController.isOnlinePlaybackMode) {
       _initOfflineMode();
     } else {
       _initOnlineMode();
@@ -712,8 +716,9 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget get episodePanel => Observer(builder: (context) {
+        final isOnlinePlayback = videoPageController.isOnlinePlaybackMode;
         final downloads = <String, DownloadEpisode>{};
-        if (!videoPageController.isOfflineMode) {
+        if (isOnlinePlayback) {
           for (final record in downloadController.records) {
             if (record.bangumiId != videoPageController.bangumiItem.id ||
                 record.pluginName != videoPageController.currentPlugin.name) {
@@ -756,13 +761,17 @@ class _VideoPageState extends State<VideoPage>
             _closeTabBodyAnimated();
             changeEpisode(episode, currentRoad: road);
           },
-          onDownload: (road) => showAdaptiveBottomSheet<void>(
-            context: context,
-            builder: (context) => DownloadEpisodeSheet(
-              road: road,
-              videoPageController: videoPageController,
-            ),
-          ),
+          // 缓存依赖在线插件线路（DownloadEpisodeSheet 会读取
+          // currentPlugin），非在线模式一律不提供入口。
+          onDownload: isOnlinePlayback
+              ? (road) => showAdaptiveBottomSheet<void>(
+                    context: context,
+                    builder: (context) => DownloadEpisodeSheet(
+                      road: road,
+                      videoPageController: videoPageController,
+                    ),
+                  )
+              : null,
         );
       });
 

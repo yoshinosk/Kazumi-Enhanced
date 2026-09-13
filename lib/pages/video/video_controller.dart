@@ -160,6 +160,15 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 边下边播的适配器标识（流 URL 与文件名保存在 roadList 中）。
   String _streamPluginName = '';
 
+  /// 是否为在线插件播放模式。
+  ///
+  /// 离线 / 本地媒体 / 边下边播三种模式没有 [currentPlugin]
+  /// （late 字段不会赋值），初始化分支与依赖它的在线专属 UI
+  /// （选集面板的线路下载映射、远程投屏等）都必须先用本 getter 拦截，
+  /// 否则访问 [currentPlugin] 会抛 LateInitializationError 导致页面卡死。
+  bool get isOnlinePlaybackMode =>
+      !isOfflineMode && !isLocalMediaMode && !isStreamMode;
+
   int? _localMediaBangumiSyncId;
 
   /// 本地媒体模式下的 Bangumi subject ID，仅搜刮来源为 bangumi 时非空；

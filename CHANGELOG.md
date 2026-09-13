@@ -4,6 +4,11 @@
 
 ## 2026.9.13
 
+- 修复从磁力下载任务点播放后播放页卡死的问题。根因是批次 4（M3E UI）合并时，播放页初始化分支从「离线/本地媒体/边下边播都走本地初始化」被缩减成只判断离线模式，导致本地媒体和边下边播模式误入在线初始化路径，访问未赋值的 `late currentPlugin` 抛出 `LateInitializationError`，`changeEpisode` 永远不会执行，播放页停在黑屏无法播放。排查后确认所有本地播放入口（媒体库点播、番剧详情页本地区块、播放页内"切换本地播放"、历史记录/首页"继续观看"恢复本地媒体与边下边播条目）都走同一初始化路径、全部受影响，本次一并修复；下载页离线缓存播放走离线模式不受影响。同时在 `VideoPageController` 上新增 `isOnlinePlaybackMode` 统一判断，并给在线专属 UI 补上守卫：选集面板的插件下载映射与"缓存剧集"入口只对在线模式提供（本地媒体/边下边播/离线模式不再显示缓存按钮）；"远程投屏"菜单项只对在线模式显示（依赖 `currentPlugin.referer`，此前在本地媒体/边下边播/离线模式下点击会抛同样的异常，且本地路径与 127.0.0.1 流地址对投屏目标本就不可达）。
+  - 相关文件: lib/pages/video/video_page.dart（恢复 `_initializePlayback` 三模式分支；选集面板下载映射与 `onDownload` 仅在线模式提供）, lib/pages/video/video_controller.dart（新增 `isOnlinePlaybackMode` getter）, lib/pages/video/episode_selection_panel.dart（"缓存剧集"按钮改为仅在提供 `onDownload` 时显示）, lib/pages/player/player_item_panel.dart（"远程投屏"菜单项仅在线模式显示）, lib/pages/player/smallest_player_item_panel.dart（同上）
+
+## 2026.9.13
+
 - 新增首页「继续观看」区域：打开 app 即可在默认的推荐（时间表）页顶部看到最近在看的一部番剧（封面 + 上次集数 + 断点进度），点击卡片或「继续播放」按钮直接恢复上次集数和进度开始播放；更早的记录以横滑封面列表展示（最多 10 条），可快速切换；右上角提供「历史记录」入口直达完整历史页。同时把历史页卡片的恢复播放逻辑抽为共用函数供两处复用，行为不变。
   - 相关文件: lib/pages/history/continue_watching_section.dart（新增）, lib/pages/history/history_resume.dart（新增，共用恢复播放逻辑）, lib/pages/timeline/timeline_page.dart, lib/pages/history/history_page.dart
 
