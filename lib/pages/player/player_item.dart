@@ -29,7 +29,7 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
-import 'package:kazumi/pages/player/danmaku_switch_dialog.dart';
+import 'package:kazumi/pages/player/danmaku_source_sheet.dart';
 import 'package:kazumi/pages/player/player_item_surface.dart';
 import 'package:mobx/mobx.dart' as mobx;
 import 'package:kazumi/pages/my/my_controller.dart';
@@ -1312,12 +1312,15 @@ class _PlayerItemState extends State<PlayerItem>
     KazumiDialog.showToast(message: '已经是最后一集，可前往详情页搜索其他资源');
   }
 
+  // 上游重设计的弹幕源选择器（面板菜单入口）；
+  // fork 的 showDanmakuSwitchDialog 仍被「弹幕」页签使用，两者并存。
   void showDanmakuSwitch() {
-    showDanmakuSwitchDialog(
-      playerController: playerController,
-      videoPageController: videoPageController,
+    unawaited(showDanmakuSourceSheet(
+      context,
       initialKeyword: videoPageController.title,
-    );
+      danmakuController: playerController.danmaku,
+      onBeforeApply: videoPageController.cancelAutomaticDanmakuLoad,
+    ));
   }
 
   void showVideoInfo() {
