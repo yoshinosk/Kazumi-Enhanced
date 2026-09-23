@@ -126,12 +126,12 @@
 | ✅ | c94c4830 | fix(ui): 移除重复的空状态操作 | 2026.9.23 |
 | ⬜ | ac494bce | deps: bump media kit | - |
 | ✅ | cd7c0f88 | fix(my): 简化竖屏布局 | 2026.9.23 |
-| ⬜ | 80e256ec | feat(collect): 响应式布局与可配置默认视图(回植本地/缓存角标) | - |
-| ⬜ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐(依赖 80e256ec,在其后应用) | - |
+| ✅ | 80e256ec | feat(collect): 响应式布局与可配置默认视图(回植本地/缓存角标到新海报卡与列表瓦片;随上游移除遗留 showAnimeCounter 键) | 2026.9.23 |
+| ✅ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐(依赖 80e256ec,在其后应用) | 2026.9.23 |
 | ✅ | a2e5a583 | feat(player): 弹幕源选择器重设计 | 2026.9.23 |
 | ⬜ | 551b2360 | deps: bump media kit | - |
-| ⬜ | 4aef9b39 | fix(collect): hero 转场保持圆角 | - |
-| ⬜ | ba21fe35 | fix(collect): 分类标签切换平滑过渡 | - |
+| ✅ | 4aef9b39 | fix(collect): hero 转场保持圆角 | 2026.9.23 |
+| ✅ | ba21fe35 | fix(collect): 分类标签切换平滑过渡 | 2026.9.23 |
 | ⬜ | (收尾) | 恢复上游更新的 test/webdav_service_test.dart;pubspec/lock 整合 | - |
 
 ### 批次 5 决定跳过
