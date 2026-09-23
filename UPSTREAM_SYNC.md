@@ -124,15 +124,15 @@
 | ✅ | dc5bd860 | feat(sync): 弹幕屏蔽规则 WebDAV 同步 | 2026.9.23 |
 | ✅ | cd9bc04c | fix(player): 退出时加载指示器不再闪烁 | 2026.9.23 |
 | ✅ | c94c4830 | fix(ui): 移除重复的空状态操作 | 2026.9.23 |
-| ⬜ | ac494bce | deps: bump media kit | - |
+| ✅ | ac494bce | deps: bump media kit(与 4fed48b5/551b2360 合并接收:最终 ref 6fd002aa;移除 libs overrides 与 media_kit_libs_video 直接依赖;接收 sdk >=3.10.0 下限,flutter pin 保持 3.47.2) | 2026.9.23 |
 | ✅ | cd7c0f88 | fix(my): 简化竖屏布局 | 2026.9.23 |
 | ✅ | 80e256ec | feat(collect): 响应式布局与可配置默认视图(回植本地/缓存角标到新海报卡与列表瓦片;随上游移除遗留 showAnimeCounter 键) | 2026.9.23 |
 | ✅ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐(依赖 80e256ec,在其后应用) | 2026.9.23 |
 | ✅ | a2e5a583 | feat(player): 弹幕源选择器重设计 | 2026.9.23 |
-| ⬜ | 551b2360 | deps: bump media kit | - |
+| ✅ | 551b2360 | deps: bump media kit(合并入 ac494bce 行接收) | 2026.9.23 |
 | ✅ | 4aef9b39 | fix(collect): hero 转场保持圆角 | 2026.9.23 |
 | ✅ | ba21fe35 | fix(collect): 分类标签切换平滑过渡 | 2026.9.23 |
-| ⬜ | (收尾) | 恢复上游更新的 test/webdav_service_test.dart;pubspec/lock 整合 | - |
+| ✅ | (收尾) | 接收上游 test/webdav_service_test.dart;`flutter pub get` 重生成 pubspec.lock 与 windows/linux/macos 插件注册文件。analyze 基线 8→48 条 info:语言版本升至 Dart 3.10 激活 `unnecessary_underscores`/`use_null_aware_elements` 新 lint,0 error / 0 warning 不变 | 2026.9.23 |
 
 ### 批次 5 决定跳过
 
