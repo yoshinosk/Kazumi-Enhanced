@@ -115,19 +115,19 @@
 
 | 状态 | 上游提交 | 内容 | 完成日期 |
 |---|---|---|---|
-| ⬜ | 4b29571e | fix(ui): 评分可见性在搜索与收藏卡片生效 | - |
-| ⬜ | 5006efac | fix(search): 布局变化时保持输入连接 | - |
-| ⬜ | 3bfd5d1f | fix(navigation): 修复 tab 路由不匹配 | - |
-| ⬜ | 2624e0c0 | fix(ui): 统一操作按钮高度 | - |
+| ✅ | 4b29571e | fix(ui): 评分可见性在搜索与收藏卡片生效 | 2026.9.23 |
+| ✅ | 5006efac | fix(search): 布局变化时保持输入连接 | 2026.9.23 |
+| ✅ | 3bfd5d1f | fix(navigation): 修复 tab 路由不匹配 | 2026.9.23 |
+| ✅ | 2624e0c0 | fix(ui): 统一操作按钮高度 | 2026.9.23 |
 | ⬜ | 1317f20d | fix(webdav): 启动时尊重历史同步开关 | - |
 | ⬜ | c2c21b5f | refactor(player): 统一全屏行为与布局归属(回植 fork 功能,见下) | - |
 | ⬜ | dc5bd860 | feat(sync): 弹幕屏蔽规则 WebDAV 同步 | - |
 | ⬜ | cd9bc04c | fix(player): 退出时加载指示器不再闪烁 | - |
 | ⬜ | c94c4830 | fix(ui): 移除重复的空状态操作 | - |
 | ⬜ | ac494bce | deps: bump media kit | - |
-| ⬜ | cd7c0f88 | fix(my): 简化竖屏布局 | - |
+| ✅ | cd7c0f88 | fix(my): 简化竖屏布局 | 2026.9.23 |
 | ⬜ | 80e256ec | feat(collect): 响应式布局与可配置默认视图(回植本地/缓存角标) | - |
-| ⬜ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐 | - |
+| ⬜ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐(依赖 80e256ec,在其后应用) | - |
 | ⬜ | a2e5a583 | feat(player): 弹幕源选择器重设计 | - |
 | ⬜ | 551b2360 | deps: bump media kit | - |
 | ⬜ | 4aef9b39 | fix(collect): hero 转场保持圆角 | - |

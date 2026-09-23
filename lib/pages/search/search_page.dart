@@ -14,6 +14,7 @@ import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/search/search_controller.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/date_time.dart';
 import 'package:kazumi/utils/search_parser.dart';
@@ -35,6 +36,8 @@ class _SearchPageState extends State<SearchPage> {
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
+  // Preserve the input subtree when the header moves in or out of the scroll view.
+  final _searchHeaderKey = GlobalKey();
   String? _submittedQuery;
   bool _managingHistory = false;
 
@@ -166,6 +169,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _header() => Padding(
+        key: _searchHeaderKey,
         padding: EdgeInsets.only(top: _hasSearched ? 8 : 24, bottom: 16),
         child: _searchField(),
       );
@@ -372,7 +376,11 @@ class _SearchPageState extends State<SearchPage> {
           ],
         ))
       else
-        _SearchResultGrid(items: items, width: width),
+        _SearchResultGrid(
+          items: items,
+          width: width,
+          showRating: GStorage.getSetting(SettingsKeys.showRating),
+        ),
       if (allItems.isNotEmpty || !failed)
         SliverToBoxAdapter(
             child: Padding(
