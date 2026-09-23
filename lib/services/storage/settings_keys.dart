@@ -304,11 +304,6 @@ class SettingsKeys {
     '/tab/popular/',
     group: SettingGroup.interface,
   );
-  static const isWideScreen = SettingKey<bool>(
-    _SettingBoxKey.isWideScreen,
-    false,
-    group: SettingGroup.interface,
-  );
   static const webDavEnable = SettingKey<bool>(
     _SettingBoxKey.webDavEnable,
     false,
@@ -1027,7 +1022,6 @@ class SettingsKeys {
     enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
-    isWideScreen,
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,
@@ -1199,9 +1193,6 @@ class _SettingBoxKey {
       enableBangumiProxy = 'enableBangumiProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
-
-      /// Deprecated
-      isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
       webDavEnableCollect = 'webDavEnableCollect',
