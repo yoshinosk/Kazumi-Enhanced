@@ -119,9 +119,9 @@
 | ✅ | 5006efac | fix(search): 布局变化时保持输入连接 | 2026.9.23 |
 | ✅ | 3bfd5d1f | fix(navigation): 修复 tab 路由不匹配 | 2026.9.23 |
 | ✅ | 2624e0c0 | fix(ui): 统一操作按钮高度 | 2026.9.23 |
-| ⬜ | 1317f20d | fix(webdav): 启动时尊重历史同步开关 | - |
+| ✅ | 1317f20d | fix(webdav): 启动时尊重历史同步开关 | 2026.9.23 |
 | ⬜ | c2c21b5f | refactor(player): 统一全屏行为与布局归属(回植 fork 功能,见下) | - |
-| ⬜ | dc5bd860 | feat(sync): 弹幕屏蔽规则 WebDAV 同步 | - |
+| ✅ | dc5bd860 | feat(sync): 弹幕屏蔽规则 WebDAV 同步 | 2026.9.23 |
 | ⬜ | cd9bc04c | fix(player): 退出时加载指示器不再闪烁 | - |
 | ⬜ | c94c4830 | fix(ui): 移除重复的空状态操作 | - |
 | ⬜ | ac494bce | deps: bump media kit | - |

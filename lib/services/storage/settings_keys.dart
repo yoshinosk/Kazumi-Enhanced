@@ -324,6 +324,26 @@ class SettingsKeys {
     false,
     group: SettingGroup.webdav,
   );
+  static const webDavEnableDanmakuShield = SettingKey<bool>(
+    'webDavEnableDanmakuShield',
+    false,
+    group: SettingGroup.webdav,
+  );
+  static const danmakuShieldSyncDeviceId = SettingKey<String>(
+    'danmakuShieldSyncDeviceId',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncState = SettingKey<String>(
+    'danmakuShieldSyncState',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncCorruptState = SettingKey<String>(
+    'danmakuShieldSyncCorruptState',
+    '',
+    group: SettingGroup.sync,
+  );
   static const webDavURL = SettingKey<String>(
     _SettingBoxKey.webDavURL,
     '',
@@ -1011,6 +1031,10 @@ class SettingsKeys {
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,
+    webDavEnableDanmakuShield,
+    danmakuShieldSyncDeviceId,
+    danmakuShieldSyncState,
+    danmakuShieldSyncCorruptState,
     webDavURL,
     webDavUsername,
     webDavPassword,
