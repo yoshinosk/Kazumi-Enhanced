@@ -108,6 +108,54 @@
 编译打通中修复的问题(本分支新增,不属上游提交):
 弹窗 API 兼容层(`KazumiDialog.showLoading`/`showTimedSuccessDialog`)、源搜索面板采用上游重构版并清理重复磁力面板、补回剧集评论接口、播放器面板传参对齐、`DanmakuDestination` 重复枚举清理、新增 `image_cache_service.dart`、`settingsPageTransitionsTheme` 补全、`getCalendarBySearch` 返回类型修正、`search_parser.updateSort` 保留。详见 CHANGELOG 2026.9.10。
 
+## 批次 5:上游 2.3.2 ~ 2.3.4(基线 23610a52 → 目标 88a8ec59,共 28 个提交)
+
+- 策略:沿用「按提交逐个内容移植 + 回植 fork 功能」,按上游时间顺序应用。
+- 本机 Flutter 保持 3.47.2,**跳过**上游 3.47.3/3.47.5 SDK 升级(用户确认两个小版本差距影响不大;pubspec environment 保留 3.47.2)。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ⬜ | 4b29571e | fix(ui): 评分可见性在搜索与收藏卡片生效 | - |
+| ⬜ | 5006efac | fix(search): 布局变化时保持输入连接 | - |
+| ⬜ | 3bfd5d1f | fix(navigation): 修复 tab 路由不匹配 | - |
+| ⬜ | 2624e0c0 | fix(ui): 统一操作按钮高度 | - |
+| ⬜ | 1317f20d | fix(webdav): 启动时尊重历史同步开关 | - |
+| ⬜ | c2c21b5f | refactor(player): 统一全屏行为与布局归属(回植 fork 功能,见下) | - |
+| ⬜ | dc5bd860 | feat(sync): 弹幕屏蔽规则 WebDAV 同步 | - |
+| ⬜ | cd9bc04c | fix(player): 退出时加载指示器不再闪烁 | - |
+| ⬜ | c94c4830 | fix(ui): 移除重复的空状态操作 | - |
+| ⬜ | ac494bce | deps: bump media kit | - |
+| ⬜ | cd7c0f88 | fix(my): 简化竖屏布局 | - |
+| ⬜ | 80e256ec | feat(collect): 响应式布局与可配置默认视图(回植本地/缓存角标) | - |
+| ⬜ | c24f9a85 | fix(settings): 窗口关闭选项与启动设置对齐 | - |
+| ⬜ | a2e5a583 | feat(player): 弹幕源选择器重设计 | - |
+| ⬜ | 551b2360 | deps: bump media kit | - |
+| ⬜ | 4aef9b39 | fix(collect): hero 转场保持圆角 | - |
+| ⬜ | ba21fe35 | fix(collect): 分类标签切换平滑过渡 | - |
+| ⬜ | (收尾) | 恢复上游更新的 test/webdav_service_test.dart;pubspec/lock 整合 | - |
+
+### 批次 5 决定跳过
+
+| 状态 | 上游提交 | 原因 |
+|---|---|---|
+| ❌ | 7d042c09 + f1f1d2e7 | go router 迁移随后即被回退,净效果为零(仅保留其后的 3bfd5d1f 修复) |
+| ❌ | 0029b732 / 4fed48b5 | deps: bump media kit——与本分支已接收的 ref 重复(AC494BCE/551b2360 已覆盖),逐项核对 ref 后按需接收 |
+| ❌ | 1b395a50 / 285fa01b | deps: bump flutter 3.47.3/3.47.5——本机保持 3.47.2(用户决定) |
+| ❌ | 81b7734c | fix(ci): 仅 CI,与本分支无关 |
+| ❌ | bcf5f8bc | fix(macos): 仅 macOS(平台约束) |
+| ❌ | 7c15b9a9 / 48e3d873 / 88a8ec59 | version 提交——本分支版本号独立(0.0.1),不接收 |
+
+### 批次 5 冲突文件与 fork 回植点
+
+- `player_item.dart` / `player_item_panel.dart` / `smallest_player_item_panel.dart`(上游删除,并入新 `player_transport_bar.dart` / `video_fullscreen_controller.dart` / `video_side_panel.dart`):回植弹幕发射追踪、本地媒体/边下边播 pluginName、Bangumi 进度同步、远程投屏在线模式守卫
+- `video_page.dart` / `video_controller.dart`:回植三模式初始化分支(`isOnlinePlaybackMode`)、`LocalMediaVideoPlaybackArgs` / `MagnetStreamVideoPlaybackArgs` 处理、剧集评论接口
+- `collect_library_view.dart` / `collect_library_card.dart`:回植本地可用/缓存角标(localCount/cacheCount)
+- `index_module.dart` / `init_page.dart`:保留 magnet/media 模块注册与 magnetController 注入
+- `settings_keys.dart`:保留 magnet/media 设置组(约 50 项)+ 弹幕轴作用域偏移键
+- `danmaku_settings_sheet.dart`:保留 `playerDanmakuController` 参数与弹幕轴偏移面板对接
+- `pubspec.yaml`:保留 fork 依赖(libtorrent_flutter vendor、awesome_notifications、local_notifier、watcher、xml、material_new_shapes)与版本 0.0.1,接收上游 media-kit ref 更新
+- `fastlane/.flutter`:保持删除;`test/webdav_service_test.dart`:接收上游更新版本
+
 ## 决定跳过(按项目平台约束)
 
 | 状态 | 上游提交 | 原因 |
