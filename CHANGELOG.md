@@ -2,6 +2,16 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（六）
+
+- 播放器工具栏第一批优化（按 PLAYER_TOOLBAR_REVIEW.md 实施路线）：
+  - 新增底栏「上一集」按钮（非紧凑布局，复用 handlePreNextEpisode 边界处理：第一集时提示；紧凑布局因空间不足不展示）
+  - 新增静音按钮（宽屏底栏紧邻全屏按钮）：音量 0 或静音态显示静音图标，点击静音/恢复；移动端同样受益（此前移动端无静音入口）
+  - 倍速菜单新增「自定义」输入项（0.25 ~ 8，与 mpv scaletempo2 max-speed=8 上限对齐），宽屏与紧凑两处倍速菜单共用同一条目列表同时生效
+  - 修复快进按钮图标与实际秒数脱节：硬编码 forward_80.png 改为通用快进图标 + 秒数角标，长按修改秒数后角标立即刷新
+  - 验证：`dart format` 3 文件语法/格式全过；`dart analyze` 仍受系统级命名管道故障（CreateFile failed 231）无法启动，`flutter analyze`/`flutter test`/`tools/build_windows_local.ps1` 请在本地终端复核
+    - 相关文件: lib/pages/player/player_transport_bar.dart, lib/pages/player/player_item_panel.dart, lib/pages/player/player_item.dart
+
 ## 2026.9.24（五）
 
 - 新功能：桌面端（Windows）快捷键截图保存到文件 + 截图目录可配置

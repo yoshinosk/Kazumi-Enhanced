@@ -1669,6 +1669,7 @@ class _PlayerItemState extends State<PlayerItem>
                               handleSuperResolutionChange:
                                   handleSuperResolutionChange,
                               onNextEpisode: () => handlePreNextEpisode('next'),
+                              onPrevEpisode: () => handlePreNextEpisode('prev'),
                               panelVisibilityController:
                                   _panelVisibilityController,
                               keyboardFocus: widget.keyboardFocus,

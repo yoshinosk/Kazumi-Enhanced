@@ -6,10 +6,13 @@ enum PlayerTimeLabelPlacement {
   besideProgress,
   afterPlaybackButtons;
 
-  static PlayerTimeLabelPlacement forViewport(Size viewport,
-      {required bool desktop}) {
+  static PlayerTimeLabelPlacement forViewport(
+    Size viewport, {
+    required bool desktop,
+  }) {
     if (desktop) return afterPlaybackButtons;
-    final hasRoomForSideLabels = viewport.shortestSide >= 600 &&
+    final hasRoomForSideLabels =
+        viewport.shortestSide >= 600 &&
         viewport.shortestSide / viewport.longestSide >= 9 / 16;
     return hasRoomForSideLabels ? besideProgress : aboveProgress;
   }
@@ -21,6 +24,7 @@ class PlayerTransportBar extends StatelessWidget {
     required this.compact,
     required this.playPause,
     required this.nextEpisode,
+    this.prevEpisode,
     required this.progressBuilder,
     required this.timeLabel,
     required this.timePlacement,
@@ -31,6 +35,9 @@ class PlayerTransportBar extends StatelessWidget {
   final bool compact;
   final Widget playPause;
   final Widget nextEpisode;
+
+  /// 上一集按钮（仅非紧凑布局展示，紧凑布局空间不足）。
+  final Widget? prevEpisode;
   final Widget Function(TimeLabelLocation location) progressBuilder;
   final Widget timeLabel;
   final PlayerTimeLabelPlacement timePlacement;
@@ -39,12 +46,14 @@ class PlayerTransportBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => compact
-      ? Row(children: [
-          playPause,
-          Expanded(child: progressBuilder(TimeLabelLocation.none)),
-          timeLabel,
-          fullscreen,
-        ])
+      ? Row(
+          children: [
+            playPause,
+            Expanded(child: progressBuilder(TimeLabelLocation.none)),
+            timeLabel,
+            fullscreen,
+          ],
+        )
       : Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -63,18 +72,23 @@ class PlayerTransportBar extends StatelessWidget {
               ),
             ),
             Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(children: [
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  ?prevEpisode,
                   playPause,
                   nextEpisode,
                   if (timePlacement ==
                       PlayerTimeLabelPlacement.afterPlaybackButtons)
                     Padding(
-                        padding: const EdgeInsets.only(left: 10),
-                        child: timeLabel),
+                      padding: const EdgeInsets.only(left: 10),
+                      child: timeLabel,
+                    ),
                   Expanded(child: controls),
                   fullscreen,
-                ])),
+                ],
+              ),
+            ),
             if (timePlacement != PlayerTimeLabelPlacement.aboveProgress)
               const SizedBox(height: 6),
           ],
