@@ -631,6 +631,14 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// 桌面端截图保存目录（绝对路径），留空使用软件目录下的
+  /// screenshots 文件夹（见 ScreenshotSaveService）。
+  static const screenshotSavePath = SettingKey<String>(
+    'screenshotSavePath',
+    '',
+    group: SettingGroup.player,
+  );
+
   // 磁力搜索 / 下载 / RSS 订阅相关设置
   static const mikanBaseUrl = SettingKey<String>(
     'mikanBaseUrl',
@@ -704,8 +712,6 @@ class SettingsKeys {
     '',
     group: SettingGroup.magnet,
   );
-
-
 
   /// BitTorrent 对等节点监听端口，0 表示使用默认。
   static const magnetListenPort = SettingKey<int>(
@@ -1135,6 +1141,7 @@ class SettingsKeys {
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,
+    screenshotSavePath,
     mikanBaseUrl,
     magnetSearchSources,
     magnetDefaultSource,
@@ -1189,7 +1196,7 @@ class SettingsKeys {
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {
     return [
       for (final key in all)
-        if (key.group == group) key
+        if (key.group == group) key,
     ];
   }
 

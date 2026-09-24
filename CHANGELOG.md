@@ -2,6 +2,16 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（五）
+
+- 新功能：桌面端（Windows）快捷键截图保存到文件 + 截图目录可配置
+  - 背景：快捷键截图（默认 S 键）此前在桌面端仅提示「桌面端暂未支持保存截图」，Android 端保存到系统相册；桌面端截图能力实际完整（safeScreenshot → BGRA→PNG 编码），仅缺保存落地
+  - 新增 `ScreenshotSaveService`：默认保存到软件（exe）所在目录下的 `screenshots` 文件夹，文件名形如 `Kazumi_20260924_161234_番剧标题.png`（自动过滤 Windows 非法字符、超长截断、去除结尾点/空格）；目录不存在自动创建，写入失败 toast 提示并指向设置入口
+  - 播放设置新增「截图」设置区（仅桌面端显示）：展示当前生效目录、点击选择自定义目录（复用 pickWritableDirectory 可写校验）、自定义后可一键恢复默认；设置说明中同步曝光「截图快捷键默认为 S 键，可在操作设置中修改」
+  - Android 端截图行为不变（保存系统相册）；快捷键自定义（设置 → 操作设置）此前已完整存在，本次未改动
+  - 验证：截图文件名生成与净化逻辑经纯 Dart 抽取脚本运行 11 项断言全部通过；`dart analyze lib test` 因系统级命名管道故障（CreateFile failed 231，与既往一致）无法启动分析服务器，`flutter analyze`/`flutter test`/`tools/build_windows_local.ps1` 请在本地终端复核
+    - 相关文件: lib/services/player/screenshot_save_service.dart (新增), lib/pages/player/player_item.dart, lib/pages/settings/player_settings.dart, lib/services/storage/settings_keys.dart
+
 ## 2026.9.24（四）
 
 - BUG 修复：弹幕轴自动检测在小样本下被离群弹幕误导，产生高置信度错误推荐
