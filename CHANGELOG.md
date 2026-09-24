@@ -2,6 +2,27 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24
+
+- 优化磁力搜索 / 磁力下载 / 媒体库界面体验并修复两处 BUG
+  - BUG 修复：订阅展开区拉取条目失败（网络异常等）时 `loadSubscriptionFeed` 无错误处理，界面永远显示加载转圈；现在记录错误态并显示「加载失败 + 重试」按钮；清空搜索时同时重置 `query`，避免「订阅当前搜索」按钮残留
+    - 相关文件: lib/pages/magnet/magnet_controller.dart
+  - BUG 修复：修复 4 处 `TextEditingController` 泄漏（磁力页字幕组选择面板、订阅编辑页字幕组选择面板、手动添加磁力对话框、媒体库重命名对话框），均改为 StatefulWidget 自持有并在 `dispose` 释放；前两处顺带合并为共用 `_FansubPickerSheet` 组件消除重复代码
+    - 相关文件: lib/pages/magnet/magnet_page.dart, lib/pages/media/media_library_page.dart
+  - 新功能：磁力下载页新增统计栏（进行中任务数 + 总下载速度）与「暂停全部 / 继续全部」按钮（`pauseAllDownloads` 此前仅通知栏可触发，页面无入口；`resumeAllDownloads` 为新增）
+    - 相关文件: lib/pages/magnet/magnet_page.dart, lib/pages/magnet/magnet_controller.dart
+  - 新功能：磁力搜索新增搜索历史（持久化到设置，最多 20 条）：点击关键词直接搜索、删除单条、一键清空；搜索框有内容时显示清空按钮（清空并重置结果）
+    - 相关文件: lib/pages/magnet/magnet_page.dart, lib/pages/magnet/magnet_controller.dart, lib/services/storage/settings_keys.dart
+  - 新功能：磁力搜索结果条目支持长按 / 桌面右键快捷操作（下载、复制磁力链、复制种子直链、复制标题、查看详情）；详情面板新增「复制磁力链 / 复制直链」按钮
+    - 相关文件: lib/pages/magnet/magnet_page.dart
+  - 新功能：下载任务「选择下载文件」面板标题实时显示已选文件总体积，方便按体积取舍
+    - 相关文件: lib/pages/magnet/magnet_page.dart
+  - 新功能：媒体库番剧条目右键菜单由仅有「删除」扩充为「续播 / 番剧详情 / 缺集检测 / 修改识别结果 / 删除」；文件条目支持右键与长按直接弹出操作菜单（与「⋯」按钮一致）
+    - 相关文件: lib/pages/media/media_library_page.dart
+  - 样式优化：下载页任务搜索框圆角统一为 12（与搜索页一致）并增加清空按钮；订阅展开条目超过 20 条时显示「共 N 条，仅显示最近 20 条」提示
+    - 相关文件: lib/pages/magnet/magnet_page.dart
+  - 验证：`dart run build_runner build` 重新生成 MobX 代码；`flutter analyze` 无新增告警（仅存量 info 级提示）；`flutter test` 399 项全部通过
+
 ## 2026.9.23
 
 - 同步上游 2.3.2 ~ 2.3.4（批次 5：基线 23610a52 → 88a8ec59 共 28 个提交，按「逐提交内容移植 + 回植 fork 功能」完成 18 项，跳过 10 项；Flutter 保持 3.47.2，逐项登记见 UPSTREAM_SYNC.md 批次 5）

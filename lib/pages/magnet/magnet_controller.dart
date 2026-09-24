@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -151,6 +152,17 @@ abstract class _MagnetController with Store {
   ObservableMap<String, ObservableList<MagnetSearchItem>> subscriptionFeeds =
       ObservableMap();
 
+  /// 条目加载失败的订阅 ID（展开区显示错误与重试入口）。
+  @observable
+  ObservableSet<String> subscriptionFeedErrors = ObservableSet<String>();
+
+  /// 最近搜索关键词（新 → 旧，持久化在设置中）。
+  @observable
+  ObservableList<String> searchHistory = ObservableList();
+
+  /// 搜索历史保留条数上限。
+  static const int _maxSearchHistory = 20;
+
   @observable
   String currentSourceId =
       GStorage.getSetting(SettingsKeys.magnetDefaultSource);
@@ -252,7 +264,58 @@ abstract class _MagnetController with Store {
       KazumiLogger()
           .w('MagnetController: subscription service init failed', error: e);
     }
+    _loadSearchHistory();
     _refreshEngineInfo();
+  }
+
+  /// 从设置中恢复搜索历史（JSON 数组，旧 → 新）。
+  void _loadSearchHistory() {
+    final raw = GStorage.getSetting(SettingsKeys.magnetSearchHistory);
+    if (raw.isEmpty) return;
+    try {
+      final list = jsonDecode(raw) as List;
+      searchHistory
+        ..clear()
+        ..addAll(list.cast<String>().take(_maxSearchHistory));
+    } catch (e) {
+      KazumiLogger().w('MagnetController: load search history failed', error: e);
+    }
+  }
+
+  /// 把关键词写入搜索历史（去重后置顶，超限截断）并持久化。
+  void _rememberSearchQuery(String keyword) {
+    searchHistory
+      ..removeWhere((k) => k == keyword)
+      ..insert(0, keyword);
+    if (searchHistory.length > _maxSearchHistory) {
+      searchHistory.removeRange(_maxSearchHistory, searchHistory.length);
+    }
+    unawaited(_saveSearchHistory());
+  }
+
+  Future<void> _saveSearchHistory() async {
+    try {
+      await GStorage.putSetting(
+        SettingsKeys.magnetSearchHistory,
+        jsonEncode(searchHistory.toList()),
+      );
+    } catch (e) {
+      KazumiLogger().w('MagnetController: save search history failed', error: e);
+    }
+  }
+
+  /// 删除单条搜索历史。
+  @action
+  Future<void> removeSearchHistory(String keyword) async {
+    searchHistory.removeWhere((k) => k == keyword);
+    await _saveSearchHistory();
+  }
+
+  /// 清空全部搜索历史。
+  @action
+  Future<void> clearSearchHistory() async {
+    searchHistory.clear();
+    await _saveSearchHistory();
   }
 
   Future<void> dispose() async {
@@ -311,6 +374,32 @@ abstract class _MagnetController with Store {
     }
   }
 
+  /// 继续全部已暂停 / 排队中的磁力下载任务。
+  @action
+  Future<void> resumeAllDownloads() async {
+    for (final entry in List.of(downloadTasks)) {
+      if (entry.isPaused || entry.isQueued) {
+        await _downloads.unpause(entry.taskId);
+      }
+    }
+  }
+
+  /// 正在进行（下载 / 排队 / 校验 / 获取元数据 / 做种）的任务数。
+  int get activeDownloadCount => downloadTasks
+      .where((t) => t.isDownloading || t.isQueued || t.isSeeding)
+      .length;
+
+  /// 已暂停 / 排队等待继续的任务数。
+  int get pausableDownloadCount =>
+      downloadTasks.where((t) => t.isDownloading || t.isQueued).length;
+
+  int get resumableDownloadCount =>
+      downloadTasks.where((t) => t.isPaused || t.isQueued).length;
+
+  /// 全部任务的总下载速度（字节 / 秒）。
+  int get totalDownloadSpeed =>
+      downloadTasks.fold<int>(0, (sum, t) => sum + t.downloadSpeed);
+
   /// 同步引擎 / tracker 状态到 observable。
   void _refreshEngineInfo() {
     engineState = _downloads.engineState;
@@ -363,6 +452,8 @@ abstract class _MagnetController with Store {
   Future<void> search(String keyword) async {
     final trimmed = keyword.trim();
     if (trimmed.isEmpty) {
+      // 清空搜索：同时重置关键词，让工具栏（订阅当前搜索等）随之隐藏。
+      query = '';
       searchResults.clear();
       searchError = null;
       hasMoreSearchResults = false;
@@ -390,6 +481,7 @@ abstract class _MagnetController with Store {
         ..addAll(result.items);
       hasMoreSearchResults = result.hasMore;
       _rememberFansubs(result.items);
+      _rememberSearchQuery(trimmed);
       if (result.items.isEmpty) {
         searchError = '没有找到相关资源。可尝试切换其它搜索源，或检查代理设置（这些站点通常需要代理才能访问）';
       }
@@ -485,12 +577,22 @@ abstract class _MagnetController with Store {
   Future<void> removeSubscription(String id) async {
     await _subscriptions.remove(id);
     subscriptionFeeds.remove(id);
+    subscriptionFeedErrors.remove(id);
   }
 
   @action
   Future<void> loadSubscriptionFeed(MagnetSubscription sub) async {
-    final items = await _subscriptions.fetchLatest(sub);
-    subscriptionFeeds[sub.id] = ObservableList.of(items);
+    try {
+      final items = await _subscriptions.fetchLatest(sub);
+      subscriptionFeeds[sub.id] = ObservableList.of(items);
+      subscriptionFeedErrors.remove(sub.id);
+    } catch (e) {
+      // 拉取失败时记录错误态：展开区显示「加载失败 + 重试」而非永远转圈。
+      subscriptionFeedErrors.add(sub.id);
+      KazumiLogger().w(
+          'MagnetController: load subscription feed failed for ${sub.name}',
+          error: e);
+    }
   }
 
   @action

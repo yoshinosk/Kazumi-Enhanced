@@ -245,97 +245,15 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (sheetCtx) {
-        final searchCtrl =
-            TextEditingController(text: controller.searchFansub ?? '');
-        return StatefulBuilder(
-          builder: (innerCtx, setInnerState) {
-            final q = searchCtrl.text.trim().toLowerCase();
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(innerCtx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text('筛选字幕组', style: TextStyle(fontSize: 16)),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(innerCtx, null),
-                          child: const Text('取消'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      controller: searchCtrl,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: '搜索或手动输入字幕组名称',
-                        prefixIcon: Icon(Icons.search_rounded, size: 20),
-                      ),
-                      onChanged: (_) => setInnerState(() {}),
-                    ),
-                  ),
-                  const Divider(height: 8),
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        if (controller.searchFansub != null)
-                          ListTile(
-                            leading: const Icon(Icons.clear_rounded, size: 20),
-                            title: const Text('清除（不限字幕组）'),
-                            onTap: () => Navigator.pop(innerCtx, '__clear__'),
-                          ),
-                        ..._resultFansubs
-                            .where((name) => name.toLowerCase().contains(q))
-                            .map((name) => ListTile(
-                                  dense: true,
-                                  title: Text(name),
-                                  trailing: name == controller.searchFansub
-                                      ? const Icon(Icons.check_rounded,
-                                          size: 20)
-                                      : null,
-                                  onTap: () => Navigator.pop(innerCtx, name),
-                                )),
-                        if (_resultFansubs.isEmpty &&
-                            searchCtrl.text.trim().isEmpty)
-                          const ListTile(
-                            dense: true,
-                            enabled: false,
-                            title: Text('当前搜索结果中没有字幕组信息'),
-                          ),
-                        if (searchCtrl.text.trim().isNotEmpty &&
-                            !_resultFansubs.contains(searchCtrl.text.trim()))
-                          ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.add_rounded, size: 20),
-                            title: Text('使用「${searchCtrl.text.trim()}」'),
-                            onTap: () =>
-                                Navigator.pop(innerCtx, searchCtrl.text.trim()),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (_) => _FansubPickerSheet(
+        title: '筛选字幕组',
+        options: _resultFansubs,
+        current: controller.searchFansub,
+        emptyHint: '当前搜索结果中没有字幕组信息',
+      ),
     );
     if (picked == null) return;
-    final value = picked == '__clear__' ? null : picked;
-    await controller.setSearchFansub(value);
+    await controller.setSearchFansub(picked.isEmpty ? null : picked);
   }
 
   void _createSubscriptionFromSearch() {
@@ -364,10 +282,30 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.search_rounded),
-                onPressed: () =>
-                    controller.search(widget.searchController.text),
+              suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: widget.searchController,
+                builder: (context, value, _) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (value.text.isNotEmpty)
+                        IconButton(
+                          tooltip: '清空',
+                          icon: const Icon(Icons.clear_rounded),
+                          onPressed: () {
+                            widget.searchController.clear();
+                            controller.search('');
+                          },
+                        ),
+                      IconButton(
+                        tooltip: '搜索',
+                        icon: const Icon(Icons.search_rounded),
+                        onPressed: () =>
+                            controller.search(widget.searchController.text),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             onSubmitted: (value) => controller.search(value),
@@ -440,6 +378,11 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                 return const Center(child: CircularProgressIndicator());
               }
               if (controller.searchResults.isEmpty) {
+                // 无搜索结果且无报错（尚未搜索 / 已清空）时优先展示搜索历史。
+                if (controller.searchError == null &&
+                    controller.searchHistory.isNotEmpty) {
+                  return _SearchHistoryView(controller: controller);
+                }
                 return Center(
                   child: GeneralEmptyState(
                     icon: Icons.search_off_rounded,
@@ -491,6 +434,188 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
   }
 }
 
+/// 搜索历史面板：点击关键词直接搜索，删除按钮移除单条，顶部一键清空。
+class _SearchHistoryView extends StatelessWidget {
+  const _SearchHistoryView({required this.controller});
+
+  final MagnetController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Observer(builder: (_) {
+      final history = controller.searchHistory;
+      if (history.isEmpty) {
+        return Center(
+          child: GeneralEmptyState(
+            icon: Icons.search_off_rounded,
+            title: '输入关键词开始搜索',
+          ),
+        );
+      }
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.history_rounded, size: 18),
+              const SizedBox(width: 6),
+              Text('最近搜索', style: theme.textTheme.titleSmall),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => controller.clearSearchHistory(),
+                icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                label: const Text('清空'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final keyword in history)
+                InputChip(
+                  label: Text(keyword),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => controller.search(keyword),
+                  onDeleted: () => controller.removeSearchHistory(keyword),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '点击关键词直接搜索，删除按钮移除单条记录',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.outline),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+/// 字幕组选择底部面板（搜索筛选与订阅编辑共用）。
+///
+/// 返回值约定：null = 取消；空字符串 = 清除（不限字幕组）；非空 = 选中名称。
+/// 自持有 [TextEditingController]，关闭时释放，避免泄漏。
+class _FansubPickerSheet extends StatefulWidget {
+  const _FansubPickerSheet({
+    required this.title,
+    required this.options,
+    this.current,
+    this.emptyHint,
+  });
+
+  final String title;
+
+  /// 候选字幕组列表（已排序）。
+  final List<String> options;
+
+  /// 当前选中的字幕组（null 表示不限）。
+  final String? current;
+
+  /// 候选列表为空且无搜索词时的提示文案。
+  final String? emptyHint;
+
+  @override
+  State<_FansubPickerSheet> createState() => _FansubPickerSheetState();
+}
+
+class _FansubPickerSheetState extends State<_FansubPickerSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _pop(String value) => Navigator.pop(context, value);
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final filtered =
+        widget.options.where((name) => name.toLowerCase().contains(q)).toList();
+    final manual = _searchCtrl.text.trim();
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(widget.title,
+                      style: const TextStyle(fontSize: 16)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('取消'),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: '搜索或手动输入字幕组名称',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          const Divider(height: 8),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                if (widget.current != null)
+                  ListTile(
+                    leading: const Icon(Icons.clear_rounded, size: 20),
+                    title: const Text('清除（不限字幕组）'),
+                    onTap: () => _pop(''),
+                  ),
+                ...filtered.map((name) => ListTile(
+                      dense: true,
+                      title: Text(name),
+                      trailing: name == widget.current
+                          ? const Icon(Icons.check_rounded, size: 20)
+                          : null,
+                      onTap: () => _pop(name),
+                    )),
+                if (filtered.isEmpty && manual.isEmpty && widget.emptyHint != null)
+                  ListTile(
+                    dense: true,
+                    enabled: false,
+                    title: Text(widget.emptyHint!),
+                  ),
+                if (manual.isNotEmpty && !widget.options.contains(manual))
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.add_rounded, size: 20),
+                    title: Text('使用「$manual」'),
+                    onTap: () => _pop(manual),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
 class _MagnetSearchTile extends StatelessWidget {
   const _MagnetSearchTile({required this.item, required this.onDownload});
 
@@ -500,49 +625,126 @@ class _MagnetSearchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      title: Text(
-        item.title,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodyMedium,
+    return GestureDetector(
+      // 桌面端右键弹出快捷操作菜单。
+      onSecondaryTapUp: (_) => _showActionsSheet(context),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        title: Text(
+          item.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (item.subtitle.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  item.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              children: [
+                if (item.size.isNotEmpty)
+                  _MetaChip(icon: Icons.sd_storage_rounded, label: item.size),
+                if (item.publisher != null)
+                  _MetaChip(icon: Icons.person_outline, label: item.publisher!),
+                _MetaChip(
+                  icon: Icons.schedule_rounded,
+                  label: _formatDate(item.publishDate),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.download_for_offline_outlined),
+          tooltip: '下载',
+          onPressed: onDownload,
+        ),
+        onTap: () => _showDetailSheet(context),
+        onLongPress: () => _showActionsSheet(context),
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (item.subtitle.isNotEmpty)
+    );
+  }
+
+  void _copy(BuildContext context, String text, String message) {
+    Clipboard.setData(ClipboardData(text: text));
+    KazumiDialog.showToast(message: message);
+  }
+
+  /// 长按 / 右键快捷操作：下载、复制链接、复制标题、查看详情。
+  void _showActionsSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Padding(
-              padding: const EdgeInsets.only(top: 2),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                item.subtitle,
-                maxLines: 1,
+                item.title,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
+                style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (item.size.isNotEmpty)
-                _MetaChip(icon: Icons.sd_storage_rounded, label: item.size),
-              if (item.publisher != null)
-                _MetaChip(icon: Icons.person_outline, label: item.publisher!),
-              _MetaChip(
-                icon: Icons.schedule_rounded,
-                label: _formatDate(item.publishDate),
+            ListTile(
+              leading: const Icon(Icons.download_rounded),
+              title: const Text('下载'),
+              onTap: () {
+                Navigator.pop(context);
+                onDownload();
+              },
+            ),
+            if (item.magnetLink.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.link_rounded),
+                title: const Text('复制磁力链'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _copy(context, item.magnetLink, '已复制磁力链接');
+                },
               ),
-            ],
-          ),
-        ],
+            if (item.torrentUrl.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.attach_file_rounded),
+                title: const Text('复制种子直链'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _copy(context, item.torrentUrl, '已复制种子直链');
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.title_rounded),
+              title: const Text('复制标题'),
+              onTap: () {
+                Navigator.pop(context);
+                _copy(context, item.title, '已复制标题');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded),
+              title: const Text('查看详情'),
+              onTap: () {
+                Navigator.pop(context);
+                _showDetailSheet(context);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
-      trailing: IconButton(
-        icon: const Icon(Icons.download_for_offline_outlined),
-        tooltip: '下载',
-        onPressed: onDownload,
-      ),
-      onTap: () => _showDetailSheet(context),
     );
   }
 
@@ -584,14 +786,29 @@ class _MagnetSearchTile extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 4,
                 children: [
+                  if (item.magnetLink.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () =>
+                          _copy(context, item.magnetLink, '已复制磁力链接'),
+                      icon: const Icon(Icons.link_rounded, size: 18),
+                      label: const Text('复制磁力链'),
+                    ),
+                  if (item.torrentUrl.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () =>
+                          _copy(context, item.torrentUrl, '已复制种子直链'),
+                      icon: const Icon(Icons.attach_file_rounded, size: 18),
+                      label: const Text('复制直链'),
+                    ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Text('关闭'),
                   ),
-                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: () {
                       Navigator.of(context).pop();
@@ -897,7 +1114,31 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
                     ),
                   ),
                   const Divider(height: 1),
-                  if (feed == null)
+                  if (widget.controller.subscriptionFeedErrors
+                      .contains(sub.id))
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline_rounded,
+                              size: 18, color: theme.colorScheme.error),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '条目加载失败，请检查网络后重试',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                widget.controller.loadSubscriptionFeed(sub),
+                            child: const Text('重试'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (feed == null)
                     const Padding(
                       padding: EdgeInsets.all(16),
                       child: Center(
@@ -908,7 +1149,7 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
                       padding: EdgeInsets.all(16),
                       child: Text('暂无条目'),
                     )
-                  else
+                  else ...[
                     for (final item in feed.take(20))
                       _MagnetSearchTile(
                         item: item,
@@ -920,6 +1161,16 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
                           scrapeInfo: widget.scrapeInfo,
                         ),
                       ),
+                    if (feed.length > 20)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          '共 ${feed.length} 条，仅显示最近 20 条',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.outline),
+                        ),
+                      ),
+                  ],
                 ],
               );
             },
@@ -1073,15 +1324,68 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: TextField(
               controller: _searchCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '搜索任务',
-                prefixIcon: Icon(Icons.search_rounded, size: 20),
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
                 isDense: true,
-                border: OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                suffixIcon: _searchQuery.trim().isNotEmpty
+                    ? IconButton(
+                        tooltip: '清空',
+                        icon: const Icon(Icons.clear_rounded, size: 20),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
               ),
               onChanged: (value) => setState(() => _searchQuery = value),
             ),
           ),
+          // 任务统计 + 批量暂停 / 继续。
+          Observer(builder: (_) {
+            if (controller.downloadTasks.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            final active = controller.activeDownloadCount;
+            final speed = controller.totalDownloadSpeed;
+            final pausable = controller.pausableDownloadCount;
+            final resumable = controller.resumableDownloadCount;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 4, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      speed > 0
+                          ? '进行中 $active 个任务 · ${_formatBytes(speed)}/s'
+                          : '进行中 $active 个任务 · 空闲',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '暂停全部任务',
+                    icon: const Icon(Icons.pause_circle_outline),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: pausable > 0
+                        ? () => controller.pauseAllDownloads()
+                        : null,
+                  ),
+                  IconButton(
+                    tooltip: '继续全部任务',
+                    icon: const Icon(Icons.play_circle_outline),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: resumable > 0
+                        ? () => controller.resumeAllDownloads()
+                        : null,
+                  ),
+                ],
+              ),
+            );
+          }),
           Expanded(
             child: tasks.isEmpty
                 ? Center(
@@ -1340,101 +1644,10 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   }
 
   /// 手动添加磁力链接 / .torrent（URL 或本地文件）。
-  Future<void> _showAddMagnetDialog(BuildContext context) async {
-    final linkCtrl = TextEditingController();
-    final titleCtrl = TextEditingController();
-    // 沿用本次会话选过的目录，连续手动添加时无需重复选择。
-    String? saveDir = MagnetSessionDownloadDir.lastPicked;
+  void _showAddMagnetDialog(BuildContext context) {
     KazumiDialog.show(
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) {
-          final theme = Theme.of(dialogContext);
-          return AlertDialog(
-            title: const Text('手动添加下载'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: linkCtrl,
-                  maxLines: 3,
-                  minLines: 1,
-                  decoration: const InputDecoration(
-                    labelText: '磁力链接 / 种子 URL / .torrent 路径',
-                    hintText: 'magnet:?xt=urn:btih:...',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(
-                    labelText: '任务名称（可选）',
-                    hintText: '留空则获取元数据后自动填充',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        saveDir == null ? '保存到默认下载目录' : '保存到：$saveDir',
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                    if (saveDir != null)
-                      IconButton(
-                        tooltip: '恢复默认下载目录',
-                        icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                        onPressed: () => setDialogState(() => saveDir = null),
-                      ),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final picked = await pickWritableDirectory(
-                          dialogTitle: '选择保存目录',
-                          initialDirectory: saveDir,
-                        );
-                        if (picked == null || !dialogContext.mounted) return;
-                        setDialogState(() => saveDir = picked);
-                        MagnetSessionDownloadDir.lastPicked = picked;
-                      },
-                      icon: const Icon(Icons.folder_open_rounded, size: 18),
-                      label: const Text('选择目录'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final link = linkCtrl.text.trim();
-                  if (link.isEmpty) {
-                    KazumiDialog.showToast(message: '请输入磁力链接或种子地址');
-                    return;
-                  }
-                  Navigator.pop(dialogContext);
-                  final item = MagnetSearchItem(
-                    title: titleCtrl.text.trim().isEmpty
-                        ? '手动添加的任务'
-                        : titleCtrl.text.trim(),
-                    magnetLink: link.startsWith('magnet:') ? link : '',
-                    torrentUrl: link.startsWith('magnet:') ? '' : link,
-                    size: '',
-                    publishDate: DateTime.now(),
-                  );
-                  widget.controller.addDownload(item, dir: saveDir);
-                },
-                child: const Text('添加'),
-              ),
-            ],
-          );
-        },
+      builder: (dialogContext) => _AddMagnetLinkDialog(
+        controller: widget.controller,
       ),
     );
   }
@@ -1800,14 +2013,23 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
               child: Column(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '选择下载文件（${selected.length}/${files.length}）',
-                            style: theme.textTheme.titleMedium,
-                          ),
+                      padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                          child: Builder(builder: (_) {
+                            var selectedBytes = 0;
+                            for (final i in selected) {
+                              if (i >= 0 && i < files.length) {
+                                selectedBytes += files[i].size;
+                              }
+                            }
+                            return Text(
+                              '选择下载文件（${selected.length}/${files.length}'
+                              '${selectedBytes > 0 ? ' · 已选 ${_formatBytes(selectedBytes)}' : ''}）',
+                              style: theme.textTheme.titleMedium,
+                            );
+                          }),
                         ),
                         TextButton(
                           onPressed: () => setSheetState(() {
@@ -1879,6 +2101,142 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
           );
         },
       ),
+    );
+  }
+}
+
+/// 手动添加磁力链接 / 种子地址的对话框。
+///
+/// 自持有 [TextEditingController]，关闭时释放，避免泄漏。
+class _AddMagnetLinkDialog extends StatefulWidget {
+  const _AddMagnetLinkDialog({required this.controller});
+
+  final MagnetController controller;
+
+  @override
+  State<_AddMagnetLinkDialog> createState() => _AddMagnetLinkDialogState();
+}
+
+class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
+  final TextEditingController _linkCtrl = TextEditingController();
+  final TextEditingController _titleCtrl = TextEditingController();
+
+  /// 下载目录：沿用本次会话选过的目录（连续手动添加无需重复选择）。
+  String? _saveDir = MagnetSessionDownloadDir.lastPicked;
+  bool _picking = false;
+
+  @override
+  void dispose() {
+    _linkCtrl.dispose();
+    _titleCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDir() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final picked = await pickWritableDirectory(
+        dialogTitle: '选择保存目录',
+        initialDirectory: _saveDir,
+      );
+      if (picked == null || !mounted) return;
+      setState(() => _saveDir = picked);
+      MagnetSessionDownloadDir.lastPicked = picked;
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _submit() {
+    final link = _linkCtrl.text.trim();
+    if (link.isEmpty) {
+      KazumiDialog.showToast(message: '请输入磁力链接或种子地址');
+      return;
+    }
+    final title = _titleCtrl.text.trim();
+    Navigator.pop(context);
+    final item = MagnetSearchItem(
+      title: title.isEmpty ? '手动添加的任务' : title,
+      magnetLink: link.startsWith('magnet:') ? link : '',
+      torrentUrl: link.startsWith('magnet:') ? '' : link,
+      size: '',
+      publishDate: DateTime.now(),
+    );
+    widget.controller.addDownload(item, dir: _saveDir);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('手动添加下载'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _linkCtrl,
+            maxLines: 3,
+            minLines: 1,
+            decoration: const InputDecoration(
+              labelText: '磁力链接 / 种子 URL / .torrent 路径',
+              hintText: 'magnet:?xt=urn:btih:...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _titleCtrl,
+            decoration: const InputDecoration(
+              labelText: '任务名称（可选）',
+              hintText: '留空则获取元数据后自动填充',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _saveDir == null ? '保存到默认下载目录' : '保存到：$_saveDir',
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              if (_saveDir != null)
+                IconButton(
+                  tooltip: '恢复默认下载目录',
+                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                  onPressed: () {
+                    setState(() => _saveDir = null);
+                    MagnetSessionDownloadDir.reset();
+                  },
+                ),
+              TextButton.icon(
+                onPressed: _picking ? null : _pickDir,
+                icon: _picking
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.folder_open_rounded, size: 18),
+                label: const Text('选择目录'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('添加'),
+        ),
+      ],
     );
   }
 }
@@ -2916,88 +3274,13 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (sheetCtx) {
-        final searchCtrl = TextEditingController(text: _fansub ?? '');
-        return StatefulBuilder(
-          builder: (innerCtx, setInnerState) {
-            final q = searchCtrl.text.trim().toLowerCase();
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(innerCtx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text('选择字幕组', style: TextStyle(fontSize: 16)),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(innerCtx, null),
-                          child: const Text('取消'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      controller: searchCtrl,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: '搜索或手动输入字幕组名称',
-                        prefixIcon: Icon(Icons.search_rounded, size: 20),
-                      ),
-                      onChanged: (_) => setInnerState(() {}),
-                    ),
-                  ),
-                  const Divider(height: 8),
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        if (_fansub != null)
-                          ListTile(
-                            leading: const Icon(Icons.clear_rounded, size: 20),
-                            title: const Text('清除（不限字幕组）'),
-                            onTap: () => Navigator.pop(innerCtx, '__clear__'),
-                          ),
-                        ..._teams
-                            .where((t) => t.name.toLowerCase().contains(q))
-                            .map((t) => ListTile(
-                                  dense: true,
-                                  title: Text(t.name),
-                                  trailing: t.name == _fansub
-                                      ? const Icon(Icons.check_rounded,
-                                          size: 20)
-                                      : null,
-                                  onTap: () => Navigator.pop(innerCtx, t.name),
-                                )),
-                        if (searchCtrl.text.trim().isNotEmpty &&
-                            !_teams
-                                .any((t) => t.name == searchCtrl.text.trim()))
-                          ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.add_rounded, size: 20),
-                            title: Text('使用「${searchCtrl.text.trim()}」'),
-                            onTap: () =>
-                                Navigator.pop(innerCtx, searchCtrl.text.trim()),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (_) => _FansubPickerSheet(
+        title: '选择字幕组',
+        options: [for (final t in _teams) t.name],
+        current: _fansub,
+      ),
     );
     if (picked == null) return;
-    setState(() => _fansub = picked == '__clear__' ? null : picked);
+    setState(() => _fansub = picked.isEmpty ? null : picked);
   }
 }

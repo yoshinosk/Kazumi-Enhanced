@@ -1062,17 +1062,33 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     );
   }
 
-  List<PopupMenuEntry<String>> _groupMenuItems() => [
+  List<PopupMenuEntry<String>> _groupMenuItems() {
+    final info = widget.group.info;
+    return [
+      if (widget.controller.resumePointForFolders(widget.group.folders) !=
+          null)
         const PopupMenuItem(
-          value: 'delete',
-          child: Text('删除', style: TextStyle(color: Colors.red)),
+          value: 'resume',
+          child: Text('续播'),
         ),
-      ];
+      if (info != null && info.bangumiId != null) ...[
+        const PopupMenuItem(value: 'detail', child: Text('番剧详情')),
+        const PopupMenuItem(value: 'missing', child: Text('缺集检测')),
+      ],
+      if (info != null)
+        const PopupMenuItem(value: 'rematch', child: Text('修改识别结果')),
+      const PopupMenuDivider(),
+      const PopupMenuItem(
+        value: 'delete',
+        child: Text('删除', style: TextStyle(color: Colors.red)),
+      ),
+    ];
+  }
 
   /// 右键（桌面端）在光标处弹出操作菜单。
   Future<void> _showGroupContextMenu(
-    BuildContext context,
-    Offset position,
+      BuildContext context,
+      Offset position,
   ) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final local = overlay.globalToLocal(position);
@@ -1087,8 +1103,45 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
       items: _groupMenuItems(),
     );
     if (!context.mounted) return;
-    if (value == 'delete') {
-      _confirmDeleteGroup(context, widget.controller, widget.group);
+    _handleGroupMenuAction(context, value);
+  }
+
+  void _handleGroupMenuAction(BuildContext context, String? value) {
+    final group = widget.group;
+    final info = group.info;
+    switch (value) {
+      case 'resume':
+        final resume =
+            widget.controller.resumePointForFolders(group.folders);
+        if (resume != null) {
+          widget.onFileTap(
+            resume.file,
+            resume.folder.files,
+            widget.controller.getFileScrapeInfo(resume.file, resume.folder),
+          );
+        }
+        break;
+      case 'detail':
+        if (info != null) {
+          context.pushNamed('/info/', arguments: info.toBangumiItem());
+        }
+        break;
+      case 'missing':
+        if (info != null) {
+          _showMissingEpisodesSheet(context, widget.controller, group);
+        }
+        break;
+      case 'rematch':
+        _showManualMatchDialog(
+          context,
+          widget.controller,
+          folder: group.folders.first,
+          title: '修改识别结果',
+        );
+        break;
+      case 'delete':
+        _confirmDeleteGroup(context, widget.controller, group);
+        break;
     }
   }
 
@@ -1791,48 +1844,53 @@ class _FileTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final kindLabel = localEpisodeKindLabel(classifyLocalEpisode(file.name));
-    return ListTile(
-      dense: true,
-      leading: const Icon(Icons.play_circle_outline_rounded, size: 28),
-      title: Row(
-        children: [
-          if (kindLabel.isNotEmpty) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.tertiary.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                kindLabel,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.tertiary,
-                  fontWeight: FontWeight.w600,
+    return GestureDetector(
+      // 桌面端右键文件条目直接弹出操作菜单（与「⋯」按钮一致）。
+      onSecondaryTapUp: (_) => onMenu(),
+      child: ListTile(
+        dense: true,
+        leading: const Icon(Icons.play_circle_outline_rounded, size: 28),
+        title: Row(
+          children: [
+            if (kindLabel.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.tertiary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  kindLabel,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.tertiary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                file.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const SizedBox(width: 6),
           ],
-          Expanded(
-            child: Text(
-              file.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+        ),
+        subtitle: file.size <= 0
+            ? null
+            : Text(
+                '${file.sizeLabel} · ${_formatDate(file.modifiedAt)}',
+                style: theme.textTheme.bodySmall,
+              ),
+        trailing: IconButton(
+          icon: const Icon(Icons.more_vert, size: 20),
+          onPressed: onMenu,
+        ),
+        onTap: onTap,
+        onLongPress: onMenu,
       ),
-      subtitle: file.size <= 0
-          ? null
-          : Text(
-              '${file.sizeLabel} · ${_formatDate(file.modifiedAt)}',
-              style: theme.textTheme.bodySmall,
-            ),
-      trailing: IconButton(
-        icon: const Icon(Icons.more_vert, size: 20),
-        onPressed: onMenu,
-      ),
-      onTap: onTap,
     );
   }
 
@@ -1963,38 +2021,72 @@ void _showRenameDialog(
   MediaController controller,
   LocalMediaFile file,
 ) {
-  final ext = p.extension(file.path);
-  final nameController =
-      TextEditingController(text: p.basenameWithoutExtension(file.path));
   showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
+    builder: (dialogContext) => _RenameFileDialog(
+      controller: controller,
+      file: file,
+    ),
+  );
+}
+
+/// 重命名对话框：自持有 [TextEditingController]，关闭时释放，避免泄漏。
+class _RenameFileDialog extends StatefulWidget {
+  const _RenameFileDialog({
+    required this.controller,
+    required this.file,
+  });
+
+  final MediaController controller;
+  final LocalMediaFile file;
+
+  @override
+  State<_RenameFileDialog> createState() => _RenameFileDialogState();
+}
+
+class _RenameFileDialogState extends State<_RenameFileDialog> {
+  late final TextEditingController _nameController = TextEditingController(
+    text: p.basenameWithoutExtension(widget.file.path),
+  );
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final newName = _nameController.text;
+    Navigator.pop(context);
+    widget.controller.renameFile(widget.file, newName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
       title: const Text('重命名'),
       content: TextField(
-        controller: nameController,
+        controller: _nameController,
         autofocus: true,
         decoration: InputDecoration(
           labelText: '文件名',
-          suffixText: ext,
+          suffixText: p.extension(widget.file.path),
           border: const OutlineInputBorder(),
         ),
+        onSubmitted: (_) => _submit(),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
+          onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
         TextButton(
-          onPressed: () {
-            final newName = nameController.text;
-            Navigator.pop(dialogContext);
-            controller.renameFile(file, newName);
-          },
+          onPressed: _submit,
           child: const Text('确定'),
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 void _showMoveDialog(

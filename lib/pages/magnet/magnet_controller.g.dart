@@ -9,8 +9,10 @@ part of 'magnet_controller.dart';
 // ignore_for_file: non_constant_identifier_names, unnecessary_brace_in_string_interps, unnecessary_lambdas, prefer_expression_function_bodies, lines_longer_than_80_chars, avoid_as, avoid_annotating_with_dynamic, no_leading_underscores_for_local_identifiers
 
 mixin _$MagnetController on _MagnetController, Store {
-  late final _$queryAtom =
-      Atom(name: '_MagnetController.query', context: context);
+  late final _$queryAtom = Atom(
+    name: '_MagnetController.query',
+    context: context,
+  );
 
   @override
   String get query {
@@ -25,8 +27,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$searchResultsAtom =
-      Atom(name: '_MagnetController.searchResults', context: context);
+  late final _$searchResultsAtom = Atom(
+    name: '_MagnetController.searchResults',
+    context: context,
+  );
 
   @override
   ObservableList<MagnetSearchItem> get searchResults {
@@ -41,8 +45,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$isSearchingAtom =
-      Atom(name: '_MagnetController.isSearching', context: context);
+  late final _$isSearchingAtom = Atom(
+    name: '_MagnetController.isSearching',
+    context: context,
+  );
 
   @override
   bool get isSearching {
@@ -57,8 +63,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$searchErrorAtom =
-      Atom(name: '_MagnetController.searchError', context: context);
+  late final _$searchErrorAtom = Atom(
+    name: '_MagnetController.searchError',
+    context: context,
+  );
 
   @override
   String? get searchError {
@@ -73,8 +81,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$hasMoreSearchResultsAtom =
-      Atom(name: '_MagnetController.hasMoreSearchResults', context: context);
+  late final _$hasMoreSearchResultsAtom = Atom(
+    name: '_MagnetController.hasMoreSearchResults',
+    context: context,
+  );
 
   @override
   bool get hasMoreSearchResults {
@@ -84,14 +94,19 @@ mixin _$MagnetController on _MagnetController, Store {
 
   @override
   set hasMoreSearchResults(bool value) {
-    _$hasMoreSearchResultsAtom.reportWrite(value, super.hasMoreSearchResults,
-        () {
-      super.hasMoreSearchResults = value;
-    });
+    _$hasMoreSearchResultsAtom.reportWrite(
+      value,
+      super.hasMoreSearchResults,
+      () {
+        super.hasMoreSearchResults = value;
+      },
+    );
   }
 
-  late final _$isLoadingMoreAtom =
-      Atom(name: '_MagnetController.isLoadingMore', context: context);
+  late final _$isLoadingMoreAtom = Atom(
+    name: '_MagnetController.isLoadingMore',
+    context: context,
+  );
 
   @override
   bool get isLoadingMore {
@@ -106,8 +121,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$searchFansubAtom =
-      Atom(name: '_MagnetController.searchFansub', context: context);
+  late final _$searchFansubAtom = Atom(
+    name: '_MagnetController.searchFansub',
+    context: context,
+  );
 
   @override
   String? get searchFansub {
@@ -122,8 +139,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$subscriptionsAtom =
-      Atom(name: '_MagnetController.subscriptions', context: context);
+  late final _$subscriptionsAtom = Atom(
+    name: '_MagnetController.subscriptions',
+    context: context,
+  );
 
   @override
   ObservableList<MagnetSubscription> get subscriptions {
@@ -138,8 +157,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$downloadTasksAtom =
-      Atom(name: '_MagnetController.downloadTasks', context: context);
+  late final _$downloadTasksAtom = Atom(
+    name: '_MagnetController.downloadTasks',
+    context: context,
+  );
 
   @override
   ObservableList<MagnetDownloadEntry> get downloadTasks {
@@ -154,26 +175,71 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$subscriptionFeedsAtom =
-      Atom(name: '_MagnetController.subscriptionFeeds', context: context);
+  late final _$subscriptionFeedsAtom = Atom(
+    name: '_MagnetController.subscriptionFeeds',
+    context: context,
+  );
 
   @override
   ObservableMap<String, ObservableList<MagnetSearchItem>>
-      get subscriptionFeeds {
+  get subscriptionFeeds {
     _$subscriptionFeedsAtom.reportRead();
     return super.subscriptionFeeds;
   }
 
   @override
   set subscriptionFeeds(
-      ObservableMap<String, ObservableList<MagnetSearchItem>> value) {
+    ObservableMap<String, ObservableList<MagnetSearchItem>> value,
+  ) {
     _$subscriptionFeedsAtom.reportWrite(value, super.subscriptionFeeds, () {
       super.subscriptionFeeds = value;
     });
   }
 
-  late final _$currentSourceIdAtom =
-      Atom(name: '_MagnetController.currentSourceId', context: context);
+  late final _$subscriptionFeedErrorsAtom = Atom(
+    name: '_MagnetController.subscriptionFeedErrors',
+    context: context,
+  );
+
+  @override
+  ObservableSet<String> get subscriptionFeedErrors {
+    _$subscriptionFeedErrorsAtom.reportRead();
+    return super.subscriptionFeedErrors;
+  }
+
+  @override
+  set subscriptionFeedErrors(ObservableSet<String> value) {
+    _$subscriptionFeedErrorsAtom.reportWrite(
+      value,
+      super.subscriptionFeedErrors,
+      () {
+        super.subscriptionFeedErrors = value;
+      },
+    );
+  }
+
+  late final _$searchHistoryAtom = Atom(
+    name: '_MagnetController.searchHistory',
+    context: context,
+  );
+
+  @override
+  ObservableList<String> get searchHistory {
+    _$searchHistoryAtom.reportRead();
+    return super.searchHistory;
+  }
+
+  @override
+  set searchHistory(ObservableList<String> value) {
+    _$searchHistoryAtom.reportWrite(value, super.searchHistory, () {
+      super.searchHistory = value;
+    });
+  }
+
+  late final _$currentSourceIdAtom = Atom(
+    name: '_MagnetController.currentSourceId',
+    context: context,
+  );
 
   @override
   String get currentSourceId {
@@ -188,8 +254,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$engineStateAtom =
-      Atom(name: '_MagnetController.engineState', context: context);
+  late final _$engineStateAtom = Atom(
+    name: '_MagnetController.engineState',
+    context: context,
+  );
 
   @override
   LibtorrentEngineState get engineState {
@@ -204,8 +272,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$engineErrorAtom =
-      Atom(name: '_MagnetController.engineError', context: context);
+  late final _$engineErrorAtom = Atom(
+    name: '_MagnetController.engineError',
+    context: context,
+  );
 
   @override
   String? get engineError {
@@ -220,8 +290,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$trackerCountAtom =
-      Atom(name: '_MagnetController.trackerCount', context: context);
+  late final _$trackerCountAtom = Atom(
+    name: '_MagnetController.trackerCount',
+    context: context,
+  );
 
   @override
   int get trackerCount {
@@ -236,8 +308,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$trackerUpdatedAtAtom =
-      Atom(name: '_MagnetController.trackerUpdatedAt', context: context);
+  late final _$trackerUpdatedAtAtom = Atom(
+    name: '_MagnetController.trackerUpdatedAt',
+    context: context,
+  );
 
   @override
   DateTime? get trackerUpdatedAt {
@@ -252,8 +326,10 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$trackerUpdatingAtom =
-      Atom(name: '_MagnetController.trackerUpdating', context: context);
+  late final _$trackerUpdatingAtom = Atom(
+    name: '_MagnetController.trackerUpdating',
+    context: context,
+  );
 
   @override
   bool get trackerUpdating {
@@ -268,216 +344,316 @@ mixin _$MagnetController on _MagnetController, Store {
     });
   }
 
-  late final _$setSearchSourceAsyncAction =
-      AsyncAction('_MagnetController.setSearchSource', context: context);
+  late final _$setSearchSourceAsyncAction = AsyncAction(
+    '_MagnetController.setSearchSource',
+    context: context,
+  );
 
   @override
   Future<void> setSearchSource(String sourceId) {
-    return _$setSearchSourceAsyncAction
-        .run(() => super.setSearchSource(sourceId));
+    return _$setSearchSourceAsyncAction.run(
+      () => super.setSearchSource(sourceId),
+    );
   }
 
-  late final _$pauseAllDownloadsAsyncAction =
-      AsyncAction('_MagnetController.pauseAllDownloads', context: context);
+  late final _$removeSearchHistoryAsyncAction = AsyncAction(
+    '_MagnetController.removeSearchHistory',
+    context: context,
+  );
+
+  @override
+  Future<void> removeSearchHistory(String keyword) {
+    return _$removeSearchHistoryAsyncAction.run(
+      () => super.removeSearchHistory(keyword),
+    );
+  }
+
+  late final _$clearSearchHistoryAsyncAction = AsyncAction(
+    '_MagnetController.clearSearchHistory',
+    context: context,
+  );
+
+  @override
+  Future<void> clearSearchHistory() {
+    return _$clearSearchHistoryAsyncAction.run(
+      () => super.clearSearchHistory(),
+    );
+  }
+
+  late final _$pauseAllDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.pauseAllDownloads',
+    context: context,
+  );
 
   @override
   Future<void> pauseAllDownloads() {
     return _$pauseAllDownloadsAsyncAction.run(() => super.pauseAllDownloads());
   }
 
-  late final _$startBuiltinEngineAsyncAction =
-      AsyncAction('_MagnetController.startBuiltinEngine', context: context);
+  late final _$resumeAllDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.resumeAllDownloads',
+    context: context,
+  );
+
+  @override
+  Future<void> resumeAllDownloads() {
+    return _$resumeAllDownloadsAsyncAction.run(
+      () => super.resumeAllDownloads(),
+    );
+  }
+
+  late final _$startBuiltinEngineAsyncAction = AsyncAction(
+    '_MagnetController.startBuiltinEngine',
+    context: context,
+  );
 
   @override
   Future<bool> startBuiltinEngine() {
-    return _$startBuiltinEngineAsyncAction
-        .run(() => super.startBuiltinEngine());
+    return _$startBuiltinEngineAsyncAction.run(
+      () => super.startBuiltinEngine(),
+    );
   }
 
-  late final _$stopBuiltinEngineAsyncAction =
-      AsyncAction('_MagnetController.stopBuiltinEngine', context: context);
+  late final _$stopBuiltinEngineAsyncAction = AsyncAction(
+    '_MagnetController.stopBuiltinEngine',
+    context: context,
+  );
 
   @override
   Future<void> stopBuiltinEngine() {
     return _$stopBuiltinEngineAsyncAction.run(() => super.stopBuiltinEngine());
   }
 
-  late final _$updateTrackersAsyncAction =
-      AsyncAction('_MagnetController.updateTrackers', context: context);
+  late final _$updateTrackersAsyncAction = AsyncAction(
+    '_MagnetController.updateTrackers',
+    context: context,
+  );
 
   @override
   Future<void> updateTrackers() {
     return _$updateTrackersAsyncAction.run(() => super.updateTrackers());
   }
 
-  late final _$searchAsyncAction =
-      AsyncAction('_MagnetController.search', context: context);
+  late final _$searchAsyncAction = AsyncAction(
+    '_MagnetController.search',
+    context: context,
+  );
 
   @override
   Future<void> search(String keyword) {
     return _$searchAsyncAction.run(() => super.search(keyword));
   }
 
-  late final _$loadMoreAsyncAction =
-      AsyncAction('_MagnetController.loadMore', context: context);
+  late final _$loadMoreAsyncAction = AsyncAction(
+    '_MagnetController.loadMore',
+    context: context,
+  );
 
   @override
   Future<void> loadMore() {
     return _$loadMoreAsyncAction.run(() => super.loadMore());
   }
 
-  late final _$setSearchFansubAsyncAction =
-      AsyncAction('_MagnetController.setSearchFansub', context: context);
+  late final _$setSearchFansubAsyncAction = AsyncAction(
+    '_MagnetController.setSearchFansub',
+    context: context,
+  );
 
   @override
   Future<void> setSearchFansub(String? fansub) {
-    return _$setSearchFansubAsyncAction
-        .run(() => super.setSearchFansub(fansub));
+    return _$setSearchFansubAsyncAction.run(
+      () => super.setSearchFansub(fansub),
+    );
   }
 
-  late final _$addSubscriptionAsyncAction =
-      AsyncAction('_MagnetController.addSubscription', context: context);
+  late final _$addSubscriptionAsyncAction = AsyncAction(
+    '_MagnetController.addSubscription',
+    context: context,
+  );
 
   @override
   Future<void> addSubscription(MagnetSubscription subscription) {
-    return _$addSubscriptionAsyncAction
-        .run(() => super.addSubscription(subscription));
+    return _$addSubscriptionAsyncAction.run(
+      () => super.addSubscription(subscription),
+    );
   }
 
-  late final _$updateSubscriptionAsyncAction =
-      AsyncAction('_MagnetController.updateSubscription', context: context);
+  late final _$updateSubscriptionAsyncAction = AsyncAction(
+    '_MagnetController.updateSubscription',
+    context: context,
+  );
 
   @override
   Future<void> updateSubscription(MagnetSubscription updated) {
-    return _$updateSubscriptionAsyncAction
-        .run(() => super.updateSubscription(updated));
+    return _$updateSubscriptionAsyncAction.run(
+      () => super.updateSubscription(updated),
+    );
   }
 
   late final _$updateSubscriptionCoverAsyncAction = AsyncAction(
-      '_MagnetController.updateSubscriptionCover',
-      context: context);
+    '_MagnetController.updateSubscriptionCover',
+    context: context,
+  );
 
   @override
   Future<void> updateSubscriptionCover(String id, String coverUrl) {
-    return _$updateSubscriptionCoverAsyncAction
-        .run(() => super.updateSubscriptionCover(id, coverUrl));
+    return _$updateSubscriptionCoverAsyncAction.run(
+      () => super.updateSubscriptionCover(id, coverUrl),
+    );
   }
 
-  late final _$removeSubscriptionAsyncAction =
-      AsyncAction('_MagnetController.removeSubscription', context: context);
+  late final _$removeSubscriptionAsyncAction = AsyncAction(
+    '_MagnetController.removeSubscription',
+    context: context,
+  );
 
   @override
   Future<void> removeSubscription(String id) {
-    return _$removeSubscriptionAsyncAction
-        .run(() => super.removeSubscription(id));
+    return _$removeSubscriptionAsyncAction.run(
+      () => super.removeSubscription(id),
+    );
   }
 
-  late final _$loadSubscriptionFeedAsyncAction =
-      AsyncAction('_MagnetController.loadSubscriptionFeed', context: context);
+  late final _$loadSubscriptionFeedAsyncAction = AsyncAction(
+    '_MagnetController.loadSubscriptionFeed',
+    context: context,
+  );
 
   @override
   Future<void> loadSubscriptionFeed(MagnetSubscription sub) {
-    return _$loadSubscriptionFeedAsyncAction
-        .run(() => super.loadSubscriptionFeed(sub));
+    return _$loadSubscriptionFeedAsyncAction.run(
+      () => super.loadSubscriptionFeed(sub),
+    );
   }
 
-  late final _$checkSubscriptionsAsyncAction =
-      AsyncAction('_MagnetController.checkSubscriptions', context: context);
+  late final _$checkSubscriptionsAsyncAction = AsyncAction(
+    '_MagnetController.checkSubscriptions',
+    context: context,
+  );
 
   @override
   Future<void> checkSubscriptions() {
-    return _$checkSubscriptionsAsyncAction
-        .run(() => super.checkSubscriptions());
+    return _$checkSubscriptionsAsyncAction.run(
+      () => super.checkSubscriptions(),
+    );
   }
 
   late final _$setSubscriptionAutoDownloadAsyncAction = AsyncAction(
-      '_MagnetController.setSubscriptionAutoDownload',
-      context: context);
+    '_MagnetController.setSubscriptionAutoDownload',
+    context: context,
+  );
 
   @override
   Future<void> setSubscriptionAutoDownload(String id, bool value) {
-    return _$setSubscriptionAutoDownloadAsyncAction
-        .run(() => super.setSubscriptionAutoDownload(id, value));
+    return _$setSubscriptionAutoDownloadAsyncAction.run(
+      () => super.setSubscriptionAutoDownload(id, value),
+    );
   }
 
-  late final _$addDownloadAsyncAction =
-      AsyncAction('_MagnetController.addDownload', context: context);
+  late final _$addDownloadAsyncAction = AsyncAction(
+    '_MagnetController.addDownload',
+    context: context,
+  );
 
   @override
-  Future<void> addDownload(MagnetSearchItem item,
-      {String? dir, MediaScrapeInfo? scrapeInfo}) {
-    return _$addDownloadAsyncAction
-        .run(() => super.addDownload(item, dir: dir, scrapeInfo: scrapeInfo));
+  Future<void> addDownload(
+    MagnetSearchItem item, {
+    String? dir,
+    MediaScrapeInfo? scrapeInfo,
+  }) {
+    return _$addDownloadAsyncAction.run(
+      () => super.addDownload(item, dir: dir, scrapeInfo: scrapeInfo),
+    );
   }
 
-  late final _$pauseDownloadAsyncAction =
-      AsyncAction('_MagnetController.pauseDownload', context: context);
+  late final _$pauseDownloadAsyncAction = AsyncAction(
+    '_MagnetController.pauseDownload',
+    context: context,
+  );
 
   @override
   Future<void> pauseDownload(String taskId) {
     return _$pauseDownloadAsyncAction.run(() => super.pauseDownload(taskId));
   }
 
-  late final _$resumeDownloadAsyncAction =
-      AsyncAction('_MagnetController.resumeDownload', context: context);
+  late final _$resumeDownloadAsyncAction = AsyncAction(
+    '_MagnetController.resumeDownload',
+    context: context,
+  );
 
   @override
   Future<void> resumeDownload(String taskId) {
     return _$resumeDownloadAsyncAction.run(() => super.resumeDownload(taskId));
   }
 
-  late final _$retryDownloadAsyncAction =
-      AsyncAction('_MagnetController.retryDownload', context: context);
+  late final _$retryDownloadAsyncAction = AsyncAction(
+    '_MagnetController.retryDownload',
+    context: context,
+  );
 
   @override
   Future<void> retryDownload(String taskId) {
     return _$retryDownloadAsyncAction.run(() => super.retryDownload(taskId));
   }
 
-  late final _$removeDownloadAsyncAction =
-      AsyncAction('_MagnetController.removeDownload', context: context);
+  late final _$removeDownloadAsyncAction = AsyncAction(
+    '_MagnetController.removeDownload',
+    context: context,
+  );
 
   @override
   Future<void> removeDownload(String taskId, {bool deleteFiles = false}) {
-    return _$removeDownloadAsyncAction
-        .run(() => super.removeDownload(taskId, deleteFiles: deleteFiles));
+    return _$removeDownloadAsyncAction.run(
+      () => super.removeDownload(taskId, deleteFiles: deleteFiles),
+    );
   }
 
-  late final _$matchDownloadToBangumiAsyncAction =
-      AsyncAction('_MagnetController.matchDownloadToBangumi', context: context);
+  late final _$matchDownloadToBangumiAsyncAction = AsyncAction(
+    '_MagnetController.matchDownloadToBangumi',
+    context: context,
+  );
 
   @override
   Future<void> matchDownloadToBangumi(String taskId, BangumiItem item) {
-    return _$matchDownloadToBangumiAsyncAction
-        .run(() => super.matchDownloadToBangumi(taskId, item));
+    return _$matchDownloadToBangumiAsyncAction.run(
+      () => super.matchDownloadToBangumi(taskId, item),
+    );
   }
 
-  late final _$rescrapeDownloadAsyncAction =
-      AsyncAction('_MagnetController.rescrapeDownload', context: context);
+  late final _$rescrapeDownloadAsyncAction = AsyncAction(
+    '_MagnetController.rescrapeDownload',
+    context: context,
+  );
 
   @override
   Future<void> rescrapeDownload(String taskId) {
-    return _$rescrapeDownloadAsyncAction
-        .run(() => super.rescrapeDownload(taskId));
+    return _$rescrapeDownloadAsyncAction.run(
+      () => super.rescrapeDownload(taskId),
+    );
   }
 
   late final _$applyMagnetSettingsChangedAsyncAction = AsyncAction(
-      '_MagnetController.applyMagnetSettingsChanged',
-      context: context);
+    '_MagnetController.applyMagnetSettingsChanged',
+    context: context,
+  );
 
   @override
   Future<void> applyMagnetSettingsChanged() {
-    return _$applyMagnetSettingsChangedAsyncAction
-        .run(() => super.applyMagnetSettingsChanged());
+    return _$applyMagnetSettingsChangedAsyncAction.run(
+      () => super.applyMagnetSettingsChanged(),
+    );
   }
 
-  late final _$_MagnetControllerActionController =
-      ActionController(name: '_MagnetController', context: context);
+  late final _$_MagnetControllerActionController = ActionController(
+    name: '_MagnetController',
+    context: context,
+  );
 
   @override
   void setQuery(String value) {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
-        name: '_MagnetController.setQuery');
+      name: '_MagnetController.setQuery',
+    );
     try {
       return super.setQuery(value);
     } finally {
@@ -488,7 +664,8 @@ mixin _$MagnetController on _MagnetController, Store {
   @override
   Future<void> refreshSearch() {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
-        name: '_MagnetController.refreshSearch');
+      name: '_MagnetController.refreshSearch',
+    );
     try {
       return super.refreshSearch();
     } finally {
@@ -499,7 +676,8 @@ mixin _$MagnetController on _MagnetController, Store {
   @override
   Future<int> clearCompletedDownloads() {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
-        name: '_MagnetController.clearCompletedDownloads');
+      name: '_MagnetController.clearCompletedDownloads',
+    );
     try {
       return super.clearCompletedDownloads();
     } finally {
@@ -510,7 +688,8 @@ mixin _$MagnetController on _MagnetController, Store {
   @override
   Future<bool> recheckDownload(String taskId) {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
-        name: '_MagnetController.recheckDownload');
+      name: '_MagnetController.recheckDownload',
+    );
     try {
       return super.recheckDownload(taskId);
     } finally {
@@ -521,7 +700,8 @@ mixin _$MagnetController on _MagnetController, Store {
   @override
   Future<void> refreshDownloads() {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
-        name: '_MagnetController.refreshDownloads');
+      name: '_MagnetController.refreshDownloads',
+    );
     try {
       return super.refreshDownloads();
     } finally {
@@ -542,6 +722,8 @@ searchFansub: ${searchFansub},
 subscriptions: ${subscriptions},
 downloadTasks: ${downloadTasks},
 subscriptionFeeds: ${subscriptionFeeds},
+subscriptionFeedErrors: ${subscriptionFeedErrors},
+searchHistory: ${searchHistory},
 currentSourceId: ${currentSourceId},
 engineState: ${engineState},
 engineError: ${engineError},

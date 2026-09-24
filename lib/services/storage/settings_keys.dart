@@ -971,6 +971,13 @@ class SettingsKeys {
     group: SettingGroup.magnet,
   );
 
+  /// 磁力搜索历史关键词（JSON 数组字符串，新 → 旧）。
+  static const magnetSearchHistory = SettingKey<String>(
+    'magnetSearchHistory',
+    '[]',
+    group: SettingGroup.magnet,
+  );
+
   static final List<SettingKey<Object?>> all = [
     hAenable,
     hardwareDecoder,
@@ -1002,6 +1009,7 @@ class SettingsKeys {
     danmakuTimeOffsetScopeMigrated,
     danmakuTimeOffsetGlobalMigrated,
     magnetAskDirOnAdd,
+    magnetSearchHistory,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
