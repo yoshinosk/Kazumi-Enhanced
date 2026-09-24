@@ -81,6 +81,10 @@ class DanmakuAxisCheckResult {
 /// 骤降（自然稀疏）或骤升（弹幕群后戛然而止）时视为自然空窗，不产生信号。
 /// 同向信号按幅度加权融合为推荐偏移；正负信号同时显著说明头尾空白
 /// 无法用单一偏移修复，判定为弹幕源错误。
+///
+/// 越界信号（轴尾越界 / 轴头越界）另有越界群采信校验：分位取值可能
+/// 被单条或小簇离群弹幕拉高 / 拉低（如观众在更长版本视频里发言），
+/// 仅当越界弹幕与弹幕主体连续延伸（无明显空隙）时才视为轴真实越界。
 class DanmakuAxisChecker {
   /// 时间偏移可校准的最大范围（与弹幕时间偏移设置一致）。
   static const double maxAdjustableOffsetSeconds = 180;
@@ -128,6 +132,11 @@ class DanmakuAxisChecker {
   /// 仍有零星弹幕落到视频结尾附近，据此可以排除「整轴提前播完」。
   static const int _tailCoverageMinCount = 2;
 
+  /// 越界群采信的条数比例下限：越界弹幕条数需达到样本量的该比例
+  /// （至少 1 条）才可能视为轴真实越界。真实整轴平移 / 合集轴的越界段
+  /// 占比通常远高于此，孤立离群弹幕则难以达到。
+  static const double _beyondMinFraction = 0.005;
+
   static DanmakuAxisCheckResult check({
     required List<DanmakuEntry> danmakus,
     required Duration videoDuration,
@@ -154,7 +163,7 @@ class DanmakuAxisChecker {
       );
     }
 
-    final head = _percentile(times, _headPercentile);
+    final head = _percentile(times, _headPercentile, roundUp: true);
     final tail = _percentile(times, _tailPercentile);
     final span = max(0.0, tail - head);
     final difference = tail - durationSeconds;
@@ -175,8 +184,8 @@ class DanmakuAxisChecker {
     // --- 边界密度形态校验：区分「硬截断」与「自然空窗」 ---
     final probeWindow = (durationSeconds * _edgeProbeWindowRatio)
         .clamp(_edgeProbeMinWindowSeconds, _edgeProbeMaxWindowSeconds);
-    final headGapReliable =
-        headGap > tolerance && _isHardEdge(times, head, probeWindow);
+    final headGapReliable = headGap > tolerance &&
+        _isHardEdge(times, head, probeWindow, isTail: false);
     // 轴尾覆盖守卫：结尾容差窗口内仍有弹幕说明池覆盖到了视频结尾，
     // P99.5 的空白只是稀疏尾（ED / 预告阶段少有人发弹幕），不是轴偏移。
     final tailCoveredCount =
@@ -184,19 +193,34 @@ class DanmakuAxisChecker {
     final tailCovered = tailCoveredCount >= _tailCoverageMinCount;
     final tailGapReliable = tailGap > tolerance &&
         !tailCovered &&
-        _isHardEdge(times, tail, probeWindow);
+        _isHardEdge(times, tail, probeWindow, isTail: true);
 
     // --- 候选偏移信号（正 = 弹幕应延后，负 = 弹幕应提前）---
     final signals = <double>[];
     // 轴尾硬截断：内容持续到轴尾突然归零，弹幕提前播完 → 延后。
     if (tailGapReliable) signals.add(tailGap);
-    // 轴尾越界：弹幕轴长于视频尾部 → 提前。
-    if (tailBeyond > tolerance) signals.add(-tailBeyond);
-    // 轴头越界：弹幕早于视频起点 → 延后。
-    if (headBeyond > tolerance) signals.add(headBeyond);
+    // 轴尾越界：弹幕轴长于视频尾部 → 提前。需通过越界群采信校验，
+    // 排除单条 / 小簇离群弹幕（观众在更长版本里发言）拉高分位尾的假象。
+    final tailBeyondSupported = tailBeyond > tolerance &&
+        _isBeyondClusterSupported(
+          times,
+          durationSeconds + tolerance,
+          isTail: true,
+          gapLimit: 2 * tolerance,
+        );
+    if (tailBeyondSupported) signals.add(-tailBeyond);
+    // 轴头越界：弹幕早于视频起点 → 延后。同样需越界群采信校验。
+    final headBeyondSupported = headBeyond > tolerance &&
+        _isBeyondClusterSupported(
+          times,
+          -tolerance,
+          isTail: false,
+          gapLimit: 2 * tolerance,
+        );
+    if (headBeyondSupported) signals.add(headBeyond);
     // 轴头硬边界：仅当轴尾同时越界（整轴平移的佐证）时才采信，
     // 避免把「片头安静开场」误判为轴偏移。
-    if (headGapReliable && tailBeyond > tolerance) signals.add(-headGap);
+    if (headGapReliable && tailBeyondSupported) signals.add(-headGap);
 
     // --- 弹幕源错误判定 ---
     // 跨度（头尾分位之差）比「轴尾位置」更能反映轴的真实长度：
@@ -273,31 +297,85 @@ class DanmakuAxisChecker {
 
   /// 判断边界附近是否为「硬边界」。
   ///
-  /// 比较贴近边界的探查窗口 [edge - window, edge] 与前一等宽窗口
-  /// [edge - 2 * window, edge - window) 的弹幕数：
+  /// 比较贴近边界的探查窗口与相邻等宽窗口（沿弹幕主体内部方向）的
+  /// 弹幕数：
   /// - 近端密度骤降（比值 < [_edgeDecayRatio]）→ 自然稀疏尾；
   /// - 近端密度骤升（比值 > [_edgeSpikeRatio]）→ 弹幕群后戛然而止；
   /// - 密度平稳 → 内容持续到边界被截断，空白是轴偏移的可靠信号。
-  static bool _isHardEdge(List<double> sorted, double edge, double window) {
-    final nearStart = edge - window;
-    final farStart = edge - 2 * window;
-    final nearCount = _countInRange(sorted, nearStart, edge);
-    final farCount = _countInRange(sorted, farStart, nearStart);
+  ///
+  /// [isTail] 为 false（轴头）时窗口方向翻转：近端窗口为
+  /// [edge, edge + window]，相邻窗口为 [edge + window, edge + 2 * window)。
+  /// 轴头方向相邻窗口若完全无弹幕，说明头部弹幕突发后沉寂（自然空窗
+  /// 形态），不视为硬边界；轴尾方向池较短时相邻窗口可能为空，保留
+  /// 「近端有实质弹幕即视为硬边界」的兜底。
+  static bool _isHardEdge(
+    List<double> sorted,
+    double edge,
+    double window, {
+    required bool isTail,
+  }) {
+    final int nearStart, nearEnd, farStart, farEnd;
+    if (isTail) {
+      nearStart = _lowerBound(sorted, edge - window);
+      nearEnd = _upperBound(sorted, edge);
+      farStart = _lowerBound(sorted, edge - 2 * window);
+      farEnd = nearStart;
+    } else {
+      nearStart = _lowerBound(sorted, edge);
+      nearEnd = _upperBound(sorted, edge + window);
+      farStart = nearEnd;
+      farEnd = _upperBound(sorted, edge + 2 * window);
+    }
+    final nearCount = nearEnd - nearStart;
+    final farCount = farEnd - farStart;
     if (nearCount < _edgeProbeMinCount) {
       return false;
     }
     if (farCount <= 0) {
-      // 前一窗口完全无弹幕，无法判断趋势；近端有实质弹幕即视为硬边界。
-      return true;
+      return isTail;
     }
     final ratio = nearCount / farCount;
     return ratio >= _edgeDecayRatio && ratio <= _edgeSpikeRatio;
   }
 
-  /// 统计排序数组中落在 [start, end] 内的元素个数（二分查找）。
-  static int _countInRange(List<double> sorted, double start, double end) {
-    if (end < start) return 0;
-    return _upperBound(sorted, end) - _lowerBound(sorted, start);
+  /// 判断分位头部 / 尾部的越界是否为可信的「轴真实越界」。
+  ///
+  /// 分位取值可能被单条或小簇离群弹幕拉高 / 拉低（如观众在更长版本
+  /// 视频里发的弹幕）。真实越界的形态是弹幕从主体边界连续延伸出视频
+  /// 范围；孤立离群簇与主体之间存在明显空隙。判定条件：
+  ///
+  /// - 越界弹幕条数达到下限（至少 1 条，大样本按 [_beyondMinFraction]
+  ///   比例提高门槛）；
+  /// - 越界群与弹幕主体之间无明显空隙（超过 [gapLimit] 视为孤立离群，
+  ///   不采信；调用方传入 2 倍对齐容差，与「容差内不误报」语义一致）。
+  static bool _isBeyondClusterSupported(
+    List<double> sorted,
+    double boundary, {
+    required bool isTail,
+    required double gapLimit,
+  }) {
+    final minCount =
+        max(1, (sorted.length * _beyondMinFraction).ceil());
+    final beyondCount = isTail
+        ? sorted.length - _upperBound(sorted, boundary)
+        : _lowerBound(sorted, boundary);
+    if (beyondCount < minCount) {
+      return false;
+    }
+    if (isTail) {
+      final bodyEnd = _upperBound(sorted, boundary);
+      if (bodyEnd <= 0) {
+        // 整池越界：无空隙可算，交由弹幕源错误判定处理。
+        return true;
+      }
+      return sorted[bodyEnd] - sorted[bodyEnd - 1] <= gapLimit;
+    } else {
+      final bodyStart = _lowerBound(sorted, boundary);
+      if (bodyStart >= sorted.length) {
+        return true;
+      }
+      return sorted[bodyStart] - sorted[bodyStart - 1] <= gapLimit;
+    }
   }
 
   static int _lowerBound(List<double> sorted, double value) {
@@ -328,9 +406,20 @@ class DanmakuAxisChecker {
     return lo;
   }
 
-  static double _percentile(List<double> sorted, double percentile) {
+  /// 取排序数组的分位值（[percentile] ∈ [0, 1]）。
+  ///
+  /// [roundUp] 为 true 时索引向上取整（用于轴头 P0.5）：保证小样本下
+  /// 至少剔除首条弹幕，单条负时间戳离群不再直接成为轴头。轴尾 P99.5
+  /// 保持四舍五入：保证「轴略长」场景的推荐幅度精度，分位被离群拉高
+  /// 的假象由越界群采信校验（[_isBeyondClusterSupported]）兜底。
+  static double _percentile(
+    List<double> sorted,
+    double percentile, {
+    bool roundUp = false,
+  }) {
+    final raw = (sorted.length - 1) * percentile;
     final index =
-        ((sorted.length - 1) * percentile).round().clamp(0, sorted.length - 1);
+        (roundUp ? raw.ceil() : raw.round()).clamp(0, sorted.length - 1);
     return sorted[index];
   }
 }

@@ -68,6 +68,10 @@ Future<void> showDanmakuAxisMismatchDialog({
   required DanmakuAxisCheckResult result,
 }) {
   final bool axisError = result.issue == DanmakuAxisIssue.axisOffset;
+  // 捕获检测时的弹幕绑定：弹窗展示期间用户可能已切换分集 / 弹幕源，
+  // 应用动作必须作用于检测时的作用域，否则推荐值会写进其他分集。
+  final int scopedBangumiId = playerController.danmaku.bangumiID;
+  final int scopedEpisodeId = playerController.danmaku.danmakuEpisodeId;
   return KazumiDialog.show(
     clickMaskDismiss: true,
     builder: (context) {
@@ -142,12 +146,26 @@ Future<void> showDanmakuAxisMismatchDialog({
           if (axisError)
             FilledButton(
               onPressed: () {
+                if (playerController.danmaku.bangumiID != scopedBangumiId ||
+                    playerController.danmaku.danmakuEpisodeId !=
+                        scopedEpisodeId) {
+                  KazumiDialog.dismiss();
+                  KazumiDialog.showToast(message: '弹幕绑定已变化，已取消应用推荐偏移');
+                  return;
+                }
                 KazumiDialog.dismiss();
                 // 推荐偏移写入当前番剧/分集作用域，不污染其他剧集；
                 // 写入后重新调度当前弹幕立即生效。
+                if (scopedEpisodeId == 0) {
+                  KazumiLogger().i(
+                      'DanmakuAxis: applying recommended offset to '
+                      'bangumi-level scope (episodeId unknown), '
+                      'bangumiID=$scopedBangumiId',
+                      forceLog: true);
+                }
                 unawaited(DanmakuTimeOffsetStore.setScopedOffset(
-                  playerController.danmaku.bangumiID,
-                  playerController.danmaku.danmakuEpisodeId,
+                  scopedBangumiId,
+                  scopedEpisodeId,
                   result.recommendedOffsetSeconds,
                 ));
                 playerController.danmaku.clearAndInvalidateScheduledDanmakus();
@@ -232,19 +250,34 @@ String _confidenceLabel(double confidence) {
 }
 
 /// 等待播放器解析出视频时长（视频初始化后才有），超时返回 null。
+///
+/// 慢源（如 WebView 解析视频源）可能在单轮窗口内拿不到时长；超时后
+/// 短暂间隔再给一轮机会，避免该集因瞬时未就绪而永久错过轴检测。
+/// 是否仍在原播放会话由调用方的 [checkDanmakuAxisAlignment] 守卫把关，
+/// 重试期间换集不会误弹。
 Future<Duration?> _waitForVideoDuration(
   PlayerController playerController, {
   Duration timeout = const Duration(seconds: 5),
   Duration interval = const Duration(milliseconds: 500),
+  int maxAttempts = 2,
+  Duration retryDelay = const Duration(seconds: 3),
 }) async {
-  final deadline = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(deadline)) {
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await Future.delayed(retryDelay);
+    }
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final duration = playerController.playback.duration;
+      if (duration > Duration.zero) {
+        return duration;
+      }
+      await Future.delayed(interval);
+    }
     final duration = playerController.playback.duration;
     if (duration > Duration.zero) {
       return duration;
     }
-    await Future.delayed(interval);
   }
-  final duration = playerController.playback.duration;
-  return duration > Duration.zero ? duration : null;
+  return null;
 }

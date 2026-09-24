@@ -242,6 +242,81 @@ void main() {
         );
         expect(result.issue, DanmakuAxisIssue.sourceMismatch);
       });
+
+      test('尾部单条离群弹幕不触发越界推荐', () {
+        // 弹幕池贴齐视频结尾，仅一条弹幕落在结尾之外 120s（观众在更长
+        // 版本里发言）：分位尾被拉高，但越界群与主体间空隙明显，不应
+        // 推荐提前。
+        final axis = buildAxis(1440, count: 80);
+        axis.add(danmakuAt(1560));
+        final result = DanmakuAxisChecker.check(
+          danmakus: axis,
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+      });
+
+      test('头部单条离群弹幕不触发越界推荐', () {
+        // 弹幕池从视频起点铺到结尾，仅一条 -120s 的负时间戳弹幕：
+        // P0.5 分位至少剔除一条后轴头贴齐起点，不应推荐延后。
+        final axis = buildAxis(1440, count: 80);
+        axis.add(danmakuAt(-120));
+        final result = DanmakuAxisChecker.check(
+          danmakus: axis,
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+      });
+
+      test('尾部离群簇（与主体存在空隙）不触发越界推荐', () {
+        // 弹幕池贴齐视频结尾，60s 空隙后出现一小簇越界弹幕（下一集
+        // 片头弹幕混入的典型形态）：空隙超过 2 倍容差不采信。
+        final times = <double>[
+          ...List.generate(75, (i) => 1440 * i / 74),
+          1500, 1512, 1530, 1545, 1560,
+        ];
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+      });
+
+      test('轴连续延伸越界的小样本仍推荐提前', () {
+        // 61 条弹幕均匀铺满 [0, 1500]：轴整体长于视频 60s，越界段与
+        // 主体连续（无空隙），应采信并推荐提前 60s。
+        final times = List.generate(61, (i) => 1500 * i / 60);
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.axisOffset);
+        expect(result.recommendedOffsetSeconds, closeTo(-60, 0.01));
+      });
+
+      test('小样本整轴平移仍推荐提前', () {
+        // 冷门番 40 条弹幕整体后移 60s：越界段仅含 1 条弹幕，但与主体
+        // 连续，应采信越界信号并结合轴头空白给出提前修正。
+        final times = List.generate(40, (i) => 60 + 1440 * i / 39);
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.axisOffset);
+        expect(result.recommendedOffsetSeconds, inInclusiveRange(-95, -60));
+      });
+
+      test('头部连续越界段仍推荐延后', () {
+        // 弹幕池头部含 -60~0 的连续越界段（长版本片头的典型形态）：
+        // 越界群与主体连续，应采信并推荐延后修正。
+        final times = List.generate(101, (i) => -60 + 1500 * i / 100);
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.axisOffset);
+        expect(result.recommendedOffsetSeconds, inInclusiveRange(30, 60));
+      });
     });
   });
 }
