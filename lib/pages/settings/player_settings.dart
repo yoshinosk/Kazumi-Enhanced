@@ -315,6 +315,14 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   },
                   title: Text('超分辨率'),
                 ),
+                SettingsTile(
+                  leading: Icons.closed_caption_rounded,
+                  onPressed: (_) async {
+                    await context.pushNamed('/settings/player/subtitle');
+                  },
+                  title: Text('字幕样式'),
+                  description: Text('调整播放器字幕的字号、颜色与描边'),
+                ),
               ],
             ),
             SettingsSection(

@@ -2,6 +2,14 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（三）
+
+- 新功能：播放器字幕样式设置
+  - 背景：播放器字幕样式此前为硬编码（粉色 48 号加粗白描边），用户无法调整；由于 media-kit 的 libass 渲染默认关闭（`sub-ass: no`），所有字幕（含 ASS/SRT）均由 Flutter 侧 SubtitleView 渲染，样式统一由本次新增的设置控制
+  - 新增字幕样式设置页（设置 → 播放设置 → 字幕样式），支持：字号（20~72）、加粗、字体颜色（8 色色板）、描边宽度（0~5，可关闭）、描边颜色（4 色色板）、背景不透明度（0~100%）；页面顶部提供黑底实时预览；支持恢复默认
+  - 播放器字幕渲染改为读取设置构建样式，并通过订阅设置存储实现播放中调整实时生效
+    - 相关文件: lib/pages/settings/subtitle_settings.dart (新增), lib/utils/subtitle_style.dart (新增), lib/pages/player/player_item_surface.dart, lib/services/storage/settings_keys.dart, lib/pages/settings/settings_module.dart, lib/pages/settings/player_settings.dart
+
 ## 2026.9.24（二）
 
 - 磁力下载界面桌面端布局优化 + 标题栏双击最大化

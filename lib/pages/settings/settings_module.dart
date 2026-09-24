@@ -17,6 +17,7 @@ import 'package:kazumi/pages/settings/renderer_settings.dart';
 import 'package:kazumi/pages/settings/settings_page.dart';
 import 'package:kazumi/pages/settings/magnet_settings.dart';
 import 'package:kazumi/pages/settings/storage_settings.dart';
+import 'package:kazumi/pages/settings/subtitle_settings.dart';
 import 'package:kazumi/pages/settings/super_resolution_settings.dart';
 import 'package:kazumi/pages/settings/sync/bangumi_sync_page.dart';
 import 'package:kazumi/pages/settings/sync/sync_settings_page.dart';
@@ -80,6 +81,10 @@ final settingsModule = createModule(
           ..route(
             '/player/super',
             child: (context, state) => const SuperResolutionSettings(),
+          )
+          ..route(
+            '/player/subtitle',
+            child: (context, state) => const SubtitleSettingsPage(),
           )
           ..route(
             '/magnet',

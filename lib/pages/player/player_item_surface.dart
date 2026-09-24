@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:kazumi/utils/subtitle_style.dart';
 
 class PlayerItemSurface extends StatefulWidget {
   const PlayerItemSurface({
@@ -16,6 +19,25 @@ class PlayerItemSurface extends StatefulWidget {
 }
 
 class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
+  StreamSubscription<void>? _subtitleStyleSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // 字幕样式设置变化时重建字幕视图，使播放中调整样式实时生效。
+    _subtitleStyleSubscription = SubtitleStyle.watch().listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _subtitleStyleSubscription?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final playerController = widget.playerController;
@@ -37,25 +59,7 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         pauseUponEnteringBackgroundMode: false,
         fit: aspectRatioMode.fit,
         subtitleViewConfiguration: SubtitleViewConfiguration(
-          style: TextStyle(
-            color: Colors.pink,
-            fontSize: 48.0,
-            background: Paint()..color = Colors.transparent,
-            decoration: TextDecoration.none,
-            fontWeight: FontWeight.bold,
-            shadows: const [
-              Shadow(
-                offset: Offset(1.0, 1.0),
-                blurRadius: 3.0,
-                color: Color.fromARGB(255, 255, 255, 255),
-              ),
-              Shadow(
-                offset: Offset(-1.0, -1.0),
-                blurRadius: 3.0,
-                color: Color.fromARGB(125, 255, 255, 255),
-              ),
-            ],
-          ),
+          style: SubtitleStyle.fromSettings(),
           textAlign: TextAlign.center,
           padding: const EdgeInsets.all(24.0),
         ),

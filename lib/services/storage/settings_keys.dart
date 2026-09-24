@@ -99,6 +99,49 @@ class SettingsKeys {
     10,
     group: SettingGroup.player,
   );
+
+  /// 字幕样式：字号（基准像素，SubtitleView 内部会按视频区域相对
+  /// 1920x1080 参考尺寸缩放）。
+  static const subtitleFontSize = SettingKey<double>(
+    'subtitleFontSize',
+    48.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：文字颜色（ARGB32 int）。
+  static const subtitleTextColor = SettingKey<int>(
+    'subtitleTextColor',
+    0xFFFF4081,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：描边宽度（0 表示关闭描边）。
+  static const subtitleBorderWidth = SettingKey<double>(
+    'subtitleBorderWidth',
+    1.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：描边颜色（ARGB32 int）。
+  static const subtitleBorderColor = SettingKey<int>(
+    'subtitleBorderColor',
+    0xFFFFFFFF,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：背景不透明度（0.0 ~ 1.0，0 表示无背景）。
+  static const subtitleBackgroundOpacity = SettingKey<double>(
+    'subtitleBackgroundOpacity',
+    0.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：是否加粗。
+  static const subtitleBold = SettingKey<bool>(
+    'subtitleBold',
+    true,
+    group: SettingGroup.player,
+  );
   static const danmakuEnhance = SettingKey<bool>(
     _SettingBoxKey.danmakuEnhance,
     true,
@@ -990,6 +1033,12 @@ class SettingsKeys {
     defaultAspectRatioType,
     buttonSkipTime,
     arrowKeySkipTime,
+    subtitleFontSize,
+    subtitleTextColor,
+    subtitleBorderWidth,
+    subtitleBorderColor,
+    subtitleBackgroundOpacity,
+    subtitleBold,
     danmakuEnhance,
     danmakuBorder,
     danmakuBorderSize,
