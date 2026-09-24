@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -46,6 +46,19 @@ class SysAppBar extends StatelessWidget implements PreferredSizeWidget {
     return GStorage.getSetting(SettingsKeys.showWindowButton);
   }
 
+  /// 双击标题栏在最大化 / 还原之间切换（与原生标题栏行为一致）。
+  Future<void> _toggleMaximize() async {
+    try {
+      if (await windowManager.isMaximized()) {
+        await windowManager.unmaximize();
+      } else {
+        await windowManager.maximize();
+      }
+    } catch (_) {
+      // 窗口尚未就绪时忽略。
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     List<Widget> acs = [];
@@ -62,6 +75,8 @@ class SysAppBar extends StatelessWidget implements PreferredSizeWidget {
     }
     return GestureDetector(
       onPanStart: (_) => (isDesktop()) ? windowManager.startDragging() : null,
+      // 双击标题栏空白区域切换最大化 / 还原（仅桌面端生效）。
+      onDoubleTap: (isDesktop()) ? _toggleMaximize : null,
       child: AppBar(
         toolbarHeight: preferredSize.height,
         scrolledUnderElevation: 0.0,

@@ -25,6 +25,7 @@ import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/directory_picker.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
@@ -131,64 +132,111 @@ class _MagnetPageState extends State<MagnetPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: SysAppBar(
-        title: const Text('磁力搜索'),
-        leading: IconButton(
-          onPressed: () => context.maybePop(),
-          icon: const Icon(Icons.arrow_back),
-        ),
-        actions: [
-          Observer(builder: (_) {
-            return PopupMenuButton<String>(
-              tooltip: '切换搜索源',
-              icon: const Icon(Icons.travel_explore_rounded),
-              onSelected: (value) => controller.setSearchSource(value),
-              itemBuilder: (_) => [
-                for (final source in MagnetSearchSources.all)
-                  PopupMenuItem<String>(
-                    value: source.id,
-                    child: Row(
-                      children: [
-                        Icon(
-                          controller.currentSourceId == source.id
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_unchecked,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(source.name),
-                      ],
-                    ),
-                  ),
-              ],
-            );
-          }),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '搜索'),
-            Tab(text: '订阅'),
-            Tab(text: '下载'),
-          ],
-        ),
+    // 桌面宽屏：顶部 TabBar 会把标签横向拉得很长，改用左侧 NavigationRail；
+    // 安卓 / 窄窗口保持顶部 TabBar 切换。
+    final useRail =
+        isDesktop() && MediaQuery.sizeOf(context).width >= _railBreakpoint;
+    final appBar = SysAppBar(
+      title: const Text('磁力搜索'),
+      leading: IconButton(
+        onPressed: () => context.maybePop(),
+        icon: const Icon(Icons.arrow_back),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      actions: [
+        Observer(builder: (_) {
+          return PopupMenuButton<String>(
+            tooltip: '切换搜索源',
+            icon: const Icon(Icons.travel_explore_rounded),
+            onSelected: (value) => controller.setSearchSource(value),
+            itemBuilder: (_) => [
+              for (final source in MagnetSearchSources.all)
+                PopupMenuItem<String>(
+                  value: source.id,
+                  child: Row(
+                    children: [
+                      Icon(
+                        controller.currentSourceId == source.id
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(source.name),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        }),
+      ],
+      bottom: useRail
+          ? null
+          : TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: '搜索'),
+                Tab(text: '订阅'),
+                Tab(text: '下载'),
+              ],
+            ),
+    );
+    final tabBarView = TabBarView(
+      controller: _tabController,
+      children: [
+        MagnetSearchTab(
+          controller: controller,
+          searchController: _searchController,
+          anime: widget.initialAnime,
+        ),
+        MagnetSubscriptionsTab(
+            controller: controller, anime: widget.initialAnime),
+        MagnetDownloadsTab(controller: controller),
+      ],
+    );
+    if (!useRail) {
+      return Scaffold(appBar: appBar, body: tabBarView);
+    }
+    return Scaffold(
+      appBar: appBar,
+      body: Row(
         children: [
-          MagnetSearchTab(
-            controller: controller,
-            searchController: _searchController,
-            anime: widget.initialAnime,
+          AnimatedBuilder(
+            animation: _tabController,
+            builder: (context, _) => NavigationRail(
+              backgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainer,
+              groupAlignment: -1,
+              labelType: NavigationRailLabelType.all,
+              selectedIndex: _tabController.index,
+              onDestinationSelected: (index) =>
+                  _tabController.animateTo(index),
+              destinations: const [
+                NavigationRailDestination(
+                  icon: Icon(Icons.search_outlined),
+                  selectedIcon: Icon(Icons.search_rounded),
+                  label: Text('搜索'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.rss_feed_outlined),
+                  selectedIcon: Icon(Icons.rss_feed_rounded),
+                  label: Text('订阅'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.download_outlined),
+                  selectedIcon: Icon(Icons.download_rounded),
+                  label: Text('下载'),
+                ),
+              ],
+            ),
           ),
-          MagnetSubscriptionsTab(
-              controller: controller, anime: widget.initialAnime),
-          MagnetDownloadsTab(controller: controller),
+          Expanded(child: tabBarView),
         ],
       ),
     );
   }
+
+  /// 宽屏（≥ 700px）时切换到 NavigationRail 的断点。
+  static const double _railBreakpoint = 700;
 }
 
 class MagnetSearchTab extends StatefulWidget {

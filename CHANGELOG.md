@@ -2,6 +2,15 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（二）
+
+- 磁力下载界面桌面端布局优化 + 标题栏双击最大化
+  - 布局优化：磁力搜索页与下载中心在桌面宽屏（≥ 700px）下改用左侧 `NavigationRail` 切换搜索 / 订阅 / 下载（下载中心为磁力搜索 / 磁力下载 / RSS 订阅 / 离线缓存），避免顶部 TabBar 在宽窗口下标签被横向拉长；安卓与窄窗口保持原顶部 TabBar 不变（与应用主菜单桌面端侧边栏风格一致）
+    - 相关文件: lib/pages/magnet/magnet_page.dart, lib/pages/download_tab/download_tab_page.dart
+  - 新功能：桌面端双击顶部标题栏区域在最大化 / 还原之间切换（与原生窗口行为一致），全应用所有使用 `SysAppBar` 的页面生效；文本输入框内双击仍为选中文字不受影响
+    - 相关文件: lib/bean/appbar/sys_app_bar.dart
+  - 验证：`flutter analyze` 无新增告警（仅存量 info 级提示）；`flutter test` 全部通过；Windows 本地构建成功
+
 ## 2026.9.24
 
 - 优化磁力搜索 / 磁力下载 / 媒体库界面体验并修复两处 BUG

@@ -8,6 +8,7 @@ import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetDownloadsTab, MagnetSearchTab, MagnetSubscriptionsTab;
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
+import 'package:kazumi/utils/device.dart';
 
 /// 下载中心：汇总磁力搜索、磁力下载、RSS 订阅与离线缓存，作为底部导航的「下载」标签页。
 class DownloadTabPage extends StatefulWidget {
@@ -45,66 +46,118 @@ class _DownloadTabPageState extends State<DownloadTabPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: SysAppBar(
-        title: const Text('下载'),
-        actions: [
-          Observer(builder: (_) {
-            return PopupMenuButton<String>(
-              tooltip: '切换搜索源',
-              icon: const Icon(Icons.travel_explore_rounded),
-              onSelected: (value) =>
-                  widget.magnetController.setSearchSource(value),
-              itemBuilder: (_) => [
-                for (final source in MagnetSearchSources.all)
-                  PopupMenuItem<String>(
-                    value: source.id,
-                    child: Row(
-                      children: [
-                        Icon(
-                          widget.magnetController.currentSourceId == source.id
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_unchecked,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(source.name),
-                      ],
-                    ),
+    // 桌面宽屏：顶部 TabBar 会把标签横向拉得很长，改用左侧 NavigationRail；
+    // 安卓 / 窄窗口保持顶部 TabBar 切换。
+    final useRail =
+        isDesktop() && MediaQuery.sizeOf(context).width >= _railBreakpoint;
+    final appBar = SysAppBar(
+      title: const Text('下载'),
+      actions: [
+        Observer(builder: (_) {
+          return PopupMenuButton<String>(
+            tooltip: '切换搜索源',
+            icon: const Icon(Icons.travel_explore_rounded),
+            onSelected: (value) =>
+                widget.magnetController.setSearchSource(value),
+            itemBuilder: (_) => [
+              for (final source in MagnetSearchSources.all)
+                PopupMenuItem<String>(
+                  value: source.id,
+                  child: Row(
+                    children: [
+                      Icon(
+                        widget.magnetController.currentSourceId == source.id
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(source.name),
+                    ],
                   ),
-              ],
-            );
-          }),
-          IconButton(
-            tooltip: '下载器设置',
-            onPressed: () => context.pushNamed('/settings/magnet/'),
-            icon: const Icon(Icons.settings_rounded),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '磁力搜索'),
-            Tab(text: '磁力下载'),
-            Tab(text: 'RSS 订阅'),
-            Tab(text: '离线缓存'),
-          ],
+                ),
+            ],
+          );
+        }),
+        IconButton(
+          tooltip: '下载器设置',
+          onPressed: () => context.pushNamed('/settings/magnet/'),
+          icon: const Icon(Icons.settings_rounded),
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
+      ],
+      bottom: useRail
+          ? null
+          : TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: '磁力搜索'),
+                Tab(text: '磁力下载'),
+                Tab(text: 'RSS 订阅'),
+                Tab(text: '离线缓存'),
+              ],
+            ),
+    );
+    final tabBarView = TabBarView(
+      controller: _tabController,
+      children: [
+        MagnetSearchTab(
+          controller: widget.magnetController,
+          searchController: _searchController,
+        ),
+        MagnetDownloadsTab(controller: widget.magnetController),
+        MagnetSubscriptionsTab(controller: widget.magnetController),
+        _OfflineCacheTab(controller: widget.downloadController),
+      ],
+    );
+    if (!useRail) {
+      return Scaffold(appBar: appBar, body: tabBarView);
+    }
+    return Scaffold(
+      appBar: appBar,
+      body: Row(
         children: [
-          MagnetSearchTab(
-            controller: widget.magnetController,
-            searchController: _searchController,
+          AnimatedBuilder(
+            animation: _tabController,
+            builder: (context, _) => NavigationRail(
+              backgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainer,
+              groupAlignment: -1,
+              labelType: NavigationRailLabelType.all,
+              selectedIndex: _tabController.index,
+              onDestinationSelected: (index) =>
+                  _tabController.animateTo(index),
+              destinations: const [
+                NavigationRailDestination(
+                  icon: Icon(Icons.travel_explore_outlined),
+                  selectedIcon: Icon(Icons.travel_explore_rounded),
+                  label: Text('磁力搜索'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.download_outlined),
+                  selectedIcon: Icon(Icons.download_rounded),
+                  label: Text('磁力下载'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.rss_feed_outlined),
+                  selectedIcon: Icon(Icons.rss_feed_rounded),
+                  label: Text('RSS 订阅'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.cloud_download_outlined),
+                  selectedIcon: Icon(Icons.cloud_download_rounded),
+                  label: Text('离线缓存'),
+                ),
+              ],
+            ),
           ),
-          MagnetDownloadsTab(controller: widget.magnetController),
-          MagnetSubscriptionsTab(controller: widget.magnetController),
-          _OfflineCacheTab(controller: widget.downloadController),
+          Expanded(child: tabBarView),
         ],
       ),
     );
   }
+
+  /// 宽屏（≥ 700px）时切换到 NavigationRail 的断点。
+  static const double _railBreakpoint = 700;
 }
 
 /// 离线缓存概览：展示每部番剧的缓存进度，点击进入完整下载管理页。
