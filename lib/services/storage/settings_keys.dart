@@ -639,6 +639,30 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// 字幕延迟（秒，mpv sub-delay）：正值字幕延后显示，负值提前。
+  /// 持久化并在每次创建播放器时应用。
+  static const subtitleDelay = SettingKey<double>(
+    'subtitleDelay',
+    0.0,
+    group: SettingGroup.player,
+  );
+
+  /// 播完动作：autoNext（尊重「自动连播」设置）/ repeatOne（单集循环）/
+  /// pauseAfter（播完暂停，等价于关闭自动连播）。
+  static const playbackFinishMode = SettingKey<String>(
+    'playbackFinishMode',
+    'autoNext',
+    group: SettingGroup.player,
+  );
+
+  /// 移动端双击屏幕左右两侧快进/快退（替代双击播放/暂停），
+  /// 幅度同「方向键跳转」设置。默认关闭以保持既有双击习惯。
+  static const doubleTapSeekEnabled = SettingKey<bool>(
+    'doubleTapSeekEnabled',
+    false,
+    group: SettingGroup.player,
+  );
+
   // 磁力搜索 / 下载 / RSS 订阅相关设置
   static const mikanBaseUrl = SettingKey<String>(
     'mikanBaseUrl',
@@ -1142,6 +1166,9 @@ class SettingsKeys {
     defaultVolume,
     playerMuted,
     screenshotSavePath,
+    subtitleDelay,
+    playbackFinishMode,
+    doubleTapSeekEnabled,
     mikanBaseUrl,
     magnetSearchSources,
     magnetDefaultSource,

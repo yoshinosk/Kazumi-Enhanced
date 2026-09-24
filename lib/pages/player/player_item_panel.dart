@@ -5,6 +5,7 @@ import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:kazumi/bean/widget/play_pause_icon.dart';
 import 'package:kazumi/pages/player/player_adjustment_hud.dart';
 import 'package:kazumi/pages/player/danmaku_destination_sheet.dart';
@@ -24,6 +25,7 @@ import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:kazumi/services/player/timed_shutdown_service.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/format.dart';
 import 'package:kazumi/pages/player/player_transport_bar.dart';
 
@@ -103,6 +105,11 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   late final Widget _cachedDanmakuOffIcon;
   late final Widget _cachedDanmakuSettingsIcon;
 
+  // 桌面音量滑块浮层（hover 音量图标弹出，P1#5）
+  final LayerLink _volumeButtonLink = LayerLink();
+  OverlayEntry? _volumeOverlayEntry;
+  Timer? _volumeOverlayHideTimer;
+
   bool get _desktop => switch (defaultTargetPlatform) {
     TargetPlatform.windows ||
     TargetPlatform.linux ||
@@ -115,9 +122,49 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   @override
   void dispose() {
+    _volumeOverlayHideTimer?.cancel();
+    _volumeOverlayEntry?.remove();
     textController.dispose();
     textFieldFocus.dispose();
     super.dispose();
+  }
+
+  void _showVolumeOverlay() {
+    if (!_desktop || _volumeOverlayEntry != null) return;
+    _cancelVolumeOverlayHide();
+    final entry = OverlayEntry(
+      builder: (overlayContext) => CompositedTransformFollower(
+        link: _volumeButtonLink,
+        targetAnchor: Alignment.topCenter,
+        followerAnchor: Alignment.bottomCenter,
+        offset: const Offset(0, -8),
+        child: MouseRegion(
+          onEnter: (_) => _cancelVolumeOverlayHide(),
+          onExit: (_) => _scheduleVolumeOverlayHide(),
+          child: _VolumeSliderCard(playerController: playerController),
+        ),
+      ),
+    );
+    _volumeOverlayEntry = entry;
+    Overlay.of(context).insert(entry);
+  }
+
+  void _scheduleVolumeOverlayHide() {
+    _volumeOverlayHideTimer?.cancel();
+    _volumeOverlayHideTimer = Timer(
+      const Duration(milliseconds: 250),
+      _hideVolumeOverlay,
+    );
+  }
+
+  void _cancelVolumeOverlayHide() {
+    _volumeOverlayHideTimer?.cancel();
+    _volumeOverlayHideTimer = null;
+  }
+
+  void _hideVolumeOverlay() {
+    _volumeOverlayEntry?.remove();
+    _volumeOverlayEntry = null;
   }
 
   Future<void> _submitDanmakuText(String message) async {
@@ -737,6 +784,204 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     child: _menuLabel('一起看'),
   );
 
+  /// 菜单项文本由 Observer 驱动：MenuAnchor 的 menuChildren 在每次打开
+  /// 菜单时才挂载构建，因此此处读取的轨道 / 延迟 / AB 点均为最新值。
+  Widget _observingMenuLabel(
+    String Function() text, {
+    bool Function()? selected,
+  }) => Observer(
+    builder: (context) =>
+        _menuLabel(text(), selected: selected?.call() ?? false),
+  );
+
+  String _trackLabel(
+    String? title,
+    String? language,
+    int index,
+    String fallback,
+  ) {
+    final base = (title != null && title.trim().isNotEmpty)
+        ? title.trim()
+        : '$fallback ${index + 1}';
+    final lang = (language != null && language.trim().isNotEmpty)
+        ? language.trim()
+        : null;
+    return lang == null ? base : '$base · $lang';
+  }
+
+  List<Widget> get _audioTrackItems {
+    final real = [
+      for (final track
+          in playerController.playback.currentTracks?.audio ??
+              const <AudioTrack>[])
+        if (track.id != 'auto' && track.id != 'no') track,
+    ];
+    if (real.isEmpty) {
+      return [MenuItemButton(onPressed: null, child: _menuLabel('无可用音轨'))];
+    }
+    return [
+      for (var i = 0; i < real.length; i++)
+        MenuItemButton(
+          onPressed: () =>
+              unawaited(playerController.playback.selectAudioTrack(real[i])),
+          child: _observingMenuLabel(
+            () => _trackLabel(real[i].title, real[i].language, i, '音轨'),
+            selected: () =>
+                playerController.playback.currentTrack?.audio == real[i],
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> get _subtitleTrackItems {
+    final real = [
+      for (final track
+          in playerController.playback.currentTracks?.subtitle ??
+              const <SubtitleTrack>[])
+        if (track.id != 'auto' && track.id != 'no') track,
+    ];
+    return [
+      MenuItemButton(
+        onPressed: () => unawaited(
+          playerController.playback.selectSubtitleTrack(SubtitleTrack.no()),
+        ),
+        child: _observingMenuLabel(
+          () => '关闭字幕',
+          selected: () {
+            final current = playerController.playback.currentTrack?.subtitle;
+            return current == null || current.id == 'no';
+          },
+        ),
+      ),
+      if (real.isEmpty)
+        MenuItemButton(onPressed: null, child: _menuLabel('无可用字幕'))
+      else
+        for (var i = 0; i < real.length; i++)
+          MenuItemButton(
+            onPressed: () => unawaited(
+              playerController.playback.selectSubtitleTrack(real[i]),
+            ),
+            child: _observingMenuLabel(
+              () => _trackLabel(real[i].title, real[i].language, i, '字幕'),
+              selected: () =>
+                  playerController.playback.currentTrack?.subtitle == real[i],
+            ),
+          ),
+    ];
+  }
+
+  String get _subtitleDelayText {
+    final delay = playerController.playback.subtitleDelay;
+    if (delay == 0) return '当前：无延迟';
+    return '当前：${delay > 0 ? '+' : ''}${delay.toStringAsFixed(1)}s';
+  }
+
+  List<Widget> get _subtitleDelayItems => [
+    MenuItemButton(
+      onPressed: null,
+      child: _observingMenuLabel(() => _subtitleDelayText),
+    ),
+    MenuItemButton(
+      onPressed: () => unawaited(
+        playerController.playback.setSubtitleDelay(
+          playerController.playback.subtitleDelay + 0.5,
+        ),
+      ),
+      child: _menuLabel('延后 0.5s'),
+    ),
+    MenuItemButton(
+      onPressed: () => unawaited(
+        playerController.playback.setSubtitleDelay(
+          playerController.playback.subtitleDelay - 0.5,
+        ),
+      ),
+      child: _menuLabel('提前 0.5s'),
+    ),
+    MenuItemButton(
+      onPressed: () => _resetSubtitleDelayIfNeeded(),
+      child: _menuLabel('重置延迟'),
+    ),
+  ];
+
+  void _resetSubtitleDelayIfNeeded() {
+    if (playerController.playback.subtitleDelay == 0) return;
+    unawaited(playerController.playback.setSubtitleDelay(0));
+  }
+
+  String _abLoopPointText(double? seconds) => seconds == null
+      ? '未设置'
+      : durationToString(Duration(milliseconds: (seconds * 1000).round()));
+
+  List<Widget> get _abLoopItems => [
+    MenuItemButton(
+      onPressed: () =>
+          unawaited(playerController.playback.markAbLoop(isA: true)),
+      child: _observingMenuLabel(
+        () => '设置 A 点（${_abLoopPointText(playerController.playback.abLoopA)}）',
+      ),
+    ),
+    MenuItemButton(
+      onPressed: () =>
+          unawaited(playerController.playback.markAbLoop(isA: false)),
+      child: _observingMenuLabel(
+        () => '设置 B 点（${_abLoopPointText(playerController.playback.abLoopB)}）',
+      ),
+    ),
+    MenuItemButton(
+      onPressed: () => _clearAbLoopIfNeeded(),
+      child: _menuLabel('清除循环'),
+    ),
+  ];
+
+  void _clearAbLoopIfNeeded() {
+    if (playerController.playback.abLoopA == null &&
+        playerController.playback.abLoopB == null) {
+      return;
+    }
+    unawaited(playerController.playback.clearAbLoop());
+  }
+
+  static const List<(String, String)> _finishModes = [
+    ('autoNext', '自动连播'),
+    ('repeatOne', '单集循环'),
+    ('pauseAfter', '播完暂停'),
+  ];
+
+  List<Widget> get _finishModeItems => [
+    for (final (mode, label) in _finishModes)
+      MenuItemButton(
+        onPressed: () => unawaited(
+          GStorage.putSetting<String>(SettingsKeys.playbackFinishMode, mode),
+        ),
+        child: _observingMenuLabel(
+          () => label,
+          selected: () =>
+              GStorage.getSetting<String>(SettingsKeys.playbackFinishMode) ==
+              mode,
+        ),
+      ),
+  ];
+
+  static const List<(int, String)> _rotateModes = [
+    (0, '自动'),
+    (90, '90°'),
+    (180, '180°'),
+    (270, '270°'),
+  ];
+
+  List<Widget> get _videoRotateItems => [
+    for (final (degrees, label) in _rotateModes)
+      MenuItemButton(
+        onPressed: () =>
+            unawaited(playerController.playback.setVideoRotate(degrees)),
+        child: _observingMenuLabel(
+          () => label,
+          selected: () =>
+              playerController.playback.videoRotateDegrees == degrees,
+        ),
+      ),
+  ];
+
   Widget get _danmakuSettingsMenuItem => MenuItemButton(
     onPressed: _showDanmakuSettings,
     child: _menuLabel('弹幕设置'),
@@ -807,11 +1052,22 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     builder: (context) {
       final muted =
           playerController.muted || playerController.playback.volume <= 0;
-      return IconButton(
+      final button = IconButton(
         color: Colors.white,
         icon: Icon(muted ? Icons.volume_off_rounded : Icons.volume_up_rounded),
         tooltip: muted ? '取消静音' : '静音',
         onPressed: () => playerController.toggleMute(),
+      );
+      if (!_desktop) {
+        return button;
+      }
+      return CompositedTransformTarget(
+        link: _volumeButtonLink,
+        child: MouseRegion(
+          onEnter: (_) => _showVolumeOverlay(),
+          onExit: (_) => _scheduleVolumeOverlayHide(),
+          child: button,
+        ),
       );
     },
   );
@@ -856,23 +1112,32 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         ),
         // Playback ticks only rebuild the progress bar and its time labels.
         progressBuilder: (location) => Observer(
-          builder: (context) => ProgressBar(
-            thumbRadius: 8,
-            thumbGlowRadius: 18,
-            timeLabelLocation: location,
-            timeLabelTextStyle: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-            progress: playerController.playback.currentPosition,
-            buffered: playerController.playback.buffer,
-            total: playerController.playback.duration,
-            onSeek: widget.handleProgressBarSeek,
-            onDragStart: (_) => widget.handleProgressBarDragStart(),
-            onDragUpdate: (details) => playerController.seeking
-                .updateInteractiveSeek(details.timeStamp),
-          ),
+          builder: (context) {
+            final bar = ProgressBar(
+              thumbRadius: 8,
+              thumbGlowRadius: 18,
+              timeLabelLocation: location,
+              timeLabelTextStyle: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+              progress: playerController.playback.currentPosition,
+              buffered: playerController.playback.buffer,
+              total: playerController.playback.duration,
+              onSeek: widget.handleProgressBarSeek,
+              onDragStart: (_) => widget.handleProgressBarDragStart(),
+              onDragUpdate: (details) => playerController.seeking
+                  .updateInteractiveSeek(details.timeStamp),
+            );
+            if (!_desktop) {
+              return bar;
+            }
+            return _ProgressHoverPreview(
+              total: playerController.playback.duration,
+              child: bar,
+            );
+          },
         ),
         timeLabel: Observer(
           builder: (context) => Text(
@@ -1026,6 +1291,30 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     onPressed: widget.showVideoInfo,
                     child: _menuLabel('视频详情'),
                   ),
+                  SubmenuButton(
+                    menuChildren: _audioTrackItems,
+                    child: _menuLabel('音轨'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: _subtitleTrackItems,
+                    child: _menuLabel('字幕'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: _subtitleDelayItems,
+                    child: _menuLabel('字幕延迟'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: _abLoopItems,
+                    child: _menuLabel('AB 循环'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: _finishModeItems,
+                    child: _menuLabel('播完动作'),
+                  ),
+                  SubmenuButton(
+                    menuChildren: _videoRotateItems,
+                    child: _menuLabel('画面旋转'),
+                  ),
                   // 远程投屏依赖 currentPlugin.referer（在线模式专属），
                   // 且本地路径 / 边下边播流地址对投屏目标不可达，非在线模式隐藏。
                   if (videoPageController.isOnlinePlaybackMode)
@@ -1149,6 +1438,145 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           const Spacer(),
         ],
       ),
+    );
+  }
+}
+
+/// 桌面端音量滑块浮层：hover 音量按钮弹出，拖动实时调整
+/// （复用手势音量链路：onChanged 节流同步、onChangeEnd 持久化并清除静音态）。
+class _VolumeSliderCard extends StatelessWidget {
+  const _VolumeSliderCard({required this.playerController});
+
+  final PlayerController playerController;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: 56,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.34),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Observer(
+          builder: (context) {
+            final volume = playerController.playback.volume;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${volume.round()}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                SizedBox(
+                  height: 120,
+                  child: RotatedBox(
+                    quarterTurns: 3,
+                    child: Slider(
+                      value: volume.clamp(0.0, 200.0),
+                      min: 0,
+                      max: 200,
+                      onChanged: playerController.setVolumeDuringGesture,
+                      onChangeEnd: (_) =>
+                          unawaited(playerController.finishVolumeGesture()),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// 桌面端进度条悬停时间预览：在光标上方显示对应时间点的气泡。
+class _ProgressHoverPreview extends StatefulWidget {
+  const _ProgressHoverPreview({required this.total, required this.child});
+
+  final Duration total;
+  final Widget child;
+
+  @override
+  State<_ProgressHoverPreview> createState() => _ProgressHoverPreviewState();
+}
+
+class _ProgressHoverPreviewState extends State<_ProgressHoverPreview> {
+  static const double _bubbleWidth = 56;
+
+  double? _hoverX;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        Duration? preview;
+        double? bubbleLeft;
+        if (_hoverX != null && width > 0 && widget.total > Duration.zero) {
+          final ratio = (_hoverX! / width).clamp(0.0, 1.0);
+          preview = Duration(
+            milliseconds: (widget.total.inMilliseconds * ratio).round(),
+          );
+          bubbleLeft = (_hoverX! - _bubbleWidth / 2).clamp(
+            0.0,
+            width - _bubbleWidth,
+          );
+        }
+        return MouseRegion(
+          onHover: (event) => setState(() => _hoverX = event.localPosition.dx),
+          onExit: (_) => setState(() => _hoverX = null),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              widget.child,
+              if (preview != null && bubbleLeft != null)
+                Positioned(
+                  left: bubbleLeft,
+                  bottom: 14,
+                  child: IgnorePointer(
+                    child: Container(
+                      width: _bubbleWidth,
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        durationToString(preview),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

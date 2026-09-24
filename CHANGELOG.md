@@ -2,6 +2,22 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（七）
+
+- 播放器工具栏第二批（播放能力）+ 第三批（交互打磨）落地（按 PLAYER_TOOLBAR_REVIEW.md 路线，新增功能统一进「更多」菜单子菜单）：
+  - 音轨选择（P1#2）：更多菜单新增「音轨」子菜单，打开时读取 media_kit tracks 动态构建（标题 + 语言，选中态高亮），无多音轨时空态禁用
+  - 字幕轨道 + 字幕延迟（P1#3）：「字幕」子菜单（关闭字幕 / 轨道列表，渲染由 media_kit_video 自动跟随）；「字幕延迟」子菜单 ±0.5s 步进 / 重置，持久化并在创建播放器时应用（mpv sub-delay）
+  - A-B 循环（P1#4）：「AB 循环」子菜单设置 / 清除 A、B 点（显示时间点），mpv ab-loop-a/b 实现；换集时自动清空（UI 与 mpv 属性同步）
+  - 播完动作（P2#9）：「播完动作」子菜单（自动连播 / 单集循环 / 播完暂停），completed tick 每秒读取即时生效；单集循环复用 restartFromBeginning；Bangumi 进度联动在所有模式下保持
+  - 画面旋转（P2#11）：「画面旋转」子菜单 自动 / 90° / 180° / 270°（mpv video-rotate，会话级）
+  - Windows 音量增益（P2#12）：创建播放器时 volume-max=200，音量链路（快捷键 / 滚轮 / 滑块）按平台 clamp（桌面 200 / Android 100），Android 系统音量接口防溢出
+  - 桌面音量滑块（P1#5）：hover 音量按钮弹出竖向滑块浮层（LayerLink 跟随，250ms 延迟隐藏），拖动复用手势音量链路；点击仍为静音切换；移动端保持静音按钮不变
+  - 进度条 hover 时间气泡（P2#8，桌面）：光标上方显示对应时间点，左右边缘 clamp，时长未知时不显示
+  - 移动端双击左右屏快进 / 快退（P2#10）：新设置项「双击快进 / 快退」（播放设置，仅移动端显示，默认关闭），幅度同「方向键跳转」，复用 seek HUD 反馈偏移量；桌面双击全屏行为不变
+  - 新增设置键：subtitleDelay / playbackFinishMode / doubleTapSeekEnabled（player 组，已注册 all）
+  - 验证：dart format 6 文件语法全过；纯逻辑（轨道标签 / 双击分屏 / hover 换算 / 字幕延迟 clamp）抽脚本 20 项断言全过；build_runner 与 dart analyze 仍受系统级子进程 / 命名管道故障（CreateFile failed 231）无法运行——playback controller 新增 @observable 字段（abLoopA/B、subtitleDelay）的 .g.dart 需本地 `dart run build_runner build` 重新生成（未生成时降级为普通字段，功能不受影响）；flutter analyze / flutter test / tools/build_windows_local.ps1 请在本地终端复核
+    - 相关文件: lib/services/storage/settings_keys.dart, lib/pages/player/controller/player_playback_controller.dart, lib/pages/player/player_controller.dart, lib/pages/player/player_item_panel.dart, lib/pages/player/player_item.dart, lib/pages/settings/player_settings.dart
+
 ## 2026.9.24（六）
 
 - 播放器工具栏第一批优化（按 PLAYER_TOOLBAR_REVIEW.md 实施路线）：

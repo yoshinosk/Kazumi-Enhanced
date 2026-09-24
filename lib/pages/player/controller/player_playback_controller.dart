@@ -2,6 +2,7 @@
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -97,6 +98,21 @@ abstract class _PlayerPlaybackController with Store {
   @observable
   SuperResolutionMode superResolutionMode = SuperResolutionMode.off;
 
+  /// A-B 循环起止点（秒，会话级）。换集时在 [resetForInit] 清空，
+  /// 并在创建播放器时向 mpv 写入 no，保证 UI 与 mpv 状态一致。
+  @observable
+  double? abLoopA;
+  @observable
+  double? abLoopB;
+
+  /// 字幕延迟（秒，mpv sub-delay）：正值字幕延后显示。持久化，
+  /// 每次创建播放器时应用。
+  @observable
+  double subtitleDelay = 0;
+
+  /// 画面旋转角度（0=按视频元数据自动，90/180/270），会话级。
+  int videoRotateDegrees = 0;
+
   @observable
   double volume = -1;
 
@@ -148,6 +164,8 @@ abstract class _PlayerPlaybackController with Store {
     duration = Duration.zero;
     completed = false;
     startOffset = 0;
+    abLoopA = null;
+    abLoopB = null;
   }
 
   /// 本次会话是否从距结尾 [nearEndWatchedThreshold] 以内的位置起播。
@@ -174,8 +192,10 @@ abstract class _PlayerPlaybackController with Store {
       await player.play();
       startOffset = 0;
     } catch (e) {
-      KazumiLogger()
-          .w('PlayerController: failed to restart from beginning', error: e);
+      KazumiLogger().w(
+        'PlayerController: failed to restart from beginning',
+        error: e,
+      );
     }
   }
 
@@ -281,8 +301,9 @@ abstract class _PlayerPlaybackController with Store {
       GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
     );
     hAenable = GStorage.getSetting(SettingsKeys.hAenable);
-    androidEnableOpenSLES =
-        GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
+    androidEnableOpenSLES = GStorage.getSetting(
+      SettingsKeys.androidEnableOpenSLES,
+    );
     hardwareDecoder = GStorage.getSetting(SettingsKeys.hardwareDecoder);
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
@@ -357,6 +378,30 @@ abstract class _PlayerPlaybackController with Store {
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
+      } else if (Platform.isWindows) {
+        // 音量增益：桌面端放开到 200%，小音量源可拉高（mpv 默认 130）。
+        await pp.setProperty("volume-max", "200");
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+
+      // 字幕延迟（持久化设置）与 A-B 循环清理：换集/换源后 UI 侧
+      // abLoopA/B 已随 resetForInit 清空，这里同步清 mpv 属性保持一致。
+      subtitleDelay = GStorage.getSetting<double>(SettingsKeys.subtitleDelay);
+      if (subtitleDelay != 0) {
+        await pp.setProperty('sub-delay', subtitleDelay.toStringAsFixed(1));
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+      await pp.setProperty('ab-loop-a', 'no');
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+      await pp.setProperty('ab-loop-b', 'no');
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
       }
 
       final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
@@ -381,17 +426,16 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
-      await player.setAudioTrack(
-        AudioTrack.auto(),
-      );
+      await player.setAudioTrack(AudioTrack.auto());
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
 
       String? videoRenderer;
       if (Platform.isAndroid) {
-        final String androidVideoRenderer =
-            GStorage.getSetting(SettingsKeys.androidVideoRenderer);
+        final String androidVideoRenderer = GStorage.getSetting(
+          SettingsKeys.androidVideoRenderer,
+        );
 
         if (androidVideoRenderer == 'auto') {
           // Android 14 及以上使用基于 Vulkan 的 MPV GPU-NEXT 视频输出，着色器性能更好
@@ -411,8 +455,9 @@ abstract class _PlayerPlaybackController with Store {
           videoRenderer = androidVideoRenderer;
         }
       } else if (Platform.isWindows) {
-        final String windowsVideoRenderer =
-            GStorage.getSetting(SettingsKeys.windowsVideoRenderer);
+        final String windowsVideoRenderer = GStorage.getSetting(
+          SettingsKeys.windowsVideoRenderer,
+        );
         // auto 时不指定 vo，交由 mpv 自行选择，
         // 与引入该设置之前的行为保持一致，避免老用户升级后出现回归。
         if (windowsVideoRenderer != 'auto') {
@@ -450,16 +495,21 @@ abstract class _PlayerPlaybackController with Store {
           );
           if (actionableMessage != null) {
             KazumiDialog.showToast(
-                message: actionableMessage, showActionButton: true);
+              message: actionableMessage,
+              showActionButton: true,
+            );
           } else if (showPlayerError) {
             KazumiDialog.showToast(
-                message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
-                duration: const Duration(seconds: 5),
-                showActionButton: true);
+              message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
+              duration: const Duration(seconds: 5),
+              showActionButton: true,
+            );
           }
         }
-        KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
-            error: event);
+        KazumiLogger().e(
+          'PlayerController: Player intent error ${videoUrl()}',
+          error: event,
+        );
       });
 
       if (superResolutionMode != SuperResolutionMode.off) {
@@ -477,8 +527,11 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       await player.open(
-        Media(videoUrl(),
-            start: Duration(seconds: offset), httpHeaders: httpHeaders),
+        Media(
+          videoUrl(),
+          start: Duration(seconds: offset),
+          httpHeaders: httpHeaders,
+        ),
         play: autoPlay,
       );
       if (!isCurrentPlayer(player)) {
@@ -536,8 +589,10 @@ abstract class _PlayerPlaybackController with Store {
     try {
       mediaPlayer!.setRate(playerSpeed);
     } catch (e) {
-      KazumiLogger()
-          .e('PlayerController: failed to set playback speed', error: e);
+      KazumiLogger().e(
+        'PlayerController: failed to set playback speed',
+        error: e,
+      );
     }
   }
 
@@ -548,7 +603,9 @@ abstract class _PlayerPlaybackController with Store {
 
   @action
   void updateVolume(double value) {
-    value = value.clamp(0.0, 100.0);
+    // 桌面端允许增益到 200%（对应创建播放器时的 volume-max），
+    // Android 端锁 100（系统音量范围）。
+    value = value.clamp(0.0, isDesktop() ? 200.0 : 100.0);
     preciseVolume = value;
     if (volume.toInt() == value.toInt()) {
       return;
@@ -569,12 +626,13 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   Future<void> syncVolumeToDevice([double? value]) async {
-    final vol = (value ?? volume).clamp(0.0, 100.0);
+    final vol = (value ?? volume).clamp(0.0, isDesktop() ? 200.0 : 100.0);
     try {
       if (isDesktop()) {
         await mediaPlayer!.setVolume(vol);
       } else {
-        await FlutterVolumeController.setVolume(vol / 100);
+        // 系统音量接口只接受 0~1，防止增益值溢出
+        await FlutterVolumeController.setVolume(vol.clamp(0.0, 100.0) / 100);
       }
     } catch (_) {}
   }
@@ -646,5 +704,122 @@ abstract class _PlayerPlaybackController with Store {
       return null;
     }
     return await screenshotService.capturePng(player);
+  }
+
+  // ---------- 音轨 / 字幕轨 / 字幕延迟 / A-B 循环 / 画面旋转 ----------
+
+  NativePlayer? get _nativePlayer {
+    final player = mediaPlayer;
+    if (player == null) return null;
+    try {
+      return player.platform as NativePlayer;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 当前可用轨道列表（菜单打开时同步读取）。
+  Tracks? get currentTracks {
+    try {
+      return mediaPlayer?.state.tracks;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 当前选中的轨道。
+  Track? get currentTrack {
+    try {
+      return mediaPlayer?.state.track;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> selectAudioTrack(AudioTrack track) async {
+    final player = mediaPlayer;
+    if (player == null) return;
+    try {
+      await player.setAudioTrack(track);
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to set audio track', error: e);
+    }
+  }
+
+  Future<void> selectSubtitleTrack(SubtitleTrack track) async {
+    final player = mediaPlayer;
+    if (player == null) return;
+    try {
+      await player.setSubtitleTrack(track);
+    } catch (e) {
+      KazumiLogger().w(
+        'PlayerController: failed to set subtitle track',
+        error: e,
+      );
+    }
+  }
+
+  /// 字幕延迟调整（秒）。正值延后 / 负值提前，持久化并立即应用。
+  @action
+  Future<void> setSubtitleDelay(double seconds) async {
+    final clamped = double.parse(seconds.clamp(-60.0, 60.0).toStringAsFixed(1));
+    subtitleDelay = clamped;
+    unawaited(GStorage.putSetting<double>(SettingsKeys.subtitleDelay, clamped));
+    try {
+      await _nativePlayer?.setProperty('sub-delay', clamped.toStringAsFixed(1));
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to set sub-delay', error: e);
+    }
+  }
+
+  /// 设置 A-B 循环起点 / 终点为当前播放位置（秒）。
+  @action
+  Future<double?> markAbLoop({required bool isA}) async {
+    final pp = _nativePlayer;
+    if (pp == null) return null;
+    final seconds = playerPosition.inMilliseconds / 1000.0;
+    try {
+      await pp.setProperty(
+        isA ? 'ab-loop-a' : 'ab-loop-b',
+        seconds.toStringAsFixed(3),
+      );
+      if (isA) {
+        abLoopA = seconds;
+      } else {
+        abLoopB = seconds;
+      }
+      return seconds;
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to set ab-loop', error: e);
+      return null;
+    }
+  }
+
+  @action
+  Future<void> clearAbLoop() async {
+    abLoopA = null;
+    abLoopB = null;
+    try {
+      await _nativePlayer?.setProperty('ab-loop-a', 'no');
+      await _nativePlayer?.setProperty('ab-loop-b', 'no');
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to clear ab-loop', error: e);
+    }
+  }
+
+  /// 画面旋转。[degrees] 为 0 时恢复按视频元数据自动（mpv video-rotate=no）。
+  Future<void> setVideoRotate(int degrees) async {
+    videoRotateDegrees = degrees;
+    try {
+      await _nativePlayer?.setProperty(
+        'video-rotate',
+        degrees == 0 ? 'no' : degrees.toString(),
+      );
+    } catch (e) {
+      KazumiLogger().w(
+        'PlayerController: failed to set video-rotate',
+        error: e,
+      );
+    }
   }
 }

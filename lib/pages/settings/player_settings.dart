@@ -42,6 +42,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool autoPlayNext;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
+  late bool doubleTapSeekEnabled;
   late int playerButtonSkipTime;
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
@@ -90,6 +91,10 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
 
     brightnessVolumeGesture = GStorage.getSetting<bool>(
       SettingsKeys.brightnessVolumeGesture,
+    );
+
+    doubleTapSeekEnabled = GStorage.getSetting<bool>(
+      SettingsKeys.doubleTapSeekEnabled,
     );
 
     playerButtonSkipTime = GStorage.getSetting<int>(
@@ -508,6 +513,24 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     title: Text('滑动手势'),
                     description: Text('竖向滑动调节音量和亮度'),
                     initialValue: brightnessVolumeGesture,
+                  ),
+                if (!isDesktop())
+                  SettingsTile.switchTile(
+                    leading: Icons.touch_app_rounded,
+                    onToggle: (value) async {
+                      doubleTapSeekEnabled = value ?? !doubleTapSeekEnabled;
+                      await GStorage.putSetting<bool>(
+                        SettingsKeys.doubleTapSeekEnabled,
+                        doubleTapSeekEnabled,
+                      );
+                      setState(() {});
+                    },
+                    title: Text('双击快进 / 快退'),
+                    description: Text(
+                      '双击屏幕左右两侧快进或快退（幅度同「方向键跳转」设置），'
+                      '开启后双击不再播放 / 暂停',
+                    ),
+                    initialValue: doubleTapSeekEnabled,
                   ),
                 if (Platform.isAndroid) ...[
                   SettingsTile.switchTile(

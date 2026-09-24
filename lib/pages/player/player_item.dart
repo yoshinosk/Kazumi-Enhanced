@@ -148,6 +148,13 @@ class _PlayerItemState extends State<PlayerItem>
   PointerDeviceKind? _lastTapPointerKind;
   PointerDeviceKind? _lastDoubleTapPointerKind;
 
+  /// 双击位置（双击左右屏快进/快退可选项使用）。
+  Offset? _lastDoubleTapPosition;
+
+  /// 移动端双击左右屏快进/快退（默认关闭，保持双击播放/暂停习惯）。
+  late bool doubleTapSeekEnabled;
+  Timer? _doubleTapSeekHudTimer;
+
   late final AnimationController _panelVisibilityController;
   late final AnimationController _screenshotFeedbackController;
   late final Animation<double> _screenshotFeedbackAnimation;
@@ -536,7 +543,39 @@ class _PlayerItemState extends State<PlayerItem>
       handleFullscreen();
       return;
     }
+    // 移动端可选：双击左/右半屏快退 / 快进（替代双击播放/暂停）。
+    if (!isDesktop() && doubleTapSeekEnabled) {
+      final position = _lastDoubleTapPosition;
+      if (position != null) {
+        final forward = position.dx >= MediaQuery.sizeOf(context).width / 2;
+        final skipSeconds = GStorage.getSetting<int>(
+          SettingsKeys.arrowKeySkipTime,
+        );
+        _showDoubleTapSeekHud(forward);
+        unawaited(
+          playerController.seekBy(
+            Duration(seconds: forward ? skipSeconds : -skipSeconds),
+          ),
+        );
+        return;
+      }
+    }
     playerController.playOrPause();
+  }
+
+  /// 双击快进/快退的 HUD 反馈：复用拖动 seek 的 HUD，
+  /// 短暂显示偏移量与目标位置后自动隐藏。
+  void _showDoubleTapSeekHud(bool forward) {
+    playerController.panel.seekDirection = forward ? 1 : -1;
+    playerController.panel.showSeekTime = true;
+    _doubleTapSeekHudTimer?.cancel();
+    _doubleTapSeekHudTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted) {
+        return;
+      }
+      playerController.panel.showSeekTime = false;
+      playerController.panel.seekDirection = 0;
+    });
   }
 
   void _handleMouseScroller() {
@@ -1233,28 +1272,42 @@ class _PlayerItemState extends State<PlayerItem>
           // Replay stale near-end resumes instead of advancing to the next episode.
           unawaited(playerController.playback.restartFromBeginning());
         } else {
-          if (playingSelection.episode < playingRoadData.data.length &&
-              autoPlayNext) {
-            final nextSelection = VideoEpisodeSelection(
-              episode: playingSelection.episode + 1,
-              road: playingSelection.road,
-            );
-            // Resolution failures surface through the controller's failed state
-            // instead of silently retrying here every second.
-            final nextRef = videoPageController.resolveEpisode(nextSelection);
-            if (nextRef != null) {
-              KazumiDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+          // 播完动作（播放器「更多 → 播完动作」，每秒 tick 读取即时生效）：
+          // repeatOne 单集循环 / pauseAfter 播完暂停（等价于关闭自动连播）/
+          // autoNext 遵循播放设置中的「自动连播」开关。
+          final finishMode = GStorage.getSetting<String>(
+            SettingsKeys.playbackFinishMode,
+          );
+          if (finishMode == 'repeatOne') {
+            unawaited(playerController.playback.restartFromBeginning());
+          } else {
+            final effectiveAutoPlayNext = finishMode == 'pauseAfter'
+                ? false
+                : autoPlayNext;
+            if (playingSelection.episode < playingRoadData.data.length &&
+                effectiveAutoPlayNext) {
+              final nextSelection = VideoEpisodeSelection(
+                episode: playingSelection.episode + 1,
+                road: playingSelection.road,
+              );
+              // Resolution failures surface through the controller's failed state
+              // instead of silently retrying here every second.
+              final nextRef = videoPageController.resolveEpisode(nextSelection);
+              if (nextRef != null) {
+                KazumiDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+              }
+              try {
+                playerTimer!.cancel();
+              } catch (_) {}
+              widget.changeEpisode(
+                playingSelection.episode + 1,
+                currentRoad: playingSelection.road,
+              );
+            } else if (playingSelection.episode >=
+                playingRoadData.data.length) {
+              // 最后一集播完：本地媒体库提示去在线 / 磁力补后续，其余仅提示。
+              _maybePromptLastEpisodeFinished(playingSelection);
             }
-            try {
-              playerTimer!.cancel();
-            } catch (_) {}
-            widget.changeEpisode(
-              playingSelection.episode + 1,
-              currentRoad: playingSelection.road,
-            );
-          } else if (playingSelection.episode >= playingRoadData.data.length) {
-            // 最后一集播完：本地媒体库提示去在线 / 磁力补后续，其余仅提示。
-            _maybePromptLastEpisodeFinished(playingSelection);
           }
           // 本地媒体库真·播放完成：可选联动 Bangumi 收藏 EP 进度。
           // completed 是持续状态，这里按 (bangumiId, 集数) 去重，
@@ -1464,6 +1517,9 @@ class _PlayerItemState extends State<PlayerItem>
     _danmakuUseSystemFont = GStorage.getSetting(SettingsKeys.useSystemFont);
     _danmakuBorderSize = GStorage.getSetting(SettingsKeys.danmakuBorderSize);
     autoPlayNext = GStorage.getSetting(SettingsKeys.autoPlayNext);
+    doubleTapSeekEnabled = GStorage.getSetting(
+      SettingsKeys.doubleTapSeekEnabled,
+    );
     backgroundPlayback = GStorage.getSetting(SettingsKeys.backgroundPlayback);
     brightnessVolumeGesture = GStorage.getSetting(
       SettingsKeys.brightnessVolumeGesture,
@@ -1492,6 +1548,7 @@ class _PlayerItemState extends State<PlayerItem>
     hideTimer?.cancel();
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
+    _doubleTapSeekHudTimer?.cancel();
     _panelVisibilityController.dispose();
     _screenshotFeedbackController.dispose();
     _disposePlayerMenu();
@@ -1578,6 +1635,7 @@ class _PlayerItemState extends State<PlayerItem>
                             ? null
                             : (details) {
                                 _lastDoubleTapPointerKind = details.kind;
+                                _lastDoubleTapPosition = details.localPosition;
                               },
                         onDoubleTap: (playerController.panel.lockPanel)
                             ? null
