@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:mobx/mobx.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:kazumi/bean/widget/play_pause_icon.dart';
@@ -109,6 +110,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   final LayerLink _volumeButtonLink = LayerLink();
   OverlayEntry? _volumeOverlayEntry;
   Timer? _volumeOverlayHideTimer;
+  ReactionDisposer? _volumeOverlayVisibilityReaction;
 
   bool get _desktop => switch (defaultTargetPlatform) {
     TargetPlatform.windows ||
@@ -122,6 +124,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   @override
   void dispose() {
+    _volumeOverlayVisibilityReaction?.call();
     _volumeOverlayHideTimer?.cancel();
     _volumeOverlayEntry?.remove();
     textController.dispose();
@@ -343,6 +346,17 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   void initState() {
     super.initState();
     playerController = widget.playerController;
+    // 底栏自动隐藏时同步移除音量滑块浮层，避免 LayerLink 目标随底栏
+    // 滑出后浮层残留成“孤立滑块”。
+    _volumeOverlayVisibilityReaction = reaction(
+      (r) => playerController.panel.showVideoController,
+      (visible) {
+        if (!visible) {
+          _cancelVolumeOverlayHide();
+          _hideVolumeOverlay();
+        }
+      },
+    );
     final visibility = widget.panelVisibilityController.drive(
       CurveTween(curve: Curves.easeInOut),
     );
@@ -533,6 +547,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 value: showVolume
                     ? playerController.playback.volume
                     : playerController.panel.brightness,
+                maxValue: showVolume && _desktop ? 200 : 100,
                 disableAnimations: widget.disableAnimations,
               );
             },

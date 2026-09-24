@@ -30,7 +30,8 @@ class ScreenshotSaveService {
   /// 保存 PNG 截图并返回文件路径。
   ///
   /// [title] 为当前播放的番剧标题，用于生成可辨识的文件名（自动过滤
-  /// Windows 非法字符并截断）。目录不存在时自动创建；写入失败时抛出
+  /// Windows 非法字符并截断）。目录不存在时自动创建；文件名冲突时
+  /// 自动追加序号，避免同一秒内连续截图静默覆盖；写入失败时抛出
   /// [FileSystemException]，由调用方提示用户修改保存位置。
   Future<File> savePng(Uint8List bytes, {String? title}) async {
     final directory = resolveDirectory();
@@ -38,7 +39,8 @@ class ScreenshotSaveService {
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
-      final file = File(p.join(directory.path, _buildFileName(title)));
+      final fileName = await _resolveUniqueFileName(directory, title);
+      final file = File(p.join(directory.path, fileName));
       await file.writeAsBytes(bytes, flush: true);
       return file;
     } on FileSystemException catch (e) {
@@ -55,7 +57,7 @@ class ScreenshotSaveService {
     }
   }
 
-  /// 生成形如 `Kazumi_20260924_161234_标题.png` 的文件名。
+  /// 生成形如 `Kazumi_20260924_161234_812_标题.png` 的文件名（含毫秒）。
   String _buildFileName(String? title) {
     final now = DateTime.now();
     final stamp = StringBuffer()
@@ -65,7 +67,10 @@ class ScreenshotSaveService {
       ..write('_')
       ..write(now.hour.toString().padLeft(2, '0'))
       ..write(now.minute.toString().padLeft(2, '0'))
-      ..write(now.second.toString().padLeft(2, '0'));
+      ..write(now.second.toString().padLeft(2, '0'))
+      // 毫秒：避免同一秒内连按两次截图快捷键生成完全相同的文件名。
+      ..write('_')
+      ..write(now.millisecond.toString().padLeft(3, '0'));
 
     final name = StringBuffer('Kazumi_');
     name.write(stamp);
@@ -77,6 +82,23 @@ class ScreenshotSaveService {
     }
     name.write('.png');
     return name.toString();
+  }
+
+  /// 文件名已存在时追加 `_2`、`_3`… 序号，保证不覆盖旧截图。
+  Future<String> _resolveUniqueFileName(
+    Directory directory,
+    String? title,
+  ) async {
+    final candidate = _buildFileName(title);
+    final extension = p.extension(candidate);
+    final base = p.basenameWithoutExtension(candidate);
+    var name = candidate;
+    var counter = 2;
+    while (await File(p.join(directory.path, name)).exists()) {
+      name = '$base$counter$extension';
+      counter++;
+    }
+    return name;
   }
 
   /// 过滤 Windows 文件名非法字符（\\ / : * ? " < > | 与控制字符），

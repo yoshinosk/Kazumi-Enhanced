@@ -2,6 +2,27 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.24（八）
+
+- 全量代码审查修复（覆盖当日全部 7 个提交，高/中/低危问题 16 项）：
+  - 【高】修复 Windows 音量增益被自身每秒 tick 拉回：`applyExternalVolume` 仍按 0~100 截断，与桌面 volume-max=200 冲突，音量调高后 1 秒内被拉回、UI 与实际播放音量脱节；改为按平台 clamp（桌面 200 / Android 100）
+  - 【高】修复画面旋转换集失效：video-rotate 是 mpv 实例属性，换集新建 Player 时未重放，画面不旋转但菜单仍高亮；创建播放器时按会话级 videoRotateDegrees 重放
+  - 【高】补跑 build_runner 重新生成 MobX 代码：abLoopA/abLoopB/subtitleDelay 此前缺 Atom、markAbLoop/clearAbLoop/setSubtitleDelay 缺 action 包装，Observer 永不重建（此前系统命名管道故障未能生成，本次已成功执行）
+  - 【高】修复弹幕轴越界群采信漏洞：仅校验最近一条越界弹幕与主体的间隙，「近端桥接 + 远端离群」组合可绕过并使推荐幅度由远端离群决定；改为链式校验主体到分位定义元素的整段连续性，新增头/尾两个回归用例
+  - 【高】修复弹幕轴换集守卫失效：本地弹幕 episodeId=0 时同番剧换集作用域键不变，旧集推荐会写入番剧级作用域污染新集；守卫改用弹幕池版本号（danmakusRevision）判定代次，等待视频时长（最长 13s）后复查池版本与手动偏移，弹窗应用前同样复查，不再覆盖用户手动偏移
+  - 【高】修复磁力搜索竞态：search('') 清空不复位 isSearching、无请求取消机制，进行中清空后旧请求把结果/错误/历史词条回填；引入请求代际（_searchGeneration），search/loadMore 的在途回填按代际丢弃
+  - 【高】修复标题栏双击最大化与拖拽手势冲突：Pan 识别器 2px 抖动即抢占双击；改为原始指针移动超阈值启动拖拽 + onTapUp 手动双击检测（子按钮仍走竞技场优先），并把 bottom（TabBar）区域排除出拖拽/双击热区（双击 Tab 栏空白不再误触最大化）
+  - 【中】补 AB 循环校验：A/B 点设置时校验 B > A（B 先设允许，mpv 从头循环），否则 toast 拒绝，避免 mpv 循环静默失效或原地反复 seek
+  - 【中】修复截图同秒重名静默覆盖：文件名时间戳加入毫秒并做存在性递增后缀（_2/_3…），连按截图快捷键不再覆盖旧图
+  - 【中】修复「恢复默认播放设置」误清自定义截图目录：screenshotSavePath 改归 SettingGroup.none（截图设置页有独立恢复默认入口）
+  - 【中】修复磁力页 700px 宽窄切换丢 tab 状态：TabBarView 固定在 Row index 1 槽位（窄屏用 SizedBox.shrink 占位），断点切换子树不再重建
+  - 【中】修复媒体库分组「修改识别结果」只作用于第一个文件夹：组级入口对组内全部文件夹生效，避免组意外分裂
+  - 【中】修复订阅刷新失败整块遮蔽已缓存条目：有缓存时保留展示 + 顶部「刷新失败」横幅，无缓存才显示整块错误
+  - 【中】修复桌面音量浮层残留：底栏自动隐藏时同步移除音量滑块 OverlayEntry（MobX reaction 监听 showVideoController）
+  - 【低】音量 HUD 进度条适配 0-200 增益（maxValue 参数，桌面 200）；双击快进 800ms HUD 定时器在进度条拖动中不再强制清屏；搜索历史点击词条同步输入框；subtitle_settings 重置后 await 补 mounted 检查
+  - 验证：flutter analyze 无新增 error/warning（存量 info 与 tools/ 本地 SDK 报错未计入）；flutter test 407 项全过（含新增 2 项弹幕轴回归）；build_runner 成功；dart format 15 文件；tools/build_windows_local.ps1 构建成功（kazumi.exe）
+    - 相关文件: lib/pages/player/controller/player_playback_controller.dart, lib/pages/player/controller/player_playback_controller.g.dart, lib/pages/player/player_item.dart, lib/pages/player/player_item_panel.dart, lib/pages/player/player_adjustment_hud.dart, lib/services/player/screenshot_save_service.dart, lib/utils/danmaku_axis_checker.dart, lib/pages/player/danmaku_axis_dialog.dart, test/danmaku_axis_checker_test.dart, lib/pages/magnet/magnet_controller.dart, lib/pages/magnet/magnet_page.dart, lib/pages/download_tab/download_tab_page.dart, lib/bean/appbar/sys_app_bar.dart, lib/pages/media/media_library_page.dart, lib/pages/settings/subtitle_settings.dart, lib/services/storage/settings_keys.dart
+
 ## 2026.9.24（七）
 
 - 播放器工具栏第二批（播放能力）+ 第三批（交互打磨）落地（按 PLAYER_TOOLBAR_REVIEW.md 路线，新增功能统一进「更多」菜单子菜单）：

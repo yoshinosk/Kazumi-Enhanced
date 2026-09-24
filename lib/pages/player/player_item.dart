@@ -573,6 +573,11 @@ class _PlayerItemState extends State<PlayerItem>
       if (!mounted) {
         return;
       }
+      // 双击后立即拖动进度条时让位于拖动 HUD，避免被强制清掉一帧产生闪烁。
+      if (_progressBarDragHold != null ||
+          playerController.seeking.hasActiveInteractiveSeek) {
+        return;
+      }
       playerController.panel.showSeekTime = false;
       playerController.panel.seekDirection = 0;
     });

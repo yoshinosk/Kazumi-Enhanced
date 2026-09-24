@@ -42,28 +42,22 @@ String _inferLocalTitle(LocalMediaFile file) {
 /// id 使用标题的稳定负值哈希：避免所有未匹配番剧共用 id=0 导致历史记录
 /// 与续播进度互相覆盖（负值同时保证不会误触发 Bangumi 相关查询）。
 BangumiItem _placeholderBangumiItem(String name) => BangumiItem(
-      id: _placeholderIdFor(name),
-      type: 2,
-      name: name,
-      nameCn: name,
-      summary: '',
-      airDate: '',
-      airWeekday: 0,
-      rank: 0,
-      images: {
-        'large': '',
-        'common': '',
-        'medium': '',
-        'small': '',
-        'grid': ''
-      },
-      tags: const [],
-      alias: const [],
-      ratingScore: 0,
-      votes: 0,
-      votesCount: const [],
-      info: '',
-    );
+  id: _placeholderIdFor(name),
+  type: 2,
+  name: name,
+  nameCn: name,
+  summary: '',
+  airDate: '',
+  airWeekday: 0,
+  rank: 0,
+  images: {'large': '', 'common': '', 'medium': '', 'small': '', 'grid': ''},
+  tags: const [],
+  alias: const [],
+  ratingScore: 0,
+  votes: 0,
+  votesCount: const [],
+  info: '',
+);
 
 int _placeholderIdFor(String name) {
   var h = 0;
@@ -141,9 +135,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
         actions: [
           IconButton(
             tooltip: _searching ? '关闭搜索' : '搜索',
-            icon: Icon(
-              _searching ? Icons.close_rounded : Icons.search_rounded,
-            ),
+            icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
             onPressed: () {
               setState(() {
                 _searching = !_searching;
@@ -163,8 +155,9 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
           IconButton(
             tooltip: '搜刮元数据',
             icon: const Icon(Icons.auto_awesome_outlined),
-            onPressed:
-                controller.isScraping ? null : () => _confirmScrape(context),
+            onPressed: controller.isScraping
+                ? null
+                : () => _confirmScrape(context),
           ),
           IconButton(
             tooltip: '文件夹管理',
@@ -173,45 +166,47 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
           ),
         ],
       ),
-      body: Observer(builder: (_) {
-        if (controller.isScanning && controller.library.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (controller.folders.isEmpty) {
-          return Center(
-            child: GeneralEmptyState(
-              icon: Icons.folder_off_rounded,
-              title: '尚未添加任何文件夹\n点击右上角添加本地视频目录',
-            ),
-          );
-        }
-        if (controller.library.isEmpty) {
-          return Center(
-            child: GeneralEmptyState(
-              icon: Icons.video_library_outlined,
-              title: '所选文件夹中没有发现视频文件',
-            ),
-          );
-        }
-        if (controller.isGridMode) {
-          return _GridView(
-            controller: controller,
-            query: _searchQuery,
-            onFileTap: _playFile,
-          );
-        }
-        return controller.isAnimeMode
-            ? _AnimeView(
-                controller: controller,
-                query: _searchQuery,
-                onFileTap: _playFile,
-              )
-            : _FolderView(
-                controller: controller,
-                query: _searchQuery,
-                onFileTap: _playFile,
-              );
-      }),
+      body: Observer(
+        builder: (_) {
+          if (controller.isScanning && controller.library.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (controller.folders.isEmpty) {
+            return Center(
+              child: GeneralEmptyState(
+                icon: Icons.folder_off_rounded,
+                title: '尚未添加任何文件夹\n点击右上角添加本地视频目录',
+              ),
+            );
+          }
+          if (controller.library.isEmpty) {
+            return Center(
+              child: GeneralEmptyState(
+                icon: Icons.video_library_outlined,
+                title: '所选文件夹中没有发现视频文件',
+              ),
+            );
+          }
+          if (controller.isGridMode) {
+            return _GridView(
+              controller: controller,
+              query: _searchQuery,
+              onFileTap: _playFile,
+            );
+          }
+          return controller.isAnimeMode
+              ? _AnimeView(
+                  controller: controller,
+                  query: _searchQuery,
+                  onFileTap: _playFile,
+                )
+              : _FolderView(
+                  controller: controller,
+                  query: _searchQuery,
+                  onFileTap: _playFile,
+                );
+        },
+      ),
       bottomNavigationBar: _ScrapeProgressBar(controller: controller),
     );
   }
@@ -317,9 +312,7 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
                         KazumiDialog.dismiss();
                       }
                     : null,
-                child: Text(
-                  canStart ? '开始搜刮（$targetCount）' : '无待搜刮项',
-                ),
+                child: Text(canStart ? '开始搜刮（$targetCount）' : '无待搜刮项'),
               ),
             ],
           );
@@ -355,42 +348,44 @@ class _ViewModeToggle extends StatelessWidget {
   final MediaController controller;
 
   IconData _iconFor(String mode) => switch (mode) {
-        'grid' => Icons.grid_view_rounded,
-        'anime' => Icons.movie_outlined,
-        _ => Icons.folder_outlined,
-      };
+    'grid' => Icons.grid_view_rounded,
+    'anime' => Icons.movie_outlined,
+    _ => Icons.folder_outlined,
+  };
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      final current = controller.viewMode;
-      return PopupMenuButton<String>(
-        tooltip: '视图模式',
-        icon: Icon(_iconFor(current)),
-        onSelected: (mode) => controller.setViewMode(mode),
-        itemBuilder: (_) => [
-          for (final entry in const [
-            ('folder', '按文件夹', Icons.folder_outlined),
-            ('anime', '按番剧', Icons.movie_outlined),
-            ('grid', '网格', Icons.grid_view_rounded),
-          ])
-            PopupMenuItem(
-              value: entry.$1,
-              child: Row(
-                children: [
-                  Icon(entry.$3, size: 20),
-                  const SizedBox(width: 12),
-                  Text(entry.$2),
-                  if (current == entry.$1) ...[
-                    const Spacer(),
-                    const Icon(Icons.check_rounded, size: 18),
+    return Observer(
+      builder: (_) {
+        final current = controller.viewMode;
+        return PopupMenuButton<String>(
+          tooltip: '视图模式',
+          icon: Icon(_iconFor(current)),
+          onSelected: (mode) => controller.setViewMode(mode),
+          itemBuilder: (_) => [
+            for (final entry in const [
+              ('folder', '按文件夹', Icons.folder_outlined),
+              ('anime', '按番剧', Icons.movie_outlined),
+              ('grid', '网格', Icons.grid_view_rounded),
+            ])
+              PopupMenuItem(
+                value: entry.$1,
+                child: Row(
+                  children: [
+                    Icon(entry.$3, size: 20),
+                    const SizedBox(width: 12),
+                    Text(entry.$2),
+                    if (current == entry.$1) ...[
+                      const Spacer(),
+                      const Icon(Icons.check_rounded, size: 18),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-        ],
-      );
-    });
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -404,63 +399,61 @@ class _SortMenu extends StatelessWidget {
 
   final MediaController controller;
 
-  static const _modes = [
-    ('date', '按番剧日期'),
-    ('name', '按标题'),
-    ('count', '按文件数'),
-  ];
+  static const _modes = [('date', '按番剧日期'), ('name', '按标题'), ('count', '按文件数')];
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      if (!controller.isAnimeMode && !controller.isGridMode) {
-        return const SizedBox.shrink();
-      }
-      final current = controller.sortMode;
-      final desc = controller.sortDescending;
-      return PopupMenuButton<String>(
-        tooltip: '排序方式',
-        icon: const Icon(Icons.sort_rounded),
-        onSelected: (value) {
-          if (value == '__direction__') {
-            controller.setSortDescending(!desc);
-          } else {
-            controller.setSortMode(value);
-          }
-        },
-        itemBuilder: (_) => [
-          for (final entry in _modes)
+    return Observer(
+      builder: (_) {
+        if (!controller.isAnimeMode && !controller.isGridMode) {
+          return const SizedBox.shrink();
+        }
+        final current = controller.sortMode;
+        final desc = controller.sortDescending;
+        return PopupMenuButton<String>(
+          tooltip: '排序方式',
+          icon: const Icon(Icons.sort_rounded),
+          onSelected: (value) {
+            if (value == '__direction__') {
+              controller.setSortDescending(!desc);
+            } else {
+              controller.setSortMode(value);
+            }
+          },
+          itemBuilder: (_) => [
+            for (final entry in _modes)
+              PopupMenuItem(
+                value: entry.$1,
+                child: Row(
+                  children: [
+                    Text(entry.$2),
+                    if (current == entry.$1) ...[
+                      const Spacer(),
+                      const Icon(Icons.check_rounded, size: 18),
+                    ],
+                  ],
+                ),
+              ),
+            const PopupMenuDivider(),
             PopupMenuItem(
-              value: entry.$1,
+              value: '__direction__',
               child: Row(
                 children: [
-                  Text(entry.$2),
-                  if (current == entry.$1) ...[
-                    const Spacer(),
-                    const Icon(Icons.check_rounded, size: 18),
-                  ],
+                  Icon(
+                    desc
+                        ? Icons.arrow_downward_rounded
+                        : Icons.arrow_upward_rounded,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(desc ? '降序（最新在前）' : '升序（最早在前）'),
                 ],
               ),
             ),
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            value: '__direction__',
-            child: Row(
-              children: [
-                Icon(
-                  desc
-                      ? Icons.arrow_downward_rounded
-                      : Icons.arrow_upward_rounded,
-                  size: 18,
-                ),
-                const SizedBox(width: 12),
-                Text(desc ? '降序（最新在前）' : '升序（最早在前）'),
-              ],
-            ),
-          ),
-        ],
-      );
-    });
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -475,37 +468,45 @@ class _FolderView extends StatelessWidget {
 
   final MediaController controller;
   final Future<void> Function(
-      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onFileTap;
   final String query;
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      final folders = _filterFolders(controller.library, query);
-      return CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _FolderSection(
-                controller: controller,
-                folder: folders[index],
-                onFileTap: onFileTap,
+    return Observer(
+      builder: (_) {
+        final folders = _filterFolders(controller.library, query);
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _StatsBar(controller: controller)),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _FolderSection(
+                  controller: controller,
+                  folder: folders[index],
+                  onFileTap: onFileTap,
+                ),
+                childCount: folders.length,
               ),
-              childCount: folders.length,
             ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
-      );
-    });
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
+        );
+      },
+    );
   }
 }
 
 /// 按查询串过滤文件夹：文件夹名命中保留全部文件；
 /// 否则只保留文件名命中的文件（空文件夹丢弃）。
 List<LocalMediaFolder> _filterFolders(
-    List<LocalMediaFolder> folders, String query) {
+  List<LocalMediaFolder> folders,
+  String query,
+) {
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return folders;
   final result = <LocalMediaFolder>[];
@@ -514,14 +515,13 @@ List<LocalMediaFolder> _filterFolders(
       result.add(folder);
       continue;
     }
-    final files =
-        folder.files.where((f) => f.name.toLowerCase().contains(q)).toList();
+    final files = folder.files
+        .where((f) => f.name.toLowerCase().contains(q))
+        .toList();
     if (files.isNotEmpty) {
-      result.add(LocalMediaFolder(
-        path: folder.path,
-        name: folder.name,
-        files: files,
-      ));
+      result.add(
+        LocalMediaFolder(path: folder.path, name: folder.name, files: files),
+      );
     }
   }
   return result;
@@ -579,79 +579,81 @@ class _ScrapeProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      if (!controller.isScraping) {
-        return const SizedBox.shrink();
-      }
-      final theme = Theme.of(context);
-      final colorScheme = theme.colorScheme;
-      final total = controller.scrapeTotal;
-      final done = controller.scrapeDone;
-      final progress = total > 0 ? (done / total).clamp(0.0, 1.0) : null;
-      return Material(
-        color: colorScheme.surfaceContainer,
-        elevation: 8,
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '正在搜刮 $done/$total',
-                            style: theme.textTheme.titleSmall,
-                          ),
-                          if (controller.scrapeCurrentName.isNotEmpty)
-                            Text(
-                              controller.scrapeCurrentName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                        ],
+    return Observer(
+      builder: (_) {
+        if (!controller.isScraping) {
+          return const SizedBox.shrink();
+        }
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+        final total = controller.scrapeTotal;
+        final done = controller.scrapeDone;
+        final progress = total > 0 ? (done / total).clamp(0.0, 1.0) : null;
+        return Material(
+          color: colorScheme.surfaceContainer,
+          elevation: 8,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                    ),
-                    Text(
-                      '匹配 ${controller.scrapeMatched} · 未找到 ${controller.scrapeFailed}',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      tooltip: '取消搜刮',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close_rounded, size: 20),
-                      onPressed: () => controller.cancelScrape(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 4,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '正在搜刮 $done/$total',
+                              style: theme.textTheme.titleSmall,
+                            ),
+                            if (controller.scrapeCurrentName.isNotEmpty)
+                              Text(
+                                controller.scrapeCurrentName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        '匹配 ${controller.scrapeMatched} · 未找到 ${controller.scrapeFailed}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip: '取消搜刮',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => controller.cancelScrape(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 4,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 }
 
@@ -665,7 +667,11 @@ class _FolderSection extends StatefulWidget {
   final MediaController controller;
   final LocalMediaFolder folder;
   final Future<void> Function(
-      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onFileTap;
 
   @override
   State<_FolderSection> createState() => _FolderSectionState();
@@ -703,10 +709,7 @@ class _FolderSectionState extends State<_FolderSection> {
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
                   child: Chip(
-                    label: Text(
-                      '已匹配',
-                      style: theme.textTheme.labelSmall,
-                    ),
+                    label: Text('已匹配', style: theme.textTheme.labelSmall),
                     visualDensity: VisualDensity.compact,
                   ),
                 ),
@@ -714,15 +717,9 @@ class _FolderSectionState extends State<_FolderSection> {
                 icon: const Icon(Icons.more_vert),
                 onSelected: (value) => _handleFolderAction(value, folder, info),
                 itemBuilder: (_) => [
-                  const PopupMenuItem(
-                    value: 'match',
-                    child: Text('手动匹配番剧'),
-                  ),
+                  const PopupMenuItem(value: 'match', child: Text('手动匹配番剧')),
                   if (info != null)
-                    const PopupMenuItem(
-                      value: 'clear',
-                      child: Text('清除匹配'),
-                    ),
+                    const PopupMenuItem(value: 'clear', child: Text('清除匹配')),
                 ],
               ),
               Icon(_expanded ? Icons.expand_less : Icons.expand_more),
@@ -799,41 +796,53 @@ class _AnimeView extends StatelessWidget {
 
   final MediaController controller;
   final Future<void> Function(
-      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onFileTap;
   final String query;
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      final groups = controller.animeGroups;
-      final q = query.trim().toLowerCase();
-      final filtered = q.isEmpty
-          ? groups
-          : groups
-              .where((g) =>
-                  (g.info?.displayName.toLowerCase().contains(q) ?? false) ||
-                  g.folders.any((f) =>
-                      f.name.toLowerCase().contains(q) ||
-                      f.files
-                          .any((file) => file.name.toLowerCase().contains(q))))
-              .toList();
-      return CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _AnimeGroupSection(
-                controller: controller,
-                group: filtered[index],
-                onFileTap: onFileTap,
+    return Observer(
+      builder: (_) {
+        final groups = controller.animeGroups;
+        final q = query.trim().toLowerCase();
+        final filtered = q.isEmpty
+            ? groups
+            : groups
+                  .where(
+                    (g) =>
+                        (g.info?.displayName.toLowerCase().contains(q) ??
+                            false) ||
+                        g.folders.any(
+                          (f) =>
+                              f.name.toLowerCase().contains(q) ||
+                              f.files.any(
+                                (file) => file.name.toLowerCase().contains(q),
+                              ),
+                        ),
+                  )
+                  .toList();
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _StatsBar(controller: controller)),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _AnimeGroupSection(
+                  controller: controller,
+                  group: filtered[index],
+                  onFileTap: onFileTap,
+                ),
+                childCount: filtered.length,
               ),
-              childCount: filtered.length,
             ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
-      );
-    });
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -847,7 +856,11 @@ class _AnimeGroupSection extends StatefulWidget {
   final MediaController controller;
   final AnimeGroup group;
   final Future<void> Function(
-      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onFileTap;
 
   @override
   State<_AnimeGroupSection> createState() => _AnimeGroupSectionState();
@@ -876,11 +889,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                 width: 56,
                 height: 78,
                 child: info != null && info.coverUrl.isNotEmpty
-                    ? NetworkImgLayer(
-                        src: info.coverUrl,
-                        width: 56,
-                        height: 78,
-                      )
+                    ? NetworkImgLayer(src: info.coverUrl, width: 56, height: 78)
                     : Container(
                         color: theme.colorScheme.surfaceContainerHighest,
                         child: const Icon(Icons.movie_outlined, size: 28),
@@ -941,8 +950,10 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                       onPressed: () => widget.onFileTap(
                         resume.file,
                         resume.folder.files,
-                        widget.controller
-                            .getFileScrapeInfo(resume.file, resume.folder),
+                        widget.controller.getFileScrapeInfo(
+                          resume.file,
+                          resume.folder,
+                        ),
                       ),
                       icon: const Icon(Icons.play_arrow_rounded, size: 18),
                       label: Text(_resumeSectionButtonLabel(resume)),
@@ -958,7 +969,10 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                   if (info != null && info.bangumiId != null)
                     TextButton(
                       onPressed: () => _showMissingEpisodesSheet(
-                          context, widget.controller, group),
+                        context,
+                        widget.controller,
+                        group,
+                      ),
                       child: const Text('缺集'),
                     ),
                   if (info != null)
@@ -966,7 +980,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                       onPressed: () => _showManualMatchDialog(
                         context,
                         widget.controller,
-                        folder: group.folders.first,
+                        folders: group.folders,
                         title: '修改识别结果',
                       ),
                       child: const Text('修改识别结果'),
@@ -1012,7 +1026,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                             onPressed: () => _showManualMatchDialog(
                               context,
                               widget.controller,
-                              folder: folder,
+                              folders: [folder],
                             ),
                             child: const Text('匹配'),
                           ),
@@ -1048,7 +1062,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
   void _showManualMatchDialog(
     BuildContext context,
     MediaController controller, {
-    required LocalMediaFolder folder,
+    required List<LocalMediaFolder> folders,
     String? title,
   }) {
     showDialog<void>(
@@ -1056,8 +1070,14 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
       builder: (_) => _ManualMatchDialog(
         controller: controller,
         title: title ?? '手动匹配番剧',
-        name: folder.name,
-        onMatch: (item) => controller.setFolderMatch(folder.path, item),
+        name: folders.first.name,
+        // 组级入口传入组内全部文件夹：识别结果需整组生效，
+        // 否则其余目录仍挂旧结果，组会意外分裂。
+        onMatch: (item) async {
+          for (final folder in folders) {
+            await controller.setFolderMatch(folder.path, item);
+          }
+        },
       ),
     );
   }
@@ -1065,12 +1085,8 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
   List<PopupMenuEntry<String>> _groupMenuItems() {
     final info = widget.group.info;
     return [
-      if (widget.controller.resumePointForFolders(widget.group.folders) !=
-          null)
-        const PopupMenuItem(
-          value: 'resume',
-          child: Text('续播'),
-        ),
+      if (widget.controller.resumePointForFolders(widget.group.folders) != null)
+        const PopupMenuItem(value: 'resume', child: Text('续播')),
       if (info != null && info.bangumiId != null) ...[
         const PopupMenuItem(value: 'detail', child: Text('番剧详情')),
         const PopupMenuItem(value: 'missing', child: Text('缺集检测')),
@@ -1087,8 +1103,8 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
 
   /// 右键（桌面端）在光标处弹出操作菜单。
   Future<void> _showGroupContextMenu(
-      BuildContext context,
-      Offset position,
+    BuildContext context,
+    Offset position,
   ) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final local = overlay.globalToLocal(position);
@@ -1111,8 +1127,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     final info = group.info;
     switch (value) {
       case 'resume':
-        final resume =
-            widget.controller.resumePointForFolders(group.folders);
+        final resume = widget.controller.resumePointForFolders(group.folders);
         if (resume != null) {
           widget.onFileTap(
             resume.file,
@@ -1135,7 +1150,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
         _showManualMatchDialog(
           context,
           widget.controller,
-          folder: group.folders.first,
+          folders: group.folders,
           title: '修改识别结果',
         );
         break;
@@ -1170,66 +1185,76 @@ class _GridView extends StatelessWidget {
 
   final MediaController controller;
   final Future<void> Function(
-      LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?) onFileTap;
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onFileTap;
   final String query;
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      final items = controller.gridItems;
-      final q = query.trim().toLowerCase();
-      final filtered = q.isEmpty
-          ? items
-          : items
-              .where((i) =>
-                  i.title.toLowerCase().contains(q) ||
-                  i.files.any((f) => f.name.toLowerCase().contains(q)))
-              .toList();
-      return CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            sliver: SliverGrid.builder(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                // 桌面宽屏下自动铺满，窄屏至少两列
-                maxCrossAxisExtent: 168,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.56,
-              ),
-              itemCount: filtered.length,
-              itemBuilder: (context, index) {
-                final item = filtered[index];
-                final resume = controller.resumePointForFolders(item.folders);
-                final thumbPath = !item.isMatched && item.folders.isNotEmpty
-                    ? controller.thumbnails[item.folders.first.path]
-                    : null;
-                return _GridCard(
-                  item: item,
-                  resume: resume,
-                  thumbPath: thumbPath,
-                  onResumeTap: resume == null
-                      ? null
-                      : () => onFileTap(
+    return Observer(
+      builder: (_) {
+        final items = controller.gridItems;
+        final q = query.trim().toLowerCase();
+        final filtered = q.isEmpty
+            ? items
+            : items
+                  .where(
+                    (i) =>
+                        i.title.toLowerCase().contains(q) ||
+                        i.files.any((f) => f.name.toLowerCase().contains(q)),
+                  )
+                  .toList();
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _StatsBar(controller: controller)),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  // 桌面宽屏下自动铺满，窄屏至少两列
+                  maxCrossAxisExtent: 168,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 14,
+                  childAspectRatio: 0.56,
+                ),
+                itemCount: filtered.length,
+                itemBuilder: (context, index) {
+                  final item = filtered[index];
+                  final resume = controller.resumePointForFolders(item.folders);
+                  final thumbPath = !item.isMatched && item.folders.isNotEmpty
+                      ? controller.thumbnails[item.folders.first.path]
+                      : null;
+                  return _GridCard(
+                    item: item,
+                    resume: resume,
+                    thumbPath: thumbPath,
+                    onResumeTap: resume == null
+                        ? null
+                        : () => onFileTap(
                             resume.file,
                             resume.folder.files,
                             controller.getFileScrapeInfo(
-                                resume.file, resume.folder),
+                              resume.file,
+                              resume.folder,
+                            ),
                           ),
-                  onTap: () => _showGridItemSheet(
-                    context,
-                    controller,
-                    item,
-                    onFileTap,
-                  ),
-                );
-              },
+                    onTap: () => _showGridItemSheet(
+                      context,
+                      controller,
+                      item,
+                      onFileTap,
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
-      );
-    });
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -1291,8 +1316,9 @@ class _GridCardState extends State<_GridCard> {
                           boxShadow: _hovered
                               ? [
                                   BoxShadow(
-                                    color: colorScheme.shadow
-                                        .withValues(alpha: 0.28),
+                                    color: colorScheme.shadow.withValues(
+                                      alpha: 0.28,
+                                    ),
                                     blurRadius: 16,
                                     offset: const Offset(0, 6),
                                   ),
@@ -1343,8 +1369,9 @@ class _GridCardState extends State<_GridCard> {
                               top: 6,
                               child: _Badge(
                                 text: '${item.fileCount}',
-                                background:
-                                    colorScheme.primary.withValues(alpha: 0.92),
+                                background: colorScheme.primary.withValues(
+                                  alpha: 0.92,
+                                ),
                                 foreground: colorScheme.onPrimary,
                               ),
                             ),
@@ -1354,8 +1381,9 @@ class _GridCardState extends State<_GridCard> {
                                 top: 6,
                                 child: _Badge(
                                   text: '未匹配',
-                                  background:
-                                      colorScheme.error.withValues(alpha: 0.92),
+                                  background: colorScheme.error.withValues(
+                                    alpha: 0.92,
+                                  ),
                                   foreground: colorScheme.onError,
                                 ),
                               ),
@@ -1382,10 +1410,13 @@ class _GridCardState extends State<_GridCard> {
                                   onTap: widget.onResumeTap,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.55),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.55,
+                                      ),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Row(
@@ -1403,9 +1434,9 @@ class _GridCardState extends State<_GridCard> {
                                           overflow: TextOverflow.ellipsis,
                                           style: theme.textTheme.labelSmall
                                               ?.copyWith(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
                                         ),
                                       ],
                                     ),
@@ -1481,10 +1512,10 @@ class _Badge extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: foreground,
-              fontWeight: FontWeight.w600,
-              height: 1.1,
-            ),
+          color: foreground,
+          fontWeight: FontWeight.w600,
+          height: 1.1,
+        ),
       ),
     );
   }
@@ -1531,8 +1562,11 @@ Future<void> _showMissingEpisodesSheet(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.check_circle_outline_rounded,
-                        size: 40, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 40,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(height: 8),
                     const Text('未发现缺集'),
                     const SizedBox(height: 4),
@@ -1553,10 +1587,7 @@ Future<void> _showMissingEpisodesSheet(
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  '点击集数前往磁力搜索补集',
-                  style: theme.textTheme.bodySmall,
-                ),
+                Text('点击集数前往磁力搜索补集', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 12),
                 ConstrainedBox(
                   constraints: BoxConstraints(
@@ -1600,7 +1631,7 @@ void _showGridItemSheet(
   MediaController controller,
   MediaGridItem item,
   Future<void> Function(LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onFileTap,
+  onFileTap,
 ) {
   showModalBottomSheet<void>(
     context: context,
@@ -1637,8 +1668,10 @@ void _showGridItemSheet(
                             : Container(
                                 color:
                                     theme.colorScheme.surfaceContainerHighest,
-                                child:
-                                    const Icon(Icons.movie_outlined, size: 26),
+                                child: const Icon(
+                                  Icons.movie_outlined,
+                                  size: 26,
+                                ),
                               ),
                       ),
                     ),
@@ -1682,8 +1715,10 @@ void _showGridItemSheet(
                                         arguments: info.toBangumiItem(),
                                       );
                                     },
-                                    icon: const Icon(Icons.info_outline_rounded,
-                                        size: 18),
+                                    icon: const Icon(
+                                      Icons.info_outline_rounded,
+                                      size: 18,
+                                    ),
                                     label: const Text('番剧详情'),
                                   ),
                                   TextButton.icon(
@@ -1707,8 +1742,9 @@ void _showGridItemSheet(
                                       );
                                     },
                                     icon: const Icon(
-                                        Icons.playlist_remove_rounded,
-                                        size: 18),
+                                      Icons.playlist_remove_rounded,
+                                      size: 18,
+                                    ),
                                     label: const Text('缺集检测'),
                                   ),
                                   TextButton.icon(
@@ -1731,8 +1767,9 @@ void _showGridItemSheet(
                                       );
                                     },
                                     icon: const Icon(
-                                        Icons.manage_search_rounded,
-                                        size: 18),
+                                      Icons.manage_search_rounded,
+                                      size: 18,
+                                    ),
                                     label: const Text('修改识别结果'),
                                   ),
                                 ],
@@ -1755,12 +1792,16 @@ void _showGridItemSheet(
                                       controller: controller,
                                       name: folder.name,
                                       onMatch: (e) => controller.setFolderMatch(
-                                          folder.path, e),
+                                        folder.path,
+                                        e,
+                                      ),
                                     ),
                                   );
                                 },
-                                icon:
-                                    const Icon(Icons.search_rounded, size: 18),
+                                icon: const Icon(
+                                  Icons.search_rounded,
+                                  size: 18,
+                                ),
                                 label: const Text('手动匹配番剧'),
                               ),
                             ),
@@ -1913,8 +1954,11 @@ void _showFileActionSheet(
   List<LocalMediaFile> siblings,
   MediaScrapeInfo? info, {
   required Future<void> Function(
-          LocalMediaFile, List<LocalMediaFile>, MediaScrapeInfo?)
-      onPlay,
+    LocalMediaFile,
+    List<LocalMediaFile>,
+    MediaScrapeInfo?,
+  )
+  onPlay,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -2023,19 +2067,14 @@ void _showRenameDialog(
 ) {
   showDialog<void>(
     context: context,
-    builder: (dialogContext) => _RenameFileDialog(
-      controller: controller,
-      file: file,
-    ),
+    builder: (dialogContext) =>
+        _RenameFileDialog(controller: controller, file: file),
   );
 }
 
 /// 重命名对话框：自持有 [TextEditingController]，关闭时释放，避免泄漏。
 class _RenameFileDialog extends StatefulWidget {
-  const _RenameFileDialog({
-    required this.controller,
-    required this.file,
-  });
+  const _RenameFileDialog({required this.controller, required this.file});
 
   final MediaController controller;
   final LocalMediaFile file;
@@ -2080,10 +2119,7 @@ class _RenameFileDialogState extends State<_RenameFileDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        TextButton(
-          onPressed: _submit,
-          child: const Text('确定'),
-        ),
+        TextButton(onPressed: _submit, child: const Text('确定')),
       ],
     );
   }
@@ -2115,8 +2151,9 @@ void _confirmDelete(
           onPressed: () => KazumiDialog.dismiss(),
           child: Text(
             '取消',
-            style:
-                TextStyle(color: Theme.of(dialogContext).colorScheme.outline),
+            style: TextStyle(
+              color: Theme.of(dialogContext).colorScheme.outline,
+            ),
           ),
         ),
         TextButton(
@@ -2181,10 +2218,9 @@ void _confirmDeleteGroup(
             const SizedBox(height: 8),
             Text(
               '视频及其所在目录（含弹幕等关联数据）将被一并删除，此操作不可恢复。',
-              style: Theme.of(dialogContext)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(dialogContext).colorScheme.error),
+              style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                color: Theme.of(dialogContext).colorScheme.error,
+              ),
             ),
           ],
         ),
@@ -2194,8 +2230,9 @@ void _confirmDeleteGroup(
           onPressed: () => KazumiDialog.dismiss(),
           child: Text(
             '取消',
-            style:
-                TextStyle(color: Theme.of(dialogContext).colorScheme.outline),
+            style: TextStyle(
+              color: Theme.of(dialogContext).colorScheme.outline,
+            ),
           ),
         ),
         TextButton(
@@ -2373,7 +2410,8 @@ class _ManualMatchDialogState extends State<_ManualMatchDialog> {
                         child: SizedBox(
                           width: 40,
                           height: 56,
-                          child: item.images['large'] != null &&
+                          child:
+                              item.images['large'] != null &&
                                   item.images['large']!.isNotEmpty
                               ? NetworkImgLayer(
                                   src: item.images['large']!,
@@ -2381,9 +2419,9 @@ class _ManualMatchDialogState extends State<_ManualMatchDialog> {
                                   height: 56,
                                 )
                               : Container(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest,
                                   child: const Icon(Icons.movie, size: 20),
                                 ),
                         ),
@@ -2470,9 +2508,9 @@ class _FolderManagerSheet extends StatelessWidget {
                   final folder = controller.folders[index];
                   return ListTile(
                     leading: const Icon(Icons.folder_rounded),
-                    title: Text(p.basename(folder).isEmpty
-                        ? folder
-                        : p.basename(folder)),
+                    title: Text(
+                      p.basename(folder).isEmpty ? folder : p.basename(folder),
+                    ),
                     subtitle: Text(
                       folder,
                       maxLines: 1,

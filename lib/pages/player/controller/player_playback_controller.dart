@@ -403,6 +403,14 @@ abstract class _PlayerPlaybackController with Store {
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
+      // 画面旋转是 mpv 实例属性，换集会新建 Player，需要重放，
+      // 否则菜单仍高亮但画面不再旋转（videoRotateDegrees 为会话级，不清空）。
+      if (videoRotateDegrees != 0) {
+        await pp.setProperty('video-rotate', videoRotateDegrees.toString());
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
 
       final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
       if (proxyEnable) {
@@ -616,7 +624,9 @@ abstract class _PlayerPlaybackController with Store {
   /// 外部来源（硬件键、系统面板等）变更音量时同步，并清除手势缓存
   @action
   void applyExternalVolume(double value) {
-    value = value.clamp(0.0, 100.0);
+    // 桌面端 mpv volume-max=200，tick 回读的实际音量可达 200；
+    // 若此处仍按 100 截断，增益音量会在 1 秒内被每秒 tick 拉回 100。
+    value = value.clamp(0.0, isDesktop() ? 200.0 : 100.0);
     preciseVolume = -1;
     volume = value;
   }
@@ -773,11 +783,25 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   /// 设置 A-B 循环起点 / 终点为当前播放位置（秒）。
+  /// 要求 A < B：B 先于 A 设置时允许（mpv 从头循环到 B），
+  /// 但两点都已存在时校验顺序，避免 B <= A 导致 mpv 循环失效或原地反复 seek。
   @action
   Future<double?> markAbLoop({required bool isA}) async {
     final pp = _nativePlayer;
     if (pp == null) return null;
     final seconds = playerPosition.inMilliseconds / 1000.0;
+    if (isA && abLoopB != null && seconds >= abLoopB!) {
+      KazumiDialog.showToast(
+        message: 'A 点必须早于 B 点 (${abLoopB!.toStringAsFixed(1)}s)',
+      );
+      return null;
+    }
+    if (!isA && abLoopA != null && seconds <= abLoopA!) {
+      KazumiDialog.showToast(
+        message: 'B 点必须晚于 A 点 (${abLoopA!.toStringAsFixed(1)}s)',
+      );
+      return null;
+    }
     try {
       await pp.setProperty(
         isA ? 'ab-loop-a' : 'ab-loop-b',

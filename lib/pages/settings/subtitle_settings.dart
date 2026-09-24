@@ -54,8 +54,9 @@ class _SubtitleSettingsPageState extends State<SubtitleSettingsPage> {
     textColor = GStorage.getSetting<int>(SettingsKeys.subtitleTextColor);
     borderWidth = GStorage.getSetting<double>(SettingsKeys.subtitleBorderWidth);
     borderColor = GStorage.getSetting<int>(SettingsKeys.subtitleBorderColor);
-    backgroundOpacity =
-        GStorage.getSetting<double>(SettingsKeys.subtitleBackgroundOpacity);
+    backgroundOpacity = GStorage.getSetting<double>(
+      SettingsKeys.subtitleBackgroundOpacity,
+    );
     bold = GStorage.getSetting<bool>(SettingsKeys.subtitleBold);
   }
 
@@ -106,7 +107,9 @@ class _SubtitleSettingsPageState extends State<SubtitleSettingsPage> {
     final newValue = double.parse(value.toStringAsFixed(1));
     if (newValue == backgroundOpacity) return;
     GStorage.putSetting<double>(
-        SettingsKeys.subtitleBackgroundOpacity, newValue);
+      SettingsKeys.subtitleBackgroundOpacity,
+      newValue,
+    );
     setState(() {
       backgroundOpacity = newValue;
     });
@@ -330,6 +333,9 @@ class _SubtitleSettingsPageState extends State<SubtitleSettingsPage> {
                           SettingsKeys.subtitleBackgroundOpacity,
                           SettingsKeys.subtitleBold,
                         ]);
+                        // resetSettings 含磁盘 IO，await 期间页面可能已
+                        // 被弹出，setState 前必须确认仍然 mounted。
+                        if (!mounted) return;
                         setState(_loadSettingsFromStorage);
                       },
                       title: Text('恢复默认字幕样式'),

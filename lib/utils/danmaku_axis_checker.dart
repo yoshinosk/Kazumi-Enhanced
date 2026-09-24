@@ -163,12 +163,20 @@ class DanmakuAxisChecker {
       );
     }
 
-    final head = _percentile(times, _headPercentile, roundUp: true);
-    final tail = _percentile(times, _tailPercentile);
+    final headIndex = _percentileIndex(
+      times.length,
+      _headPercentile,
+      roundUp: true,
+    );
+    final tailIndex = _percentileIndex(times.length, _tailPercentile);
+    final head = times[headIndex];
+    final tail = times[tailIndex];
     final span = max(0.0, tail - head);
     final difference = tail - durationSeconds;
-    final tolerance =
-        max(alignedToleranceSeconds, durationSeconds * alignedToleranceRatio);
+    final tolerance = max(
+      alignedToleranceSeconds,
+      durationSeconds * alignedToleranceRatio,
+    );
 
     final headGap = max(0.0, head);
     final tailGap = max(0.0, durationSeconds - tail);
@@ -182,16 +190,20 @@ class DanmakuAxisChecker {
     final beyondFraction = beyondCount / times.length;
 
     // --- 边界密度形态校验：区分「硬截断」与「自然空窗」 ---
-    final probeWindow = (durationSeconds * _edgeProbeWindowRatio)
-        .clamp(_edgeProbeMinWindowSeconds, _edgeProbeMaxWindowSeconds);
-    final headGapReliable = headGap > tolerance &&
+    final probeWindow = (durationSeconds * _edgeProbeWindowRatio).clamp(
+      _edgeProbeMinWindowSeconds,
+      _edgeProbeMaxWindowSeconds,
+    );
+    final headGapReliable =
+        headGap > tolerance &&
         _isHardEdge(times, head, probeWindow, isTail: false);
     // 轴尾覆盖守卫：结尾容差窗口内仍有弹幕说明池覆盖到了视频结尾，
     // P99.5 的空白只是稀疏尾（ED / 预告阶段少有人发弹幕），不是轴偏移。
     final tailCoveredCount =
         times.length - _lowerBound(times, durationSeconds - tolerance);
     final tailCovered = tailCoveredCount >= _tailCoverageMinCount;
-    final tailGapReliable = tailGap > tolerance &&
+    final tailGapReliable =
+        tailGap > tolerance &&
         !tailCovered &&
         _isHardEdge(times, tail, probeWindow, isTail: true);
 
@@ -201,21 +213,25 @@ class DanmakuAxisChecker {
     if (tailGapReliable) signals.add(tailGap);
     // 轴尾越界：弹幕轴长于视频尾部 → 提前。需通过越界群采信校验，
     // 排除单条 / 小簇离群弹幕（观众在更长版本里发言）拉高分位尾的假象。
-    final tailBeyondSupported = tailBeyond > tolerance &&
+    final tailBeyondSupported =
+        tailBeyond > tolerance &&
         _isBeyondClusterSupported(
           times,
           durationSeconds + tolerance,
           isTail: true,
           gapLimit: 2 * tolerance,
+          quantileIndex: tailIndex,
         );
     if (tailBeyondSupported) signals.add(-tailBeyond);
     // 轴头越界：弹幕早于视频起点 → 延后。同样需越界群采信校验。
-    final headBeyondSupported = headBeyond > tolerance &&
+    final headBeyondSupported =
+        headBeyond > tolerance &&
         _isBeyondClusterSupported(
           times,
           -tolerance,
           isTail: false,
           gapLimit: 2 * tolerance,
+          quantileIndex: headIndex,
         );
     if (headBeyondSupported) signals.add(headBeyond);
     // 轴头硬边界：仅当轴尾同时越界（整轴平移的佐证）时才采信，
@@ -229,7 +245,8 @@ class DanmakuAxisChecker {
     final spanRatio = span / durationSeconds;
     final hasPositive = signals.any((s) => s > 0);
     final hasNegative = signals.any((s) => s < 0);
-    final bool sourceMismatch = (hasPositive && hasNegative) ||
+    final bool sourceMismatch =
+        (hasPositive && hasNegative) ||
         spanRatio >= sourceMismatchRatio ||
         spanRatio <= 1 / sourceMismatchRatio ||
         (span - durationSeconds).abs() > maxAdjustableOffsetSeconds ||
@@ -270,8 +287,10 @@ class DanmakuAxisChecker {
       weightedSum += s * s.abs();
       weightTotal += s.abs();
     }
-    final offset = (weightedSum / weightTotal)
-        .clamp(-maxAdjustableOffsetSeconds, maxAdjustableOffsetSeconds);
+    final offset = (weightedSum / weightTotal).clamp(
+      -maxAdjustableOffsetSeconds,
+      maxAdjustableOffsetSeconds,
+    );
 
     final maxAbs = signals.map((s) => s.abs()).reduce(max);
     final strength = (maxAbs / 45).clamp(0.0, 1.0);
@@ -346,16 +365,18 @@ class DanmakuAxisChecker {
   ///
   /// - 越界弹幕条数达到下限（至少 1 条，大样本按 [_beyondMinFraction]
   ///   比例提高门槛）；
-  /// - 越界群与弹幕主体之间无明显空隙（超过 [gapLimit] 视为孤立离群，
-  ///   不采信；调用方传入 2 倍对齐容差，与「容差内不误报」语义一致）。
+  /// - 从弹幕主体到分位定义元素（[quantileIndex]）之间的相邻弹幕均
+  ///   无明显空隙（单段间隔超过 [gapLimit] 视为孤立离群，不采信）。
+  ///   仅检查最近一条越界弹幕会漏掉「近端桥接 + 远端离群」的组合，
+  ///   使推荐幅度仍由远端离群决定。
   static bool _isBeyondClusterSupported(
     List<double> sorted,
     double boundary, {
     required bool isTail,
     required double gapLimit,
+    required int quantileIndex,
   }) {
-    final minCount =
-        max(1, (sorted.length * _beyondMinFraction).ceil());
+    final minCount = max(1, (sorted.length * _beyondMinFraction).ceil());
     final beyondCount = isTail
         ? sorted.length - _upperBound(sorted, boundary)
         : _lowerBound(sorted, boundary);
@@ -368,13 +389,23 @@ class DanmakuAxisChecker {
         // 整池越界：无空隙可算，交由弹幕源错误判定处理。
         return true;
       }
-      return sorted[bodyEnd] - sorted[bodyEnd - 1] <= gapLimit;
+      for (var i = bodyEnd; i <= quantileIndex; i++) {
+        if (sorted[i] - sorted[i - 1] > gapLimit) {
+          return false;
+        }
+      }
+      return true;
     } else {
       final bodyStart = _lowerBound(sorted, boundary);
       if (bodyStart >= sorted.length) {
         return true;
       }
-      return sorted[bodyStart] - sorted[bodyStart - 1] <= gapLimit;
+      for (var i = quantileIndex + 1; i <= bodyStart; i++) {
+        if (sorted[i] - sorted[i - 1] > gapLimit) {
+          return false;
+        }
+      }
+      return true;
     }
   }
 
@@ -406,20 +437,18 @@ class DanmakuAxisChecker {
     return lo;
   }
 
-  /// 取排序数组的分位值（[percentile] ∈ [0, 1]）。
+  /// 取排序数组的分位索引（[percentile] ∈ [0, 1]）。
   ///
   /// [roundUp] 为 true 时索引向上取整（用于轴头 P0.5）：保证小样本下
   /// 至少剔除首条弹幕，单条负时间戳离群不再直接成为轴头。轴尾 P99.5
   /// 保持四舍五入：保证「轴略长」场景的推荐幅度精度，分位被离群拉高
   /// 的假象由越界群采信校验（[_isBeyondClusterSupported]）兜底。
-  static double _percentile(
-    List<double> sorted,
+  static int _percentileIndex(
+    int count,
     double percentile, {
     bool roundUp = false,
   }) {
-    final raw = (sorted.length - 1) * percentile;
-    final index =
-        (roundUp ? raw.ceil() : raw.round()).clamp(0, sorted.length - 1);
-    return sorted[index];
+    final raw = (count - 1) * percentile;
+    return (roundUp ? raw.ceil() : raw.round()).clamp(0, count - 1);
   }
 }

@@ -9,8 +9,10 @@ part of 'media_controller.dart';
 // ignore_for_file: non_constant_identifier_names, unnecessary_brace_in_string_interps, unnecessary_lambdas, prefer_expression_function_bodies, lines_longer_than_80_chars, avoid_as, avoid_annotating_with_dynamic, no_leading_underscores_for_local_identifiers
 
 mixin _$MediaController on _MediaController, Store {
-  late final _$thumbnailsAtom =
-      Atom(name: '_MediaController.thumbnails', context: context);
+  late final _$thumbnailsAtom = Atom(
+    name: '_MediaController.thumbnails',
+    context: context,
+  );
 
   @override
   ObservableMap<String, String> get thumbnails {
@@ -25,8 +27,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$foldersAtom =
-      Atom(name: '_MediaController.folders', context: context);
+  late final _$foldersAtom = Atom(
+    name: '_MediaController.folders',
+    context: context,
+  );
 
   @override
   ObservableList<String> get folders {
@@ -41,8 +45,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$libraryAtom =
-      Atom(name: '_MediaController.library', context: context);
+  late final _$libraryAtom = Atom(
+    name: '_MediaController.library',
+    context: context,
+  );
 
   @override
   ObservableList<LocalMediaFolder> get library {
@@ -57,8 +63,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$isScanningAtom =
-      Atom(name: '_MediaController.isScanning', context: context);
+  late final _$isScanningAtom = Atom(
+    name: '_MediaController.isScanning',
+    context: context,
+  );
 
   @override
   bool get isScanning {
@@ -73,8 +81,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeResultsAtom =
-      Atom(name: '_MediaController.scrapeResults', context: context);
+  late final _$scrapeResultsAtom = Atom(
+    name: '_MediaController.scrapeResults',
+    context: context,
+  );
 
   @override
   ObservableMap<String, MediaScrapeInfo> get scrapeResults {
@@ -89,8 +99,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$fileScrapeResultsAtom =
-      Atom(name: '_MediaController.fileScrapeResults', context: context);
+  late final _$fileScrapeResultsAtom = Atom(
+    name: '_MediaController.fileScrapeResults',
+    context: context,
+  );
 
   @override
   ObservableMap<String, MediaScrapeInfo> get fileScrapeResults {
@@ -105,8 +117,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$isScrapingAtom =
-      Atom(name: '_MediaController.isScraping', context: context);
+  late final _$isScrapingAtom = Atom(
+    name: '_MediaController.isScraping',
+    context: context,
+  );
 
   @override
   bool get isScraping {
@@ -121,8 +135,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeDoneAtom =
-      Atom(name: '_MediaController.scrapeDone', context: context);
+  late final _$scrapeDoneAtom = Atom(
+    name: '_MediaController.scrapeDone',
+    context: context,
+  );
 
   @override
   int get scrapeDone {
@@ -137,8 +153,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeTotalAtom =
-      Atom(name: '_MediaController.scrapeTotal', context: context);
+  late final _$scrapeTotalAtom = Atom(
+    name: '_MediaController.scrapeTotal',
+    context: context,
+  );
 
   @override
   int get scrapeTotal {
@@ -153,8 +171,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeMatchedAtom =
-      Atom(name: '_MediaController.scrapeMatched', context: context);
+  late final _$scrapeMatchedAtom = Atom(
+    name: '_MediaController.scrapeMatched',
+    context: context,
+  );
 
   @override
   int get scrapeMatched {
@@ -169,8 +189,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeFailedAtom =
-      Atom(name: '_MediaController.scrapeFailed', context: context);
+  late final _$scrapeFailedAtom = Atom(
+    name: '_MediaController.scrapeFailed',
+    context: context,
+  );
 
   @override
   int get scrapeFailed {
@@ -185,8 +207,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeCurrentNameAtom =
-      Atom(name: '_MediaController.scrapeCurrentName', context: context);
+  late final _$scrapeCurrentNameAtom = Atom(
+    name: '_MediaController.scrapeCurrentName',
+    context: context,
+  );
 
   @override
   String get scrapeCurrentName {
@@ -201,8 +225,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$scrapeKeywordAtom =
-      Atom(name: '_MediaController.scrapeKeyword', context: context);
+  late final _$scrapeKeywordAtom = Atom(
+    name: '_MediaController.scrapeKeyword',
+    context: context,
+  );
 
   @override
   String get scrapeKeyword {
@@ -217,8 +243,10 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$resumePointsAtom =
-      Atom(name: '_MediaController.resumePoints', context: context);
+  late final _$resumePointsAtom = Atom(
+    name: '_MediaController.resumePoints',
+    context: context,
+  );
 
   @override
   ObservableMap<String, MediaResumePoint> get resumePoints {
@@ -233,174 +261,224 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
-  late final _$setSortModeAsyncAction =
-      AsyncAction('_MediaController.setSortMode', context: context);
+  late final _$setSortModeAsyncAction = AsyncAction(
+    '_MediaController.setSortMode',
+    context: context,
+  );
 
   @override
   Future<void> setSortMode(String mode) {
     return _$setSortModeAsyncAction.run(() => super.setSortMode(mode));
   }
 
-  late final _$setSortDescendingAsyncAction =
-      AsyncAction('_MediaController.setSortDescending', context: context);
+  late final _$setSortDescendingAsyncAction = AsyncAction(
+    '_MediaController.setSortDescending',
+    context: context,
+  );
 
   @override
   Future<void> setSortDescending(bool value) {
-    return _$setSortDescendingAsyncAction
-        .run(() => super.setSortDescending(value));
+    return _$setSortDescendingAsyncAction.run(
+      () => super.setSortDescending(value),
+    );
   }
 
-  late final _$setWatchFolderAsyncAction =
-      AsyncAction('_MediaController.setWatchFolder', context: context);
+  late final _$setWatchFolderAsyncAction = AsyncAction(
+    '_MediaController.setWatchFolder',
+    context: context,
+  );
 
   @override
   Future<void> setWatchFolder(bool value) {
     return _$setWatchFolderAsyncAction.run(() => super.setWatchFolder(value));
   }
 
-  late final _$setThumbnailsEnabledAsyncAction =
-      AsyncAction('_MediaController.setThumbnailsEnabled', context: context);
+  late final _$setThumbnailsEnabledAsyncAction = AsyncAction(
+    '_MediaController.setThumbnailsEnabled',
+    context: context,
+  );
 
   @override
   Future<void> setThumbnailsEnabled(bool value) {
-    return _$setThumbnailsEnabledAsyncAction
-        .run(() => super.setThumbnailsEnabled(value));
+    return _$setThumbnailsEnabledAsyncAction.run(
+      () => super.setThumbnailsEnabled(value),
+    );
   }
 
-  late final _$addFolderAsyncAction =
-      AsyncAction('_MediaController.addFolder', context: context);
+  late final _$addFolderAsyncAction = AsyncAction(
+    '_MediaController.addFolder',
+    context: context,
+  );
 
   @override
   Future<void> addFolder(String path) {
     return _$addFolderAsyncAction.run(() => super.addFolder(path));
   }
 
-  late final _$removeFolderAsyncAction =
-      AsyncAction('_MediaController.removeFolder', context: context);
+  late final _$removeFolderAsyncAction = AsyncAction(
+    '_MediaController.removeFolder',
+    context: context,
+  );
 
   @override
   Future<void> removeFolder(String path) {
     return _$removeFolderAsyncAction.run(() => super.removeFolder(path));
   }
 
-  late final _$scanAsyncAction =
-      AsyncAction('_MediaController.scan', context: context);
+  late final _$scanAsyncAction = AsyncAction(
+    '_MediaController.scan',
+    context: context,
+  );
 
   @override
   Future<void> scan() {
     return _$scanAsyncAction.run(() => super.scan());
   }
 
-  late final _$setGroupByFolderAsyncAction =
-      AsyncAction('_MediaController.setGroupByFolder', context: context);
+  late final _$setGroupByFolderAsyncAction = AsyncAction(
+    '_MediaController.setGroupByFolder',
+    context: context,
+  );
 
   @override
   Future<void> setGroupByFolder(bool value) {
-    return _$setGroupByFolderAsyncAction
-        .run(() => super.setGroupByFolder(value));
+    return _$setGroupByFolderAsyncAction.run(
+      () => super.setGroupByFolder(value),
+    );
   }
 
-  late final _$setViewModeAsyncAction =
-      AsyncAction('_MediaController.setViewMode', context: context);
+  late final _$setViewModeAsyncAction = AsyncAction(
+    '_MediaController.setViewMode',
+    context: context,
+  );
 
   @override
   Future<void> setViewMode(String mode) {
     return _$setViewModeAsyncAction.run(() => super.setViewMode(mode));
   }
 
-  late final _$scrapeAllAsyncAction =
-      AsyncAction('_MediaController.scrapeAll', context: context);
+  late final _$scrapeAllAsyncAction = AsyncAction(
+    '_MediaController.scrapeAll',
+    context: context,
+  );
 
   @override
   Future<void> scrapeAll({bool? onlyUnmatched}) {
-    return _$scrapeAllAsyncAction
-        .run(() => super.scrapeAll(onlyUnmatched: onlyUnmatched));
+    return _$scrapeAllAsyncAction.run(
+      () => super.scrapeAll(onlyUnmatched: onlyUnmatched),
+    );
   }
 
-  late final _$setFolderMatchAsyncAction =
-      AsyncAction('_MediaController.setFolderMatch', context: context);
+  late final _$setFolderMatchAsyncAction = AsyncAction(
+    '_MediaController.setFolderMatch',
+    context: context,
+  );
 
   @override
   Future<void> setFolderMatch(String folderPath, BangumiItem item) {
-    return _$setFolderMatchAsyncAction
-        .run(() => super.setFolderMatch(folderPath, item));
+    return _$setFolderMatchAsyncAction.run(
+      () => super.setFolderMatch(folderPath, item),
+    );
   }
 
-  late final _$setFileMatchAsyncAction =
-      AsyncAction('_MediaController.setFileMatch', context: context);
+  late final _$setFileMatchAsyncAction = AsyncAction(
+    '_MediaController.setFileMatch',
+    context: context,
+  );
 
   @override
   Future<void> setFileMatch(LocalMediaFile file, BangumiItem item) {
     return _$setFileMatchAsyncAction.run(() => super.setFileMatch(file, item));
   }
 
-  late final _$removeFileScrapeResultAsyncAction =
-      AsyncAction('_MediaController.removeFileScrapeResult', context: context);
+  late final _$removeFileScrapeResultAsyncAction = AsyncAction(
+    '_MediaController.removeFileScrapeResult',
+    context: context,
+  );
 
   @override
   Future<void> removeFileScrapeResult(String filePath) {
-    return _$removeFileScrapeResultAsyncAction
-        .run(() => super.removeFileScrapeResult(filePath));
+    return _$removeFileScrapeResultAsyncAction.run(
+      () => super.removeFileScrapeResult(filePath),
+    );
   }
 
-  late final _$applyScrapeInfoAsyncAction =
-      AsyncAction('_MediaController.applyScrapeInfo', context: context);
+  late final _$applyScrapeInfoAsyncAction = AsyncAction(
+    '_MediaController.applyScrapeInfo',
+    context: context,
+  );
 
   @override
   Future<void> applyScrapeInfo(String folderPath, MediaScrapeInfo info) {
-    return _$applyScrapeInfoAsyncAction
-        .run(() => super.applyScrapeInfo(folderPath, info));
+    return _$applyScrapeInfoAsyncAction.run(
+      () => super.applyScrapeInfo(folderPath, info),
+    );
   }
 
-  late final _$removeScrapeResultAsyncAction =
-      AsyncAction('_MediaController.removeScrapeResult', context: context);
+  late final _$removeScrapeResultAsyncAction = AsyncAction(
+    '_MediaController.removeScrapeResult',
+    context: context,
+  );
 
   @override
   Future<void> removeScrapeResult(String folderPath) {
-    return _$removeScrapeResultAsyncAction
-        .run(() => super.removeScrapeResult(folderPath));
+    return _$removeScrapeResultAsyncAction.run(
+      () => super.removeScrapeResult(folderPath),
+    );
   }
 
-  late final _$deleteAnimeGroupAsyncAction =
-      AsyncAction('_MediaController.deleteAnimeGroup', context: context);
+  late final _$deleteAnimeGroupAsyncAction = AsyncAction(
+    '_MediaController.deleteAnimeGroup',
+    context: context,
+  );
 
   @override
   Future<void> deleteAnimeGroup(AnimeGroup group) {
-    return _$deleteAnimeGroupAsyncAction
-        .run(() => super.deleteAnimeGroup(group));
+    return _$deleteAnimeGroupAsyncAction.run(
+      () => super.deleteAnimeGroup(group),
+    );
   }
 
-  late final _$deleteFileAsyncAction =
-      AsyncAction('_MediaController.deleteFile', context: context);
+  late final _$deleteFileAsyncAction = AsyncAction(
+    '_MediaController.deleteFile',
+    context: context,
+  );
 
   @override
   Future<void> deleteFile(LocalMediaFile file) {
     return _$deleteFileAsyncAction.run(() => super.deleteFile(file));
   }
 
-  late final _$renameFileAsyncAction =
-      AsyncAction('_MediaController.renameFile', context: context);
+  late final _$renameFileAsyncAction = AsyncAction(
+    '_MediaController.renameFile',
+    context: context,
+  );
 
   @override
   Future<void> renameFile(LocalMediaFile file, String newName) {
     return _$renameFileAsyncAction.run(() => super.renameFile(file, newName));
   }
 
-  late final _$moveFileAsyncAction =
-      AsyncAction('_MediaController.moveFile', context: context);
+  late final _$moveFileAsyncAction = AsyncAction(
+    '_MediaController.moveFile',
+    context: context,
+  );
 
   @override
   Future<void> moveFile(LocalMediaFile file, String destDir) {
     return _$moveFileAsyncAction.run(() => super.moveFile(file, destDir));
   }
 
-  late final _$_MediaControllerActionController =
-      ActionController(name: '_MediaController', context: context);
+  late final _$_MediaControllerActionController = ActionController(
+    name: '_MediaController',
+    context: context,
+  );
 
   @override
   void _refreshResumePoints() {
     final _$actionInfo = _$_MediaControllerActionController.startAction(
-        name: '_MediaController._refreshResumePoints');
+      name: '_MediaController._refreshResumePoints',
+    );
     try {
       return super._refreshResumePoints();
     } finally {
@@ -411,7 +489,8 @@ mixin _$MediaController on _MediaController, Store {
   @override
   void cancelScrape() {
     final _$actionInfo = _$_MediaControllerActionController.startAction(
-        name: '_MediaController.cancelScrape');
+      name: '_MediaController.cancelScrape',
+    );
     try {
       return super.cancelScrape();
     } finally {

@@ -26,31 +26,49 @@ Future<void> checkDanmakuAxisAlignment({
   // 用户已手动调整过弹幕轴（全局偏移），或当前番剧 / 分集已有作用域
   // 偏移（此前单集检测已应用），视为已知晓偏差，不再打扰。
   // 作用域化存储保证其他番剧 / 分集仍会自动触发检测。
+  final danmaku = playerController.danmaku;
   if (DanmakuTimeOffsetStore.effectiveOffset(
-        playerController.danmaku.bangumiID,
-        playerController.danmaku.danmakuEpisodeId,
+        danmaku.bangumiID,
+        danmaku.danmakuEpisodeId,
       ) !=
       0) {
     KazumiLogger().i(
-        'DanmakuAxis: skipped by active offset '
-        '${DanmakuTimeOffsetStore.effectiveOffset(playerController.danmaku.bangumiID, playerController.danmaku.danmakuEpisodeId)}s '
-        'bangumiID=${playerController.danmaku.bangumiID} '
-        'episodeId=${playerController.danmaku.danmakuEpisodeId}',
-        forceLog: true);
+      'DanmakuAxis: skipped by active offset '
+      '${DanmakuTimeOffsetStore.effectiveOffset(danmaku.bangumiID, danmaku.danmakuEpisodeId)}s '
+      'bangumiID=${danmaku.bangumiID} '
+      'episodeId=${danmaku.danmakuEpisodeId}',
+      forceLog: true,
+    );
     return;
   }
+  // 捕获弹幕池版本：等待视频时长期间（最长 13s）用户可能已换集或
+  // 重新绑定弹幕（弹幕池整体替换会递增版本号），检测结论只对发起时
+  // 的弹幕池有效。作用域键（bangumiID/episodeId）在本地弹幕 episodeId
+  // 未知（同为 0）时无法区分同番剧不同分集，版本号是更可靠的代次。
+  final int poolRevision = danmaku.danmakusRevision;
 
   final duration = await _waitForVideoDuration(playerController);
   if (duration == null || duration <= Duration.zero) return;
   if (shouldProceed != null && !shouldProceed()) return;
+  // 等待窗口内复查：弹幕池被整体替换（换集 / 手动重新绑定）或用户已
+  // 手动设置了偏移时，检测结果不再适用，放弃弹窗。
+  if (danmaku.danmakusRevision != poolRevision) return;
+  if (DanmakuTimeOffsetStore.effectiveOffset(
+        danmaku.bangumiID,
+        danmaku.danmakuEpisodeId,
+      ) !=
+      0) {
+    return;
+  }
 
   final result = DanmakuAxisChecker.check(
     danmakus: danmakus,
     videoDuration: duration,
   );
   KazumiLogger().i(
-      'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds.toStringAsFixed(1)}s, video=${result.videoDurationSeconds.toStringAsFixed(1)}s, head=${result.headGapSeconds.toStringAsFixed(1)}s(${result.headGapReliable ? 'hard' : 'soft'}), tail=${result.tailGapSeconds.toStringAsFixed(1)}s(${result.tailGapReliable ? 'hard' : 'soft'}), beyond=${result.beyondFraction.toStringAsFixed(3)}, confidence=${result.confidence.toStringAsFixed(2)}, offset=${result.recommendedOffsetSeconds.toStringAsFixed(1)}s',
-      forceLog: true);
+    'DanmakuAxis: ${result.issue.name}, axis=${result.axisLengthSeconds.toStringAsFixed(1)}s, video=${result.videoDurationSeconds.toStringAsFixed(1)}s, head=${result.headGapSeconds.toStringAsFixed(1)}s(${result.headGapReliable ? 'hard' : 'soft'}), tail=${result.tailGapSeconds.toStringAsFixed(1)}s(${result.tailGapReliable ? 'hard' : 'soft'}), beyond=${result.beyondFraction.toStringAsFixed(3)}, confidence=${result.confidence.toStringAsFixed(2)}, offset=${result.recommendedOffsetSeconds.toStringAsFixed(1)}s',
+    forceLog: true,
+  );
   if (result.issue == DanmakuAxisIssue.none) return;
   if (shouldProceed != null && !shouldProceed()) return;
 
@@ -70,8 +88,11 @@ Future<void> showDanmakuAxisMismatchDialog({
   final bool axisError = result.issue == DanmakuAxisIssue.axisOffset;
   // 捕获检测时的弹幕绑定：弹窗展示期间用户可能已切换分集 / 弹幕源，
   // 应用动作必须作用于检测时的作用域，否则推荐值会写进其他分集。
+  // 除作用域键外同时记录弹幕池版本号：本地弹幕 episodeId 未知（0）时
+  // 同番剧不同分集的作用域键相同，仅凭键比较无法发现换集。
   final int scopedBangumiId = playerController.danmaku.bangumiID;
   final int scopedEpisodeId = playerController.danmaku.danmakuEpisodeId;
+  final int scopedPoolRevision = playerController.danmaku.danmakusRevision;
   return KazumiDialog.show(
     clickMaskDismiss: true,
     builder: (context) {
@@ -124,9 +145,7 @@ Future<void> showDanmakuAxisMismatchDialog({
                 ),
               _AxisInfoRow(
                 label: '推荐偏移',
-                value: formatDanmakuTimeOffset(
-                  result.recommendedOffsetSeconds,
-                ),
+                value: formatDanmakuTimeOffset(result.recommendedOffsetSeconds),
               ),
               _AxisInfoRow(
                 label: '推荐可信度',
@@ -138,19 +157,28 @@ Future<void> showDanmakuAxisMismatchDialog({
         actions: [
           TextButton(
             onPressed: () => KazumiDialog.dismiss(),
-            child: Text(
-              '忽略',
-              style: TextStyle(color: colorScheme.outline),
-            ),
+            child: Text('忽略', style: TextStyle(color: colorScheme.outline)),
           ),
           if (axisError)
             FilledButton(
               onPressed: () {
                 if (playerController.danmaku.bangumiID != scopedBangumiId ||
                     playerController.danmaku.danmakuEpisodeId !=
-                        scopedEpisodeId) {
+                        scopedEpisodeId ||
+                    playerController.danmaku.danmakusRevision !=
+                        scopedPoolRevision) {
                   KazumiDialog.dismiss();
                   KazumiDialog.showToast(message: '弹幕绑定已变化，已取消应用推荐偏移');
+                  return;
+                }
+                // 弹窗展示期间用户已手动设置偏移时保留手动值，不覆盖。
+                if (DanmakuTimeOffsetStore.effectiveOffset(
+                      scopedBangumiId,
+                      scopedEpisodeId,
+                    ) !=
+                    0) {
+                  KazumiDialog.dismiss();
+                  KazumiDialog.showToast(message: '检测到手动偏移，已保留当前设置');
                   return;
                 }
                 KazumiDialog.dismiss();
@@ -158,16 +186,19 @@ Future<void> showDanmakuAxisMismatchDialog({
                 // 写入后重新调度当前弹幕立即生效。
                 if (scopedEpisodeId == 0) {
                   KazumiLogger().i(
-                      'DanmakuAxis: applying recommended offset to '
-                      'bangumi-level scope (episodeId unknown), '
-                      'bangumiID=$scopedBangumiId',
-                      forceLog: true);
+                    'DanmakuAxis: applying recommended offset to '
+                    'bangumi-level scope (episodeId unknown), '
+                    'bangumiID=$scopedBangumiId',
+                    forceLog: true,
+                  );
                 }
-                unawaited(DanmakuTimeOffsetStore.setScopedOffset(
-                  scopedBangumiId,
-                  scopedEpisodeId,
-                  result.recommendedOffsetSeconds,
-                ));
+                unawaited(
+                  DanmakuTimeOffsetStore.setScopedOffset(
+                    scopedBangumiId,
+                    scopedEpisodeId,
+                    result.recommendedOffsetSeconds,
+                  ),
+                );
                 playerController.danmaku.clearAndInvalidateScheduledDanmakus();
                 KazumiDialog.showToast(
                   message:
@@ -196,10 +227,7 @@ Future<void> showDanmakuAxisMismatchDialog({
 }
 
 class _AxisInfoRow extends StatelessWidget {
-  const _AxisInfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _AxisInfoRow({required this.label, required this.value});
 
   final String label;
   final String value;

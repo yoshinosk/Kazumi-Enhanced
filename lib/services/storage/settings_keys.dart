@@ -15,6 +15,10 @@ enum SettingGroup {
   misc,
   magnet,
   media,
+
+  /// 不参与任何设置组的批量重置（如截图保存目录这类存储位置偏好，
+  /// 有独立的恢复默认入口）。
+  none,
 }
 
 class SettingContext {
@@ -633,10 +637,13 @@ class SettingsKeys {
 
   /// 桌面端截图保存目录（绝对路径），留空使用软件目录下的
   /// screenshots 文件夹（见 ScreenshotSaveService）。
+  ///
+  /// 归属 [SettingGroup.none]：「恢复默认播放设置」不应清除用户自定义
+  /// 的保存目录（截图设置页有独立的恢复默认入口）。
   static const screenshotSavePath = SettingKey<String>(
     'screenshotSavePath',
     '',
-    group: SettingGroup.player,
+    group: SettingGroup.none,
   );
 
   /// 字幕延迟（秒，mpv sub-delay）：正值字幕延后显示，负值提前。

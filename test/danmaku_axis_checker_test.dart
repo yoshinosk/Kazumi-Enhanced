@@ -131,7 +131,14 @@ void main() {
         for (var i = 0; i < 390; i++) {
           times.add(1330 * i / 389);
         }
-        for (final t in const [1330.0, 1352.0, 1374.0, 1396.0, 1418.0, 1440.0]) {
+        for (final t in const [
+          1330.0,
+          1352.0,
+          1374.0,
+          1396.0,
+          1418.0,
+          1440.0,
+        ]) {
           times.add(t);
         }
         final result = DanmakuAxisChecker.check(
@@ -273,7 +280,45 @@ void main() {
         // 片头弹幕混入的典型形态）：空隙超过 2 倍容差不采信。
         final times = <double>[
           ...List.generate(75, (i) => 1440 * i / 74),
-          1500, 1512, 1530, 1545, 1560,
+          1500,
+          1512,
+          1530,
+          1545,
+          1560,
+        ];
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+      });
+
+      test('尾部近端桥接 + 远端离群不触发越界推荐', () {
+        // 弹幕池贴齐视频结尾：一条越界弹幕落在主体后容差空隙内（通过
+        // 最近一条的间隙检查），另一条远端离群决定 P99.5 分位值。旧实现
+        // 只校验最近一条越界弹幕与主体的间隙，会采信远端离群并推荐
+        // -120s；链式连续性校验应发现桥接弹幕与远端离群之间的空隙。
+        final times = <double>[
+          ...List.generate(80, (i) => 1440 * i / 79),
+          1470,
+          1560,
+        ];
+        final result = DanmakuAxisChecker.check(
+          danmakus: times.map(danmakuAt).toList(),
+          videoDuration: const Duration(minutes: 24),
+        );
+        expect(result.issue, DanmakuAxisIssue.none);
+      });
+
+      test('头部近端桥接 + 远端离群不触发越界推荐', () {
+        // 头部对称场景：远端负时间戳离群决定 P0.5 分位值，近端桥接弹幕
+        // 与主体连续（通过最近一条的间隙检查），但远端离群与桥接弹幕
+        // 之间存在超过 2 倍容差的空隙，不应推荐延后。
+        final times = <double>[
+          -120,
+          -110,
+          -50,
+          ...List.generate(80, (i) => 1440 * i / 79),
         ];
         final result = DanmakuAxisChecker.check(
           danmakus: times.map(danmakuAt).toList(),
