@@ -602,9 +602,46 @@ mixin _$MagnetController on _MagnetController, Store {
   );
 
   @override
-  Future<void> removeDownload(String taskId, {bool deleteFiles = false}) {
+  Future<bool> removeDownload(String taskId, {bool deleteFiles = false}) {
     return _$removeDownloadAsyncAction.run(
       () => super.removeDownload(taskId, deleteFiles: deleteFiles),
+    );
+  }
+
+  late final _$pauseDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.pauseDownloads',
+    context: context,
+  );
+
+  @override
+  Future<void> pauseDownloads(Iterable<String> taskIds) {
+    return _$pauseDownloadsAsyncAction.run(() => super.pauseDownloads(taskIds));
+  }
+
+  late final _$resumeDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.resumeDownloads',
+    context: context,
+  );
+
+  @override
+  Future<void> resumeDownloads(Iterable<String> taskIds) {
+    return _$resumeDownloadsAsyncAction.run(
+      () => super.resumeDownloads(taskIds),
+    );
+  }
+
+  late final _$removeDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.removeDownloads',
+    context: context,
+  );
+
+  @override
+  Future<int> removeDownloads(
+    Iterable<String> taskIds, {
+    bool deleteFiles = false,
+  }) {
+    return _$removeDownloadsAsyncAction.run(
+      () => super.removeDownloads(taskIds, deleteFiles: deleteFiles),
     );
   }
 

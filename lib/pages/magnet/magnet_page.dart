@@ -1375,6 +1375,12 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
+  /// 多选模式：任务条目显示勾选框，工具栏出现批量操作栏。
+  bool _selectMode = false;
+
+  /// 多选模式下已勾选的任务 taskId 集合。
+  final Set<String> _selectedTaskIds = {};
+
   /// 是否按番剧分组展示（持久化在设置中，下载中心与磁力页共享）。
   bool get _grouped => GStorage.getSetting(SettingsKeys.magnetGroupDownloads);
 
@@ -1387,6 +1393,157 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   Future<void> _setGrouped(bool value) async {
     await GStorage.putSetting(SettingsKeys.magnetGroupDownloads, value);
     setState(() {});
+  }
+
+  // ---------------- 多选模式 ----------------
+
+  void _enterSelectMode([String? taskId]) {
+    setState(() {
+      _selectMode = true;
+      if (taskId != null) _selectedTaskIds.add(taskId);
+    });
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _selectedTaskIds.clear();
+    });
+  }
+
+  void _toggleSelect(String taskId) {
+    setState(() {
+      if (!_selectedTaskIds.remove(taskId)) _selectedTaskIds.add(taskId);
+    });
+  }
+
+  /// 全选 / 取消全选当前筛选与搜索下的可见任务。
+  void _toggleSelectAll(List<MagnetDownloadEntry> visibleTasks) {
+    setState(() {
+      final allSelected =
+          visibleTasks.isNotEmpty &&
+          visibleTasks.every((t) => _selectedTaskIds.contains(t.taskId));
+      if (allSelected) {
+        for (final t in visibleTasks) {
+          _selectedTaskIds.remove(t.taskId);
+        }
+      } else {
+        for (final t in visibleTasks) {
+          _selectedTaskIds.add(t.taskId);
+        }
+      }
+    });
+  }
+
+  /// 当前勾选且仍存在的任务（自动剔除已被删除 / 清理的任务）。
+  List<MagnetDownloadEntry> get _selectedTasks => widget
+      .controller
+      .downloadTasks
+      .where((t) => _selectedTaskIds.contains(t.taskId))
+      .toList();
+
+  Future<void> _pauseSelected() async {
+    final ids = _selectedTasks
+        .where((t) => t.isDownloading || t.isQueued)
+        .map((t) => t.taskId)
+        .toList();
+    if (ids.isEmpty) return;
+    await widget.controller.pauseDownloads(ids);
+  }
+
+  Future<void> _resumeSelected() async {
+    final ids = _selectedTasks
+        .where((t) => t.isPaused || t.isQueued)
+        .map((t) => t.taskId)
+        .toList();
+    if (ids.isEmpty) return;
+    await widget.controller.resumeDownloads(ids);
+  }
+
+  Future<void> _deleteSelected(bool deleteFiles) async {
+    final ids = _selectedTasks.map((t) => t.taskId).toList();
+    if (ids.isEmpty) return;
+    final removed = await widget.controller.removeDownloads(
+      ids,
+      deleteFiles: deleteFiles,
+    );
+    if (!mounted) return;
+    _toastRemoved(removed, deleteFiles);
+    _exitSelectMode();
+  }
+
+  /// 右键菜单「一键删除」：跳过确认框直接移除任务（保留磁盘文件）。
+  Future<void> _quickRemoveTask(MagnetDownloadEntry task) async {
+    final ok = await widget.controller.removeDownload(task.taskId);
+    if (ok && mounted) {
+      KazumiDialog.showToast(message: '已删除任务（文件保留在磁盘）');
+    }
+  }
+
+  void _toastRemoved(int count, bool deleteFiles) {
+    KazumiDialog.showToast(
+      message: deleteFiles ? '已删除 $count 个任务及文件' : '已删除 $count 个任务',
+    );
+  }
+
+  /// 多选模式下的批量操作栏（替换任务统计行）。
+  Widget _buildSelectionBar(
+    BuildContext context,
+    List<MagnetDownloadEntry> visibleTasks,
+  ) {
+    final selected = _selectedTasks;
+    final pausable = selected
+        .where((t) => t.isDownloading || t.isQueued)
+        .length;
+    final resumable = selected.where((t) => t.isPaused || t.isQueued).length;
+    final allVisibleSelected =
+        visibleTasks.isNotEmpty &&
+        visibleTasks.every((t) => _selectedTaskIds.contains(t.taskId));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: '退出多选',
+            icon: const Icon(Icons.close_rounded),
+            visualDensity: VisualDensity.compact,
+            onPressed: _exitSelectMode,
+          ),
+          Expanded(
+            child: Text(
+              '已选 ${selected.length} 项',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          IconButton(
+            tooltip: allVisibleSelected ? '取消全选' : '全选',
+            icon: Icon(allVisibleSelected ? Icons.deselect : Icons.select_all),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _toggleSelectAll(visibleTasks),
+          ),
+          IconButton(
+            tooltip: '暂停所选',
+            icon: const Icon(Icons.pause_circle_outline),
+            visualDensity: VisualDensity.compact,
+            onPressed: pausable > 0 ? _pauseSelected : null,
+          ),
+          IconButton(
+            tooltip: '继续所选',
+            icon: const Icon(Icons.play_circle_outline),
+            visualDensity: VisualDensity.compact,
+            onPressed: resumable > 0 ? _resumeSelected : null,
+          ),
+          IconButton(
+            tooltip: '删除所选',
+            icon: const Icon(Icons.delete_outline),
+            visualDensity: VisualDensity.compact,
+            onPressed: selected.isNotEmpty
+                ? () => _confirmBatchRemove(context)
+                : null,
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1473,6 +1630,16 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                     onPressed: () => _setGrouped(!_grouped),
                   ),
                   IconButton(
+                    tooltip: _selectMode ? '退出多选' : '多选任务',
+                    icon: Icon(
+                      _selectMode
+                          ? Icons.close_rounded
+                          : Icons.checklist_rounded,
+                    ),
+                    onPressed: () =>
+                        _selectMode ? _exitSelectMode() : _enterSelectMode(),
+                  ),
+                  IconButton(
                     tooltip: '手动添加磁力链接',
                     icon: const Icon(Icons.add_link_rounded),
                     onPressed: () => _showAddMagnetDialog(context),
@@ -1505,49 +1672,52 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                 onChanged: (value) => setState(() => _searchQuery = value),
               ),
             ),
-            // 任务统计 + 批量暂停 / 继续。
-            Observer(
-              builder: (_) {
-                if (controller.downloadTasks.isEmpty) {
-                  return const SizedBox.shrink();
-                }
-                final active = controller.activeDownloadCount;
-                final speed = controller.totalDownloadSpeed;
-                final pausable = controller.pausableDownloadCount;
-                final resumable = controller.resumableDownloadCount;
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 4, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          speed > 0
-                              ? '进行中 $active 个任务 · ${_formatBytes(speed)}/s'
-                              : '进行中 $active 个任务 · 空闲',
-                          style: Theme.of(context).textTheme.bodySmall,
+            // 多选模式显示批量操作栏，否则显示任务统计 + 批量暂停 / 继续。
+            if (_selectMode)
+              _buildSelectionBar(context, tasks)
+            else
+              Observer(
+                builder: (_) {
+                  if (controller.downloadTasks.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  final active = controller.activeDownloadCount;
+                  final speed = controller.totalDownloadSpeed;
+                  final pausable = controller.pausableDownloadCount;
+                  final resumable = controller.resumableDownloadCount;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 4, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            speed > 0
+                                ? '进行中 $active 个任务 · ${_formatBytes(speed)}/s'
+                                : '进行中 $active 个任务 · 空闲',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: '暂停全部任务',
-                        icon: const Icon(Icons.pause_circle_outline),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: pausable > 0
-                            ? () => controller.pauseAllDownloads()
-                            : null,
-                      ),
-                      IconButton(
-                        tooltip: '继续全部任务',
-                        icon: const Icon(Icons.play_circle_outline),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: resumable > 0
-                            ? () => controller.resumeAllDownloads()
-                            : null,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                        IconButton(
+                          tooltip: '暂停全部任务',
+                          icon: const Icon(Icons.pause_circle_outline),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: pausable > 0
+                              ? () => controller.pauseAllDownloads()
+                              : null,
+                        ),
+                        IconButton(
+                          tooltip: '继续全部任务',
+                          icon: const Icon(Icons.play_circle_outline),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: resumable > 0
+                              ? () => controller.resumeAllDownloads()
+                              : null,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             Expanded(
               child: tasks.isEmpty
                   ? Center(
@@ -1620,6 +1790,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
           group: group,
           buildTaskTile: _buildTaskTile,
           onMissingEpisodes: (g) => _showGroupMissingEpisodes(context, g),
+          onDeleteGroup: (g) => _confirmRemoveGroup(context, g),
         );
       },
     );
@@ -1643,9 +1814,14 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
     return _DownloadTaskTile(
       task: task,
       grouped: grouped,
+      selectMode: _selectMode,
+      selected: _selectedTaskIds.contains(task.taskId),
+      onToggleSelect: () => _toggleSelect(task.taskId),
+      onLongPress: () => _enterSelectMode(task.taskId),
       onPause: () => widget.controller.pauseDownload(task.taskId),
       onResume: () => widget.controller.resumeDownload(task.taskId),
       onRemove: () => _confirmRemove(context, task),
+      onQuickRemove: () => _quickRemoveTask(task),
       // 单文件种子没有「部分下载」的余地，不显示文件选择入口。
       onSelectFiles: task.totalLength > 0 && task.files.length != 1
           ? () => _showFileSelection(task)
@@ -1834,53 +2010,25 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
     );
   }
 
-  /// 删除任务确认，可选同时删除已下载文件。
-  Future<void> _confirmRemove(
-    BuildContext context,
-    MagnetDownloadEntry task,
-  ) async {
+  /// 删除确认框（单任务 / 批量 / 分组共用）：主体说明 + 「同时删除文件」
+  /// 勾选项，确认后回调 [onConfirm]（deleteFiles 为勾选结果）。
+  Future<void> _confirmRemoveDialog(
+    BuildContext context, {
+    required String title,
+    required List<Widget> message,
+    required Future<void> Function(bool deleteFiles) onConfirm,
+  }) {
     var deleteFiles = false;
     KazumiDialog.show(
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('删除下载任务'),
+          title: Text(title),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                task.title.isEmpty ? task.fileName : task.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              ...message,
               const SizedBox(height: 12),
-              if (task.importedPath.isNotEmpty) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      dialogContext,
-                    ).colorScheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.folder_open_rounded, size: 16),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '该任务文件已自动移入媒体库，删除任务不会影响已入库的文件。',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
               CheckboxListTile(
                 value: deleteFiles,
                 onChanged: (v) =>
@@ -1910,16 +2058,90 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
               ),
               onPressed: () {
                 Navigator.pop(dialogContext);
-                widget.controller.removeDownload(
-                  task.taskId,
-                  deleteFiles: deleteFiles,
-                );
+                onConfirm(deleteFiles);
               },
               child: Text(deleteFiles ? '删除任务和文件' : '删除任务'),
             ),
           ],
         ),
       ),
+    );
+    return Future.value();
+  }
+
+  /// 「已入库」提示：删除任务不影响已移入媒体库的文件。
+  Widget _importedHint(BuildContext context, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.folder_open_rounded, size: 16),
+          const SizedBox(width: 6),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmRemove(BuildContext context, MagnetDownloadEntry task) {
+    return _confirmRemoveDialog(
+      context,
+      title: '删除下载任务',
+      message: [
+        Text(
+          task.title.isEmpty ? task.fileName : task.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (task.importedPath.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _importedHint(context, '该任务文件已自动移入媒体库，删除任务不会影响已入库的文件。'),
+        ],
+      ],
+      onConfirm: (deleteFiles) => widget.controller.removeDownload(
+        task.taskId,
+        deleteFiles: deleteFiles,
+      ),
+    );
+  }
+
+  /// 批量删除多选模式中勾选的任务。
+  Future<void> _confirmBatchRemove(BuildContext context) async {
+    final selected = _selectedTasks;
+    if (selected.isEmpty) return;
+    final anyImported = selected.any((t) => t.importedPath.isNotEmpty);
+    await _confirmRemoveDialog(
+      context,
+      title: '删除 ${selected.length} 个下载任务',
+      message: [
+        Text('将移除选中的 ${selected.length} 个任务记录。'),
+        if (anyImported) ...[
+          const SizedBox(height: 12),
+          _importedHint(context, '部分任务文件已自动移入媒体库，删除任务不会影响已入库的文件。'),
+        ],
+      ],
+      onConfirm: _deleteSelected,
+    );
+  }
+
+  /// 一键删除番剧分组下的全部任务。
+  Future<void> _confirmRemoveGroup(BuildContext context, _DownloadGroup group) {
+    return _confirmRemoveDialog(
+      context,
+      title: '删除分组任务',
+      message: [Text('「${group.title}」分组下共 ${group.count} 个任务，将一并移除。')],
+      onConfirm: (deleteFiles) async {
+        final removed = await widget.controller.removeDownloads(
+          group.tasks.map((t) => t.taskId),
+          deleteFiles: deleteFiles,
+        );
+        if (!mounted) return;
+        _toastRemoved(removed, deleteFiles);
+      },
     );
   }
 
@@ -2492,6 +2714,7 @@ class _DownloadGroupSection extends StatefulWidget {
     required this.group,
     required this.buildTaskTile,
     required this.onMissingEpisodes,
+    this.onDeleteGroup,
   });
 
   final _DownloadGroup group;
@@ -2505,12 +2728,39 @@ class _DownloadGroupSection extends StatefulWidget {
   /// 点击「缺集」时触发（由外层 Tab 执行 Bangumi 查询与跳转）。
   final void Function(_DownloadGroup group) onMissingEpisodes;
 
+  /// 右键组头「删除该分组全部任务」时触发（外层弹确认框后批量移除）。
+  final void Function(_DownloadGroup group)? onDeleteGroup;
+
   @override
   State<_DownloadGroupSection> createState() => _DownloadGroupSectionState();
 }
 
 class _DownloadGroupSectionState extends State<_DownloadGroupSection> {
   late bool _expanded = widget.group.hasActive;
+
+  /// 右键（Windows）组头弹出分组操作菜单：一键删除整组任务。
+  Future<void> _showGroupContextMenu(
+    BuildContext context,
+    Offset position,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final local = overlay.globalToLocal(position);
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        local.dx,
+        local.dy,
+        overlay.size.width - local.dx,
+        overlay.size.height - local.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'removeGroup', child: Text('删除该分组全部任务')),
+      ],
+    );
+    if (value == 'removeGroup') {
+      widget.onDeleteGroup?.call(widget.group);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2519,40 +2769,47 @@ class _DownloadGroupSectionState extends State<_DownloadGroupSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          onTap: () => setState(() => _expanded = !_expanded),
-          leading: group.coverUrl.isNotEmpty
-              ? SizedBox(
-                  width: 36,
-                  height: 50,
-                  child: NetworkImgLayer(
-                    src: group.coverUrl,
+        GestureDetector(
+          // 右键组头也能展开操作菜单（Windows 桌面端）。
+          onSecondaryTapUp: widget.onDeleteGroup == null
+              ? null
+              : (details) =>
+                    _showGroupContextMenu(context, details.globalPosition),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            onTap: () => setState(() => _expanded = !_expanded),
+            leading: group.coverUrl.isNotEmpty
+                ? SizedBox(
                     width: 36,
                     height: 50,
+                    child: NetworkImgLayer(
+                      src: group.coverUrl,
+                      width: 36,
+                      height: 50,
+                    ),
+                  )
+                : const Icon(Icons.movie_outlined),
+            title: Text(
+              group.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall,
+            ),
+            subtitle: Text(
+              '${group.count} 个任务',
+              style: theme.textTheme.bodySmall,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (group.bangumiId != null)
+                  TextButton(
+                    onPressed: () => widget.onMissingEpisodes(group),
+                    child: const Text('缺集'),
                   ),
-                )
-              : const Icon(Icons.movie_outlined),
-          title: Text(
-            group.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall,
-          ),
-          subtitle: Text(
-            '${group.count} 个任务',
-            style: theme.textTheme.bodySmall,
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (group.bangumiId != null)
-                TextButton(
-                  onPressed: () => widget.onMissingEpisodes(group),
-                  child: const Text('缺集'),
-                ),
-              Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-            ],
+                Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+              ],
+            ),
           ),
         ),
         if (_expanded)
@@ -2721,6 +2978,11 @@ class _DownloadTaskTile extends StatelessWidget {
     required this.onResume,
     required this.onRemove,
     this.grouped = false,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggleSelect,
+    this.onLongPress,
+    this.onQuickRemove,
     this.onSelectFiles,
     this.onMatchAnime,
     this.onRescrape,
@@ -2737,6 +2999,22 @@ class _DownloadTaskTile extends StatelessWidget {
   /// 按番剧分组展示时的子条目：组头已展示封面与番剧名，子条目不再
   /// 重复（标题改用文件名 / 任务名以便区分集数，隐藏「已搜刮」标记）。
   final bool grouped;
+
+  /// 多选模式：条目用勾选框替代封面，点击切换勾选而非跳转番剧页。
+  final bool selectMode;
+
+  /// 多选模式下本条是否已勾选。
+  final bool selected;
+
+  /// 多选模式下点击条目切换勾选状态。
+  final VoidCallback? onToggleSelect;
+
+  /// 长按条目进入多选模式并勾选本条。
+  final VoidCallback? onLongPress;
+
+  /// 右键菜单「一键删除」：跳过确认框直接移除任务（保留磁盘文件）；
+  /// 「⋯」菜单的「删除…」保留确认框，可在其中选择同时删除文件。
+  final VoidCallback? onQuickRemove;
 
   /// 元数据就绪后可用的「选择下载文件」回调。
   final VoidCallback? onSelectFiles;
@@ -2781,7 +3059,7 @@ class _DownloadTaskTile extends StatelessWidget {
         : '第 ${sorted.first}-${sorted.last} 集';
   }
 
-  List<PopupMenuEntry<String>> _menuItems() => [
+  List<PopupMenuEntry<String>> _menuItems({bool quickRemove = false}) => [
     if (onStream != null)
       PopupMenuItem(
         value: 'stream',
@@ -2800,10 +3078,10 @@ class _DownloadTaskTile extends StatelessWidget {
       const PopupMenuItem(value: 'match', child: Text('匹配番剧')),
     if (onRescrape != null)
       const PopupMenuItem(value: 'rescrape', child: Text('重新搜刮')),
-    const PopupMenuItem(value: 'remove', child: Text('删除')),
+    PopupMenuItem(value: 'remove', child: Text(quickRemove ? '一键删除' : '删除…')),
   ];
 
-  void _onMenuSelected(String value) {
+  void _onMenuSelected(String value, {bool quickRemove = false}) {
     switch (value) {
       case 'pause':
         onPause();
@@ -2812,7 +3090,11 @@ class _DownloadTaskTile extends StatelessWidget {
         onResume();
         break;
       case 'remove':
-        onRemove();
+        if (quickRemove) {
+          onQuickRemove?.call();
+        } else {
+          onRemove();
+        }
         break;
       case 'files':
         onSelectFiles?.call();
@@ -2835,7 +3117,7 @@ class _DownloadTaskTile extends StatelessWidget {
     }
   }
 
-  /// 右键（Windows）在光标处弹出与「⋯」按钮一致的操作菜单。
+  /// 右键（Windows）在光标处弹出操作菜单，删除项为一键删除。
   Future<void> _showContextMenu(BuildContext context, Offset position) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final local = overlay.globalToLocal(position);
@@ -2847,10 +3129,10 @@ class _DownloadTaskTile extends StatelessWidget {
         overlay.size.width - local.dx,
         overlay.size.height - local.dy,
       ),
-      items: _menuItems(),
+      items: _menuItems(quickRemove: true),
     );
     if (value != null) {
-      _onMenuSelected(value);
+      _onMenuSelected(value, quickRemove: true);
     }
   }
 
@@ -2871,22 +3153,33 @@ class _DownloadTaskTile extends StatelessWidget {
       // 右键任务条目也能展开操作菜单（Windows 桌面端）。
       onSecondaryTapUp: (details) =>
           _showContextMenu(context, details.globalPosition),
+      // 长按进入多选模式并勾选本条。
+      onLongPress: onLongPress,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        // 已搜刮的任务可直接跳转番剧详情页。
-        onTap: info == null ? null : () => _openAnimePage(context),
-        // 分组子条目不显示封面（组头已有）。
-        leading: !grouped && info != null && info.coverUrl.isNotEmpty
-            ? SizedBox(
-                width: 44,
-                height: 60,
-                child: NetworkImgLayer(
-                  src: info.coverUrl,
-                  width: 44,
-                  height: 60,
-                ),
+        // 多选模式下点击切换勾选，不再跳转番剧详情页。
+        onTap: selectMode
+            ? onToggleSelect
+            : info == null
+            ? null
+            : () => _openAnimePage(context),
+        // 多选模式下用勾选框替代封面（分组子条目不显示封面，组头已有）。
+        leading: selectMode
+            ? Checkbox(
+                value: selected,
+                onChanged: (_) => onToggleSelect?.call(),
               )
-            : null,
+            : (!grouped && info != null && info.coverUrl.isNotEmpty
+                  ? SizedBox(
+                      width: 44,
+                      height: 60,
+                      child: NetworkImgLayer(
+                        src: info.coverUrl,
+                        width: 44,
+                        height: 60,
+                      ),
+                    )
+                  : null),
         title: Row(
           children: [
             Expanded(
@@ -3050,11 +3343,14 @@ class _DownloadTaskTile extends StatelessWidget {
             ),
           ],
         ),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          onSelected: _onMenuSelected,
-          itemBuilder: (context) => _menuItems(),
-        ),
+        // 多选模式下隐藏「⋯」按钮，操作统一走批量操作栏。
+        trailing: selectMode
+            ? null
+            : PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) => _onMenuSelected(value),
+                itemBuilder: (context) => _menuItems(),
+              ),
       ),
     );
   }

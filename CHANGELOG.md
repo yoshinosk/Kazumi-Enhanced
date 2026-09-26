@@ -2,6 +2,16 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.26（三）
+
+- 磁力下载任务列表新增多选操作：工具栏「多选任务」按钮或长按任务条目进入多选模式，条目以勾选框替代封面、点击切换勾选（不再跳转番剧页），顶部统计行切换为批量操作栏，支持全选/取消全选、批量暂停、批量继续、批量删除（删除前弹确认框，可勾选「同时删除已下载的文件」）；批量操作栏对当前勾选中不可暂停/继续的任务自动禁用对应按钮，全部/进行中/已完成三种筛选与按番剧分组视图下均可用，磁力页与下载中心两个入口共享
+  - `magnet_page.dart`：`_MagnetDownloadsTabState` 新增 `_selectMode`/`_selectedTaskIds` 状态与 `_enterSelectMode`/`_exitSelectMode`/`_toggleSelect`/`_toggleSelectAll` 方法；工具栏在分组开关与添加入口之间新增「多选任务」IconButton（多选中变为退出按钮）；原任务统计 Observer 行改为 `if (_selectMode) _buildSelectionBar(...) else Observer(...)`，`_buildSelectionBar` 提供退出/已选计数/全选/暂停所选/继续所选/删除所选；`_buildTaskTile` 向 `_DownloadTaskTile` 传递 `selectMode`/`selected`/`onToggleSelect`/`onLongPress`；批量确认对话框与单任务/分组删除确认共用新抽取的 `_confirmRemoveDialog`（原 `_confirmRemove` 重构复用，行为不变）
+  - `magnet_controller.dart`：新增 `@action pauseDownloads(Iterable<String>)`、`resumeDownloads(Iterable<String>)`（失败汇总 toast）；新增 `removeDownloads(Iterable<String>, {bool deleteFiles})` 返回成功删除数；`removeDownload` 返回值由 `Future<void>` 改为 `Future<bool>`（同步重新生成 `magnet_controller.g.dart`）
+- 磁力下载任务右键一键删除：右键任务条目弹出的菜单中「删除」改为「一键删除」，跳过确认对话框立即移除任务（保留磁盘文件）并 toast 反馈；「⋯」按钮菜单的「删除…」保留确认对话框（可在其中勾选同时删除文件）；按番剧分组时右键组头可弹出菜单「删除该分组全部任务」，确认后批量移除整组任务（同样可勾选同时删除文件）
+  - `magnet_page.dart`：`_DownloadTaskTile._menuItems` 增加 `quickRemove` 参数区分右键（一键删除）与「⋯」菜单（删除…）两个入口，`_onMenuSelected` 按 `quickRemove` 分发到 `onQuickRemove`/`onRemove`；`_DownloadGroupSection` 新增可选 `onDeleteGroup` 回调，组头外包 `GestureDetector.onSecondaryTapUp` 弹出分组右键菜单
+  - 验证：flutter analyze 0 错误 0 警告（存量 info lint 34 项无新增）；flutter test 412 项全过；tools/build_windows_local.ps1 构建成功
+    - 相关文件: lib/pages/magnet/magnet_page.dart, lib/pages/magnet/magnet_controller.dart, lib/pages/magnet/magnet_controller.g.dart
+
 ## 2026.9.26（二）
 
 - 播放器视频画面新增右键菜单：在画面任意位置右键可弹出与顶栏「更多选项」按钮完全相同的菜单，菜单在光标处弹出并自动夹紧到窗口内

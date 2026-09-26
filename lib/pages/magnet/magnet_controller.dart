@@ -1271,9 +1271,43 @@ abstract class _MagnetController with Store {
   Future<bool> recheckDownload(String taskId) => _downloads.recheck(taskId);
 
   @action
-  Future<void> removeDownload(String taskId, {bool deleteFiles = false}) async {
+  Future<bool> removeDownload(String taskId, {bool deleteFiles = false}) async {
     final ok = await _downloads.remove(taskId, deleteFiles: deleteFiles);
     if (!ok) KazumiDialog.showToast(message: '删除任务失败');
+    return ok;
+  }
+
+  /// 批量暂停选中的任务（仅处理处于可暂停状态的任务）。
+  @action
+  Future<void> pauseDownloads(Iterable<String> taskIds) async {
+    var failed = 0;
+    for (final id in taskIds) {
+      if (!await _downloads.pause(id)) failed++;
+    }
+    if (failed > 0) KazumiDialog.showToast(message: '有 $failed 个任务暂停失败');
+  }
+
+  /// 批量继续选中的任务。
+  @action
+  Future<void> resumeDownloads(Iterable<String> taskIds) async {
+    var failed = 0;
+    for (final id in taskIds) {
+      if (!await _downloads.unpause(id)) failed++;
+    }
+    if (failed > 0) KazumiDialog.showToast(message: '有 $failed 个任务继续失败');
+  }
+
+  /// 批量删除任务，返回成功移除的数量。
+  @action
+  Future<int> removeDownloads(
+    Iterable<String> taskIds, {
+    bool deleteFiles = false,
+  }) async {
+    var removed = 0;
+    for (final id in List.of(taskIds)) {
+      if (await _downloads.remove(id, deleteFiles: deleteFiles)) removed++;
+    }
+    return removed;
   }
 
   @action
