@@ -72,3 +72,6 @@ tools/parse_analyze.py
 tools/diff_strings.py
 analyze_*.log
 build_runner.log
+
+# 本地发布构建产物
+/dist/
