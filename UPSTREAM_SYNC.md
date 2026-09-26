@@ -1,17 +1,14 @@
 # 上游功能同步进度
 
 - 基线:上游 `2.2.8`(640dfdcb)
-- 目标:同步上游 `2.2.9` / `2.3.0` / `2.3.1` / `main` 的全部功能(共 72 个提交)
+- 目标:同步上游 `2.2.9` ~ `2.3.4` 的全部功能(批次 1~4 共 72 个提交 + 批次 5 共 28 个提交)
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.9.10)**:批次 1~3 已完成并在 `dev` 提交;批次 4 在 `sync-upstream-batch4-wip` 分支**完成代码整合**。
-> - 工程已升级到 Flutter 3.47.2(上游 pubspec environment 精确要求),`pub get` 通过,mobx 产物(`video/timeline/media` 的 `.g.dart`)由 build_runner 重新生成。
-> - 首轮 `dart analyze` 报出 506 个编译错误,WIP 树不可编译;现全部修完,`dart analyze lib test` 为 **0 error / 0 warning**(7 条 info 均为基线存量)。
-> - 修复要点见 CHANGELOG 2026.9.10;上游基线 commit:`23610a526ab380d9013d9fe07c7bca73996f796f`(upstream/main,2026-09-09)。
-> - 验证与合流:`flutter test` 与 Windows 构建已在 Flutter 3.47.2 下于本机终端跑通,批次 4 已合并回 `dev`。
->   注意:本机代理会话内无法运行 flutter 工具(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开,`flutter.bat` 会静默挂死),
->   test/build 需在本机终端执行,详见备注。
+> **当前状态(2026.9.27)**:批次 1~5 已全部完成并合入 `dev`,上游功能同步至 **2.3.4**(目标 commit `88a8ec59`,批次 5 完成于 2026.9.23);上游已发布 2.3.5 / 2.3.6,待后续批次跟进。
+> - 工程构建于 Flutter 3.47.2(跳过上游 3.47.3 / 3.47.5 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning,`flutter test` 与 Windows 构建在本机终端跑通。
+> - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
+> - 注意:本机代理会话内无法运行 flutter 工具(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开,`flutter.bat` 会静默挂死),test/build 需在本机终端执行,详见备注。
 
 ## 批次 1:低冲突功能
 

@@ -2,7 +2,7 @@
 
 ## 项目概况
 
-- 本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的增强分支（fork，基于上游 2.2.6）：在上游番剧在线观看（插件源解析）的基础上，重点增强**本地媒体库**、**磁力下载（libtorrent）**与**播放器**能力。
+- 本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的增强分支（fork 自上游 2.2.6，上游功能已同步至 2.3.4，进度见 `UPSTREAM_SYNC.md`）：在上游番剧在线观看（插件源解析）的基础上，重点增强**本地媒体库**、**磁力下载（libtorrent）**与**播放器**能力。
 - 技术栈：Flutter **3.47.2**（`pubspec.yaml` 精确锁定）+ Dart ≥ 3.10；状态管理 **MobX**（`mobx_codegen` 生成 `.g.dart`，生成产物需提交）；存储 **Hive CE**；播放内核 **media_kit**（mpv，Predidit fork，pubspec 固定 git ref）；弹幕 canvas_danmaku；路由与依赖注入 **flutter_modular**（`lib/pages/router.dart`、`lib/app_module.dart`）。
 
 ## 平台约束（重要）
