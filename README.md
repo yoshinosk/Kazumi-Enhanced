@@ -5,7 +5,7 @@
 > [!IMPORTANT]
 > **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.3.4](https://github.com/Predidit/Kazumi/releases/tag/2.3.4)。**
 > 我们在上游项目的基础上进行**功能加强**，重点新增了**本地媒体库**与**磁力下载**能力。
-> ⚠️ **当前正处于开发阶段，相关功能尚未完成**，可能存在不稳定或不可用的情况，请勿用于生产环境。功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
+> 🎉 **v1.0.0 已正式发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
 
 ## 功能一览
 
@@ -30,9 +30,15 @@
 - **桌面端体验**：全局 ESC 返回、双击标题栏最大化 / 还原、播放画面与媒体库右键菜单、宽窗口侧边栏布局、磁力任务多选批量操作
 - **其他**：首页「继续观看」一键续播、时间线「仅显示日漫」筛选、看完自动联动 Bangumi 收藏进度
 
+## 截图
+
+| 本地媒体库 | 磁力下载 |
+| :---: | :---: |
+| ![本地媒体库](static/screenshot/%E5%AA%92%E4%BD%93%E5%BA%93.png) | ![磁力下载](static/screenshot/%E7%A3%81%E5%8A%9B%E4%B8%8B%E8%BD%BD.png) |
+
 ## 开发状态
 
-本项目尚在积极开发中，核心功能已基本可用，但接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
+本项目已发布 **v1.0.0**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
 
 **上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.3.4**（上游最新已发布 2.3.5 / 2.3.6，将在后续批次跟进），各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
 
