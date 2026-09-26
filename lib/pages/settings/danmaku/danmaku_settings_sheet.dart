@@ -2,11 +2,11 @@ import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_shield_settings_sheet.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:kazumi/services/storage/storage.dart';
 
 enum _DanmakuSettingsDestination {
   timeOffset,
@@ -15,7 +15,8 @@ enum _DanmakuSettingsDestination {
 Future<void> showDanmakuSettingsSheet({
   required BuildContext context,
   required DanmakuController danmakuController,
-  VoidCallback? onUpdateDanmakuSpeed,
+  required PlayerDanmakuController playerDanmakuController,
+  required VoidCallback onUpdateDanmakuSpeed,
   VoidCallback? onTimelineOffsetChanged,
 }) async {
   final destination =
@@ -24,6 +25,7 @@ Future<void> showDanmakuSettingsSheet({
     builder: (context) {
       return _DanmakuSettingsSheet(
         danmakuController: danmakuController,
+        playerDanmakuController: playerDanmakuController,
         onUpdateDanmakuSpeed: onUpdateDanmakuSpeed,
       );
     },
@@ -38,6 +40,7 @@ Future<void> showDanmakuSettingsSheet({
     context: context,
     builder: (context) {
       return DanmakuTimeOffsetSheet(
+        danmakuController: playerDanmakuController,
         onTimelineOffsetChanged: onTimelineOffsetChanged,
       );
     },
@@ -46,11 +49,13 @@ Future<void> showDanmakuSettingsSheet({
 
 class _DanmakuSettingsSheet extends StatefulWidget {
   final DanmakuController danmakuController;
-  final VoidCallback? onUpdateDanmakuSpeed;
+  final PlayerDanmakuController playerDanmakuController;
+  final VoidCallback onUpdateDanmakuSpeed;
 
   const _DanmakuSettingsSheet({
     required this.danmakuController,
-    this.onUpdateDanmakuSpeed,
+    required this.playerDanmakuController,
+    required this.onUpdateDanmakuSpeed,
   });
 
   @override
@@ -58,7 +63,17 @@ class _DanmakuSettingsSheet extends StatefulWidget {
 }
 
 class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
+  /// The stored duration, before playback speed scales it. The running option
+  /// carries the scaled value, so it can't back this slider.
+  late double _duration;
+
   DanmakuOption get _option => widget.danmakuController.option;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = GStorage.getSetting(SettingsKeys.danmakuDuration);
+  }
 
   void _applyOption(DanmakuOption option) {
     setState(() => widget.danmakuController.updateOption(option));
@@ -106,7 +121,7 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                         title: Text('字体大小'),
                         value: _option.fontSize,
                         min: 10,
-                        max: isCompact() ? 32 : 48,
+                        max: 48,
                         valueLabel: '${_option.fontSize.floor()}',
                         onChanged: (value) {
                           final fontSize = value.floorToDouble();
@@ -144,8 +159,8 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                         value: Text(
                           formatDanmakuTimeOffset(
                             normalizeDanmakuTimeOffset(
-                              GStorage.getSetting<double>(
-                                  SettingsKeys.danmakuTimeOffset),
+                              widget.playerDanmakuController
+                                  .timelineOffsetSeconds,
                             ),
                           ),
                         ),
@@ -167,16 +182,17 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                       SettingsSliderTile(
                         leading: Icons.timer_rounded,
                         title: Text('持续时间'),
-                        value: _option.duration.toDouble(),
+                        value: _duration,
                         min: 2,
                         max: 16,
                         divisions: 14,
-                        valueLabel: '${_option.duration.round()} 秒',
+                        valueLabel: '${_duration.round()} 秒',
                         onChanged: (value) {
-                          _applyOption(_option.copyWith(duration: value));
+                          final duration = value.roundToDouble();
+                          setState(() => _duration = duration);
                           GStorage.putSetting<double>(
-                              SettingsKeys.danmakuDuration,
-                              value.roundToDouble());
+                              SettingsKeys.danmakuDuration, duration);
+                          widget.onUpdateDanmakuSpeed();
                         },
                       ),
                       SettingsSliderTile(
@@ -237,7 +253,7 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                                   SettingsKeys.danmakuFollowSpeed);
                           GStorage.putSetting<bool>(
                               SettingsKeys.danmakuFollowSpeed, followSpeed);
-                          widget.onUpdateDanmakuSpeed?.call();
+                          widget.onUpdateDanmakuSpeed();
                           setState(() {});
                         },
                         title: Text('跟随视频倍速'),

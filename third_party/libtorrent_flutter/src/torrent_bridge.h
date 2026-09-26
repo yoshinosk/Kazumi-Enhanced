@@ -144,6 +144,10 @@ TORRENT_API void lt_add_trackers(lt_session_t session, lt_torrent_id id,
 TORRENT_API void lt_pause_torrent(lt_session_t session, lt_torrent_id id);
 TORRENT_API void lt_resume_torrent(lt_session_t session, lt_torrent_id id);
 TORRENT_API void lt_recheck_torrent(lt_session_t session, lt_torrent_id id);
+/* Export the torrent's metadata (file layout + piece hashes) as a .torrent
+ * file. Returns 0 on success, -1 on error (no metadata / bad handle / IO). */
+TORRENT_API int  lt_export_torrent(lt_session_t session, lt_torrent_id id,
+                                   const char* file_path);
 
 /* status queries */
 TORRENT_API int lt_get_torrent_count(lt_session_t session);

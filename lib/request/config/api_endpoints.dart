@@ -1,6 +1,8 @@
+import 'package:flutter/services.dart' show appBuildName;
+
 class ApiEndpoints {
   /// 当前版本
-  static const String version = '0.0.1';
+  static const String version = appBuildName ?? '0.0.0';
 
   /// 规则API级别
   static const int apiLevel = 8;
@@ -73,9 +75,9 @@ class ApiEndpoints {
   /// 新增或修改用户单个条目收藏
   static const String bangumiSetCollection = '/v0/users/-/collections/{0}';
 
-  /// 获取用户收藏。用户名，分页参数1，分页参数2
-  static const String bangumiGetCollection =
-      '/v0/users/{0}/collections?subject_type=2&limit={1}&offset={2}&type={3}';
+  /// 获取用户全部收藏（不限类型）。用户名，分页参数1(limit)，分页参数2(offset)
+  static const String bangumiGetAllCollections =
+      '/v0/users/{0}/collections?subject_type=2&limit={1}&offset={2}';
 
   /// 获取用户单个条目收藏。用户名，条目 ID。
   static const String bangumiGetCollectionBySubject =
@@ -125,6 +127,9 @@ class ApiEndpoints {
 
   /// 检索弹弹番剧元数据
   static const String dandanAPISearch = "/api/v2/search/anime";
+
+  /// 检索弹弹番剧集数（v2，结果不截断）
+  static const String dandanAPISearchEpisodes = "/api/v2/search/episodes";
 
   /// 获取弹弹番剧元数据
   static const String dandanAPIInfo = "/api/v2/bangumi/";

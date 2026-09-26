@@ -1,4 +1,5 @@
-﻿import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -10,6 +11,7 @@ import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/directory_picker.dart';
 
 class MagnetSettingsPage extends StatefulWidget {
   const MagnetSettingsPage({super.key});
@@ -24,6 +26,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late String animesGardenFansub;
   late bool engineEnabled;
   late String downloadDir;
+  late bool askDirOnAdd;
   late int listenPort;
   late int maxPeers;
   late int maxUploadLimitKb;
@@ -75,6 +78,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   void _loadFromSettings() {
     engineEnabled = GStorage.getSetting(SettingsKeys.magnetEngineEnabled);
     downloadDir = GStorage.getSetting(SettingsKeys.magnetDownloadDir);
+    askDirOnAdd = GStorage.getSetting(SettingsKeys.magnetAskDirOnAdd);
     listenPort = GStorage.getSetting(SettingsKeys.magnetListenPort);
     maxPeers = GStorage.getSetting(SettingsKeys.magnetMaxPeers);
     maxUploadLimitKb = GStorage.getSetting(SettingsKeys.magnetMaxUploadLimitKb);
@@ -251,6 +255,18 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : null,
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.folder_copy_outlined,
+          title: const Text('添加任务时询问下载目录'),
+          description: const Text(
+              '开启后添加下载会先弹窗，可临时为单个任务指定保存位置；关闭则直接使用上面的默认目录'),
+          initialValue: askDirOnAdd,
+          onToggle: (value) async {
+            final v = value ?? askDirOnAdd;
+            setState(() => askDirOnAdd = v);
+            await GStorage.putSetting(SettingsKeys.magnetAskDirOnAdd, v);
+          },
         ),
         SettingsTile(
           leading: Icons.hub_outlined,
@@ -435,6 +451,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
               underline: const SizedBox.shrink(),
               isDense: true,
               items: const [
+                DropdownMenuItem(value: 1, child: Text('1 小时')),
                 DropdownMenuItem(value: 6, child: Text('6 小时')),
                 DropdownMenuItem(value: 12, child: Text('12 小时')),
                 DropdownMenuItem(value: 24, child: Text('1 天')),
@@ -626,7 +643,9 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         SettingsTile.switchTile(
           leading: Icons.image_outlined,
           title: const Text('未匹配卡片视频缩略图'),
-          description: const Text('用 ffmpeg 为未匹配番剧的文件夹生成视频首帧缩略图，替代默认占位图标'),
+          description: Text(Platform.isAndroid
+              ? '仅桌面端可用：Android 设备通常没有 ffmpeg，此开关不会生效'
+              : '用 ffmpeg 为未匹配番剧的文件夹生成视频首帧缩略图，替代默认占位图标'),
           initialValue: thumbnailsEnabled,
           onToggle: (value) async {
             final v = value ?? thumbnailsEnabled;
@@ -909,10 +928,13 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
     await _controller.applyMagnetSettingsChanged();
   }
 
-  Future<void> _pickDownloadDir() async {    if (mounted) setState(() => isPickingDir = true);
+  Future<void> _pickDownloadDir() async {
+    if (isPickingDir) return;
+    if (mounted) setState(() => isPickingDir = true);
     try {
-      final dir = await FilePicker.platform.getDirectoryPath(
+      final dir = await pickWritableDirectory(
         dialogTitle: '选择默认下载目录',
+        initialDirectory: downloadDir.isEmpty ? null : downloadDir,
       );
       if (dir == null) return;
       setState(() => downloadDir = dir);

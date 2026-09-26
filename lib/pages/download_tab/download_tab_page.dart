@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart' show GeneralEmptyState;
+import 'package:kazumi/bean/widget/empty_state_widget.dart'
+    show GeneralEmptyState;
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
-import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetDownloadsTab, MagnetSearchTab, MagnetSubscriptionsTab;
+import 'package:kazumi/pages/magnet/magnet_page.dart'
+    show MagnetDownloadsTab, MagnetSearchTab, MagnetSubscriptionsTab;
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
+import 'package:kazumi/utils/device.dart';
 
 /// 下载中心：汇总磁力搜索、磁力下载、RSS 订阅与离线缓存，作为底部导航的「下载」标签页。
 class DownloadTabPage extends StatefulWidget {
@@ -45,11 +48,15 @@ class _DownloadTabPageState extends State<DownloadTabPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: SysAppBar(
-        title: const Text('下载'),
-        actions: [
-          Observer(builder: (_) {
+    // 桌面宽屏：顶部 TabBar 会把标签横向拉得很长，改用左侧 NavigationRail；
+    // 安卓 / 窄窗口保持顶部 TabBar 切换。
+    final useRail =
+        isDesktop() && MediaQuery.sizeOf(context).width >= _railBreakpoint;
+    final appBar = SysAppBar(
+      title: const Text('下载'),
+      actions: [
+        Observer(
+          builder: (_) {
             return PopupMenuButton<String>(
               tooltip: '切换搜索源',
               icon: const Icon(Icons.travel_explore_rounded),
@@ -74,37 +81,89 @@ class _DownloadTabPageState extends State<DownloadTabPage>
                   ),
               ],
             );
-          }),
-          IconButton(
-            tooltip: '下载器设置',
-            onPressed: () => context.pushNamed('/settings/magnet/'),
-            icon: const Icon(Icons.settings_rounded),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '磁力搜索'),
-            Tab(text: '磁力下载'),
-            Tab(text: 'RSS 订阅'),
-            Tab(text: '离线缓存'),
-          ],
+          },
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
+        IconButton(
+          tooltip: '下载器设置',
+          onPressed: () => context.pushNamed('/settings/magnet/'),
+          icon: const Icon(Icons.settings_rounded),
+        ),
+      ],
+      bottom: useRail
+          ? null
+          : TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: '磁力搜索'),
+                Tab(text: '磁力下载'),
+                Tab(text: 'RSS 订阅'),
+                Tab(text: '离线缓存'),
+              ],
+            ),
+    );
+    final tabBarView = TabBarView(
+      controller: _tabController,
+      children: [
+        MagnetSearchTab(
+          controller: widget.magnetController,
+          searchController: _searchController,
+        ),
+        MagnetDownloadsTab(controller: widget.magnetController),
+        MagnetSubscriptionsTab(controller: widget.magnetController),
+        _OfflineCacheTab(controller: widget.downloadController),
+      ],
+    );
+    // 两种布局共用同一棵树：TabBarView 固定在 Row 的 index 1 槽位，
+    // 宽窄切换时仅 index 0（侧栏/占位）变化，各 tab 的滚动位置等
+    // State 不会因子树重建而丢失。
+    return Scaffold(
+      appBar: appBar,
+      body: Row(
         children: [
-          MagnetSearchTab(
-            controller: widget.magnetController,
-            searchController: _searchController,
-          ),
-          MagnetDownloadsTab(controller: widget.magnetController),
-          MagnetSubscriptionsTab(controller: widget.magnetController),
-          _OfflineCacheTab(controller: widget.downloadController),
+          if (useRail)
+            AnimatedBuilder(
+              animation: _tabController,
+              builder: (context, _) => NavigationRail(
+                backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+                groupAlignment: -1,
+                labelType: NavigationRailLabelType.all,
+                selectedIndex: _tabController.index,
+                onDestinationSelected: (index) =>
+                    _tabController.animateTo(index),
+                destinations: const [
+                  NavigationRailDestination(
+                    icon: Icon(Icons.travel_explore_outlined),
+                    selectedIcon: Icon(Icons.travel_explore_rounded),
+                    label: Text('磁力搜索'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.download_outlined),
+                    selectedIcon: Icon(Icons.download_rounded),
+                    label: Text('磁力下载'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.rss_feed_outlined),
+                    selectedIcon: Icon(Icons.rss_feed_rounded),
+                    label: Text('RSS 订阅'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.cloud_download_outlined),
+                    selectedIcon: Icon(Icons.cloud_download_rounded),
+                    label: Text('离线缓存'),
+                  ),
+                ],
+              ),
+            )
+          else
+            const SizedBox.shrink(),
+          Expanded(child: tabBarView),
         ],
       ),
     );
   }
+
+  /// 宽屏（≥ 700px）时切换到 NavigationRail 的断点。
+  static const double _railBreakpoint = 700;
 }
 
 /// 离线缓存概览：展示每部番剧的缓存进度，点击进入完整下载管理页。
@@ -115,30 +174,32 @@ class _OfflineCacheTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Observer(builder: (_) {
-      final keys = controller.recordKeys.toList();
-      if (keys.isEmpty) {
-        return const Center(
-          child: GeneralEmptyState(
-            icon: Icons.download_done_rounded,
-            title: '暂无离线缓存',
+    return Observer(
+      builder: (_) {
+        final keys = controller.recordKeys.toList();
+        if (keys.isEmpty) {
+          return const Center(
+            child: GeneralEmptyState(
+              icon: Icons.download_done_rounded,
+              title: '暂无离线缓存',
+            ),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: () async => controller.refreshRecords(),
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            itemCount: keys.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final record = controller.getRecordSnapshot(keys[index]);
+              if (record == null) return const SizedBox.shrink();
+              return _OfflineCacheTile(record: record);
+            },
           ),
         );
-      }
-      return RefreshIndicator(
-        onRefresh: () async => controller.refreshRecords(),
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemCount: keys.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final record = controller.getRecordSnapshot(keys[index]);
-            if (record == null) return const SizedBox.shrink();
-            return _OfflineCacheTile(record: record);
-          },
-        ),
-      );
-    });
+      },
+    );
   }
 }
 
@@ -152,12 +213,15 @@ class _OfflineCacheTile extends StatelessWidget {
     final theme = Theme.of(context);
     final episodes = record.episodes.values.toList();
     final total = episodes.length;
-    final completed =
-        episodes.where((e) => e.status == DownloadStatus.completed).length;
-    final active =
-        episodes.where((e) => e.status == DownloadStatus.downloading).length;
-    final failed =
-        episodes.where((e) => e.status == DownloadStatus.failed).length;
+    final completed = episodes
+        .where((e) => e.status == DownloadStatus.completed)
+        .length;
+    final active = episodes
+        .where((e) => e.status == DownloadStatus.downloading)
+        .length;
+    final failed = episodes
+        .where((e) => e.status == DownloadStatus.failed)
+        .length;
     final progress = total > 0 ? completed / total : 0.0;
 
     final String statusText;
@@ -196,10 +260,7 @@ class _OfflineCacheTile extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: [
-              Text(
-                '$completed / $total 集',
-                style: theme.textTheme.bodySmall,
-              ),
+              Text('$completed / $total 集', style: theme.textTheme.bodySmall),
               const SizedBox(width: 8),
               Text(
                 statusText,
@@ -208,8 +269,9 @@ class _OfflineCacheTile extends StatelessWidget {
               const Spacer(),
               Text(
                 record.pluginName,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),

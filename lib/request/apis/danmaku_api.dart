@@ -142,6 +142,7 @@ class DanmakuApi {
     var endPoint = ApiEndpoints.dandanAPIDomain + path;
     Map<String, String> keywordMap = {
       'keyword': title,
+      'v2': 'true',
     };
 
     final jsonData = await _client.get(endPoint, queryParameters: keywordMap);
@@ -150,11 +151,33 @@ class DanmakuApi {
     return danmakuSearchResponse;
   }
 
-  static Future<List<DanmakuEntry>> getDanDanmaku(
-      int bangumiID, int episode) async {
-    List<DanmakuEntry> danmakus = [];
+  /// Manual search entry point.
+  ///
+  /// `/api/v2/search/anime` caps results at 25 with no paging parameter, which
+  /// drops the main series of large franchises (Detective Conan has 48 entries).
+  /// This endpoint is uncapped, but only under `v2`: the legacy engine collapses
+  /// a keyword to a single anime. Its inline episode lists are truncated, so
+  /// episodes still come from [getDanDanEpisodesByDanDanBangumiID].
+  static Future<DanmakuSearchResponse> searchAnimes(String title) async {
+    var path = ApiEndpoints.dandanAPISearchEpisodes;
+    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    Map<String, String> keywordMap = {
+      'anime': title,
+      'v2': 'true',
+    };
+
+    final jsonData = await _client.get(endPoint, queryParameters: keywordMap);
+    return DanmakuSearchResponse.fromJson(jsonData);
+  }
+
+  /// 按番剧 ID + 集数拉取弹幕，同时返回定位到的弹弹分集 ID。
+  ///
+  /// episodeId 供上层把弹幕轴偏移等按分集作用域的数据精确到单集；
+  /// 解析失败或番剧无效时 episodeId 为 0。
+  static Future<({List<DanmakuEntry> danmakus, int episodeId})>
+      getDanDanmaku(int bangumiID, int episode) async {
     if (bangumiID == 0) {
-      return danmakus;
+      return (danmakus: <DanmakuEntry>[], episodeId: 0);
     }
     // 关键修正：不再猜测 `animeId * 10000 + 集数` 的弹幕库 ID。
     // 该命名规则并未写入弹弹 Play 官方文档，对大量番剧（尤其新番、多季、合集）
@@ -164,9 +187,10 @@ class DanmakuApi {
     if (episodeId == 0) {
       KazumiLogger().w(
           'Danmaku: cannot resolve episodeId for bangumi $bangumiID episode $episode');
-      return danmakus;
+      return (danmakus: <DanmakuEntry>[], episodeId: 0);
     }
-    return await getDanDanmakuByEpisodeID(episodeId);
+    final danmakus = await getDanDanmakuByEpisodeID(episodeId);
+    return (danmakus: danmakus, episodeId: episodeId);
   }
 
   /// 在弹弹番剧分集列表中按集数定位真实 episodeId。

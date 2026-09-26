@@ -19,6 +19,7 @@ import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/platform/webview_feature_service.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/navigation.dart';
+import 'package:kazumi/utils/danmaku_time_offset_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,11 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
+    // 清理历史弹幕轴偏移污染：番剧级作用域偏移（旧版自动检测误写）与
+    // 遗留全局偏移（旧版手动调整 / 应用推荐偏移误写，会让所有视频弹幕
+    // 提前 / 延后固定时长）。
+    await DanmakuTimeOffsetStore.migrateLegacyBangumiScopes();
+    await DanmakuTimeOffsetStore.migrateLegacyGlobalOffset();
   } catch (e) {
     // Log the error for debugging (if logger is available)
     debugPrint('Storage initialization failed: $e');
@@ -91,7 +97,7 @@ void main() async {
   if (Platform.isWindows) {
     SystemProxyService.init();
   }
-  MeteredNetworkService.init();
+  await MeteredNetworkService.refresh();
   ProxyManager.applyProxy();
   runApp(
     ModularApp(

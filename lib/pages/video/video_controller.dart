@@ -7,6 +7,10 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/player/danmaku_axis_dialog.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/modules/bangumi/episode_item.dart';
+import 'package:kazumi/modules/comments/comment_item.dart';
+import 'package:kazumi/modules/comments/comment_response.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/repositories/download_repository.dart';
@@ -15,10 +19,8 @@ import 'package:kazumi/services/video_source/services.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:mobx/mobx.dart';
 import 'package:kazumi/services/logging/logger.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/episode_url.dart';
 import 'package:kazumi/utils/http_headers.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
@@ -26,6 +28,7 @@ import 'package:kazumi/utils/media.dart';
 import 'package:kazumi/utils/async_session.dart';
 import 'package:kazumi/services/platform/display_mode_service.dart';
 import 'package:path/path.dart' as p;
+import 'package:kazumi/pages/video/video_fullscreen_controller.dart';
 
 part 'video_controller.g.dart';
 
@@ -65,6 +68,12 @@ abstract class _VideoPageController with Store implements Disposable {
 
   late BangumiItem bangumiItem;
 
+  /// Bangumi 剧集信息（评论面板使用）。
+  EpisodeInfo episodeInfo = EpisodeInfo.fromTemplate();
+
+  @observable
+  var episodeCommentsList = ObservableList<EpisodeCommentItem>();
+
   // Resolution state machine: [_beginEpisodeSwitch] enters the loading state;
   // [_finishLoading] and [_failLoading] are the only terminal transitions.
   // [_errorMessage] is non-null only in the failed state.
@@ -81,29 +90,38 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   VideoEpisodeSelection? playingEpisode;
 
+  @observable
+  int commentsEpisode = 1;
+
   @action
   void resetEpisodeState({int episode = 1, int road = 0}) {
     final selection = VideoEpisodeSelection(episode: episode, road: road);
     selectedEpisode = selection;
     playingEpisode = null;
+    commentsEpisode = commentEpisodeForSelection(selection);
   }
 
   VideoEpisodeSelection get playbackEpisode =>
       playingEpisode ?? selectedEpisode;
 
-  @observable
-  bool isFullscreen = false;
+  final fullscreen = VideoFullscreenController(
+    applyFullscreen: DisplayModeService.applyVideoFullscreen,
+  );
 
-  // Playback and automatic danmaku loading have separate owners. Manual
-  // danmaku selection can cancel auto danmaku without touching playback.
+  bool get isFullscreen => fullscreen.isFullscreen;
+
+  @observable
+  bool isCommentsAscending = false;
+
+  // Playback, automatic danmaku loading, and comment loading have separate
+  // owners. Manual danmaku selection can cancel auto danmaku without touching
+  // playback; comment refreshes never cancel playback.
   final AsyncSessionOwner _playbackSessions = AsyncSessionOwner();
   final AsyncSessionOwner _danmakuSessions = AsyncSessionOwner();
+  final AsyncSessionOwner _commentSessions = AsyncSessionOwner();
 
   @observable
   bool isPip = false;
-
-  @observable
-  bool showTabBody = true;
 
   @observable
   int historyOffset = 0;
@@ -140,6 +158,15 @@ abstract class _VideoPageController with Store implements Disposable {
 
   /// 边下边播的适配器标识（流 URL 与文件名保存在 roadList 中）。
   String _streamPluginName = '';
+
+  /// 是否为在线插件播放模式。
+  ///
+  /// 离线 / 本地媒体 / 边下边播三种模式没有 [currentPlugin]
+  /// （late 字段不会赋值），初始化分支与依赖它的在线专属 UI
+  /// （选集面板的线路下载映射、远程投屏等）都必须先用本 getter 拦截，
+  /// 否则访问 [currentPlugin] 会抛 LateInitializationError 导致页面卡死。
+  bool get isOnlinePlaybackMode =>
+      !isOfflineMode && !isLocalMediaMode && !isStreamMode;
 
   int? _localMediaBangumiSyncId;
 
@@ -559,12 +586,25 @@ abstract class _VideoPageController with Store implements Disposable {
     );
   }
 
+  int commentEpisodeForSelection(VideoEpisodeSelection selection) {
+    final resolvedEpisode = resolveEpisode(selection);
+    return resolvedEpisode?.danmakuEpisodeNumber ?? selection.episode;
+  }
+
   /// Resets pre-switch state as a single transaction so observers see one
   /// notification instead of one per field.
   @action
   void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
+    final targetCommentsEpisode = commentEpisodeForSelection(selection);
     selectedEpisode = selection;
     playingEpisode = null;
+    // The comments sheet only re-queries when [commentsEpisode] changes, so
+    // resetting comment state here without changing it would blank the sheet
+    // permanently.
+    if (targetCommentsEpisode != commentsEpisode) {
+      commentsEpisode = targetCommentsEpisode;
+      _resetEpisodeComments();
+    }
     _loading = true;
     _errorMessage = null;
   }
@@ -574,6 +614,75 @@ abstract class _VideoPageController with Store implements Disposable {
     selectedEpisode = VideoEpisodeSelection(
       episode: resolvedEpisode.listIndex,
       road: resolvedEpisode.roadIndex,
+    );
+    commentsEpisode = commentEpisodeForSelection(selectedEpisode);
+  }
+
+  void _resetEpisodeComments() {
+    _commentSessions.cancel();
+    episodeInfo.reset();
+    episodeCommentsList.clear();
+  }
+
+  Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
+    final session = _commentSessions.begin();
+    final EpisodeInfo latestEpisodeInfo;
+    try {
+      latestEpisodeInfo = await BangumiApi.getBangumiEpisodeByID(id, episode);
+    } catch (_) {
+      if (session.isStale) {
+        return false;
+      }
+      rethrow;
+    }
+    if (session.isStale) {
+      return false;
+    }
+    final EpisodeCommentResponse value;
+    try {
+      value =
+          await BangumiApi.getBangumiCommentsByEpisodeID(latestEpisodeInfo.id);
+    } catch (_) {
+      if (session.isStale) {
+        return false;
+      }
+      rethrow;
+    }
+    if (session.isStale) {
+      return false;
+    }
+    final commentsList = value.commentList;
+    if (!isCommentsAscending) {
+      commentsList
+          .sort((a, b) => b.comment.createdAt.compareTo(a.comment.createdAt));
+    } else {
+      commentsList
+          .sort((a, b) => a.comment.createdAt.compareTo(b.comment.createdAt));
+    }
+    _applyEpisodeComments(episode, latestEpisodeInfo, commentsList);
+    KazumiLogger().i(
+        'VideoPageController: loaded comments list length ${episodeCommentsList.length}');
+    return true;
+  }
+
+  @action
+  void _applyEpisodeComments(
+    int episode,
+    EpisodeInfo info,
+    List<EpisodeCommentItem> comments,
+  ) {
+    commentsEpisode = episode;
+    episodeInfo = info;
+    episodeCommentsList = ObservableList.of(comments);
+  }
+
+  @action
+  void toggleSortOrder() {
+    isCommentsAscending = !isCommentsAscending;
+    episodeCommentsList.sort(
+      (a, b) => isCommentsAscending
+          ? a.comment.createdAt.compareTo(b.comment.createdAt)
+          : b.comment.createdAt.compareTo(a.comment.createdAt),
     );
   }
 
@@ -1061,8 +1170,10 @@ abstract class _VideoPageController with Store implements Disposable {
   /// Called by Modular when the '/video' route scope is disposed.
   @override
   void dispose() {
+    unawaited(fullscreen.close());
     _playbackSessions.cancel();
     _danmakuSessions.cancel();
+    _commentSessions.cancel();
     _logSubscription?.cancel();
     _logSubscription = null;
     if (!_logStreamController.isClosed) {
@@ -1073,30 +1184,6 @@ abstract class _VideoPageController with Store implements Disposable {
     if (videoSourceService != null) {
       unawaited(videoSourceService.dispose());
     }
-  }
-
-  void enterFullScreen() {
-    isFullscreen = true;
-    DisplayModeService.enterFullScreen(lockOrientation: false);
-  }
-
-  void exitFullScreen() {
-    isFullscreen = false;
-    DisplayModeService.exitFullScreen();
-  }
-
-  void isDesktopFullscreen() async {
-    if (isDesktop()) {
-      isFullscreen = await windowManager.isFullScreen();
-    }
-  }
-
-  void handleOnEnterFullScreen() async {
-    isFullscreen = true;
-  }
-
-  void handleOnExitFullScreen() async {
-    isFullscreen = false;
   }
 }
 

@@ -758,7 +758,7 @@ void main() {
   group('MagnetDownloadService file guard', () {
     test('isFileIntact detects existing and missing files', () {
       final dir = Directory.systemTemp.createTempSync('kazumi_guard');
-      addTearDown(() => dir.deleteSync(recursive: true));
+      addTearDown(() => dir.delete(recursive: true));
       final f = File('${dir.path}${Platform.pathSeparator}ep01.mkv');
       f.writeAsBytesSync(List<int>.filled(16, 1));
 
@@ -780,7 +780,7 @@ void main() {
 
     test('checks every selected file in a multi-file torrent', () {
       final dir = Directory.systemTemp.createTempSync('kazumi_multi_guard');
-      addTearDown(() => dir.deleteSync(recursive: true));
+      addTearDown(() => dir.delete(recursive: true));
       final season = Directory('${dir.path}${Platform.pathSeparator}Season 1')
         ..createSync();
       File('${season.path}${Platform.pathSeparator}01.mkv')
@@ -843,6 +843,50 @@ void main() {
         )),
         'active',
       );
+    });
+  });
+
+  group('MagnetDownloadEntry hasCompleteFiles', () {
+    MagnetDownloadEntry mk(String status,
+        {int totalLength = 0, int verifiedLength = 0}) {
+      return MagnetDownloadEntry(
+        sessionGid: '1',
+        title: 'T',
+        sourceUri: 'magnet:?xt=urn:btih:abc',
+        addedAt: DateTime(2026, 1, 1),
+        status: status,
+        totalLength: totalLength,
+        verifiedLength: verifiedLength,
+      );
+    }
+
+    test('complete and seeding tasks are always playable', () {
+      expect(mk('complete').hasCompleteFiles, isTrue);
+      expect(mk('seeding').hasCompleteFiles, isTrue);
+    });
+
+    test('paused after download finished is playable', () {
+      // 做种中被暂停：进入完成态时 verifiedLength 已对齐总量并持久化。
+      final e = mk('paused', totalLength: 1000, verifiedLength: 1000);
+      expect(e.hasCompleteFiles, isTrue);
+    });
+
+    test('paused mid-download is not playable locally', () {
+      final e = mk('paused', totalLength: 1000, verifiedLength: 400);
+      expect(e.hasCompleteFiles, isFalse);
+    });
+
+    test('active / queued / error tasks without full data are not playable',
+        () {
+      expect(
+          mk('active', totalLength: 1000, verifiedLength: 999).hasCompleteFiles,
+          isFalse);
+      expect(mk('queued').hasCompleteFiles, isFalse);
+      expect(mk('error').hasCompleteFiles, isFalse);
+    });
+
+    test('unknown total size never counts as finished', () {
+      expect(mk('waiting').hasCompleteFiles, isFalse);
     });
   });
 

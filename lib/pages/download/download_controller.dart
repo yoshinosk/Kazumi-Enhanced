@@ -385,7 +385,7 @@ abstract class _DownloadController with Store {
   /// 支持新格式 (带 danDanBangumiID 的 wrapper) 和旧格式 (纯数组)
   /// [scope] 非空时优先读带番剧作用域的侧车，不存在则回退旧版
   /// 无作用域的 `danmaku_<ep>.json`，避免升级后旧缓存失效。
-  Future<({List<DanmakuEntry> danmakus, int danDanBangumiID})?>
+  Future<({List<DanmakuEntry> danmakus, int danDanBangumiID, int danDanEpisodeId})?>
       _readDanmakuFromFile(String downloadDirectory,
           {int? episode, String scope = ''}) async {
     if (downloadDirectory.isEmpty) return null;
@@ -404,14 +404,23 @@ abstract class _DownloadController with Store {
         // 旧格式：纯弹幕数组
         final danmakus =
             decoded.map((json) => DanmakuEntry.fromJson(json)).toList();
-        return (danmakus: danmakus, danDanBangumiID: 0);
+        return (
+          danmakus: danmakus,
+          danDanBangumiID: 0,
+          danDanEpisodeId: 0
+        );
       } else if (decoded is Map<String, dynamic>) {
         // 新格式：带 danDanBangumiID 的 wrapper
         final danDanBangumiID = decoded['danDanBangumiID'] as int? ?? 0;
+        final danDanEpisodeId = decoded['danDanEpisodeId'] as int? ?? 0;
         final List<dynamic> jsonList = decoded['danmakus'] as List? ?? [];
         final danmakus =
             jsonList.map((json) => DanmakuEntry.fromJson(json)).toList();
-        return (danmakus: danmakus, danDanBangumiID: danDanBangumiID);
+        return (
+          danmakus: danmakus,
+          danDanBangumiID: danDanBangumiID,
+          danDanEpisodeId: danDanEpisodeId
+        );
       }
       return null;
     } catch (e) {
@@ -427,19 +436,22 @@ abstract class _DownloadController with Store {
       List<DanmakuEntry> danmakus,
       int danDanBangumiID, {
       int? episode,
-      String scope = ''}) async {
+      String scope = '',
+      int danDanEpisodeId = 0}) async {
     if (downloadDirectory.isEmpty) return;
     final file =
         File(_danmakuFilePath(downloadDirectory, episode: episode, scope: scope));
     final wrapper = {
       'danDanBangumiID': danDanBangumiID,
+      if (danDanEpisodeId > 0) 'danDanEpisodeId': danDanEpisodeId,
       'danmakus': danmakus.map((d) => d.toJson()).toList(),
     };
     await file.writeAsString(jsonEncode(wrapper));
   }
 
-  Future<List<DanmakuEntry>?> getCachedDanmakus(
-      int bangumiId, String pluginName, int episodeNumber) async {
+  Future<({List<DanmakuEntry> danmakus, int danDanEpisodeId})?>
+      getCachedDanmakus(
+          int bangumiId, String pluginName, int episodeNumber) async {
     final episode =
         _repository.getEpisode(bangumiId, pluginName, episodeNumber);
     if (episode == null) return null;
@@ -447,7 +459,10 @@ abstract class _DownloadController with Store {
     // 从文件读取
     final fromFile = await _readDanmakuFromFile(episode.downloadDirectory);
     if (fromFile != null && fromFile.danmakus.isNotEmpty) {
-      return fromFile.danmakus;
+      return (
+        danmakus: fromFile.danmakus,
+        danDanEpisodeId: fromFile.danDanEpisodeId
+      );
     }
 
     return null;
@@ -460,7 +475,7 @@ abstract class _DownloadController with Store {
   /// [episode] 非空时优先读取分集侧车文件（`danmaku_<ep>.json`）；
   /// [scope] 非空时读取带番剧作用域的侧车（`danmaku_<ep>_<scope>.json`），
   /// 不存在时回退读取不带作用域的旧文件。
-  Future<({List<DanmakuEntry> danmakus, int danDanBangumiID})?>
+  Future<({List<DanmakuEntry> danmakus, int danDanBangumiID, int danDanEpisodeId})?>
       readDirectoryDanmaku(String directory,
           {int? episode, String scope = ''}) {
     return _readDanmakuFromFile(directory, episode: episode, scope: scope);
@@ -476,10 +491,13 @@ abstract class _DownloadController with Store {
     int danDanBangumiID, {
     int? episode,
     String scope = '',
+    int danDanEpisodeId = 0,
   }) async {
     try {
       await _writeDanmakuToFile(directory, danmakus, danDanBangumiID,
-          episode: episode, scope: scope);
+          episode: episode,
+          scope: scope,
+          danDanEpisodeId: danDanEpisodeId);
     } catch (e) {
       KazumiLogger()
           .w('DownloadController: failed to write directory danmaku', error: e);
@@ -775,11 +793,11 @@ abstract class _DownloadController with Store {
         }
 
         // 获取弹幕列表
-        final danmakus =
+        final danmakuResult =
             await DanmakuApi.getDanDanmaku(danDanBangumiID, episodeNumber);
+        final danmakus = danmakuResult.danmakus;
         if (danmakus.isEmpty) {
-          KazumiLogger().i(
-              'DownloadController: no danmaku found for episode $episodeNumber');
+          KazumiLogger().i('DownloadController: no danmaku found for episode $episodeNumber');
           return;
         }
 
@@ -806,7 +824,8 @@ abstract class _DownloadController with Store {
         }
 
         // 写入独立文件
-        await _writeDanmakuToFile(downloadDirectory, danmakus, danDanBangumiID);
+        await _writeDanmakuToFile(downloadDirectory, danmakus, danDanBangumiID,
+            danDanEpisodeId: danmakuResult.episodeId);
 
         KazumiLogger().i(
             'DownloadController: cached ${danmakus.length} danmakus for episode $episodeNumber');

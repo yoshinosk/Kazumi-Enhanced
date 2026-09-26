@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/widget/error_widget.dart';
 import 'package:kazumi/bean/widget/image_preview.dart';
 import 'package:kazumi/pages/collect/collect_module.dart';
 import 'package:kazumi/pages/download_tab/download_tab_module.dart';
@@ -26,6 +27,7 @@ import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
+import 'package:kazumi/services/sync/danmaku_shield_sync_service.dart';
 
 final _tabTransition = CustomTransition(
   duration: const Duration(milliseconds: 70),
@@ -50,7 +52,7 @@ final tabModule = createModule(
       ..addSingleton<TimelineController>(TimelineController.new)
       ..route(
         '/',
-        child: (context, state) => const IndexPage(),
+        child: (context, state) => IndexPage(location: state.uri.path),
         transition: _tabTransition,
         children: (sub) {
           sub
@@ -85,6 +87,7 @@ final indexModule = createModule(
           downloadController: inject<DownloadController>(),
           magnetController: inject<MagnetController>(),
           mediaController: inject<MediaController>(),
+          danmakuShieldSync: inject<DanmakuShieldSyncService>(),
         ),
         transition: TransitionType.none,
       )
@@ -100,7 +103,10 @@ final indexModule = createModule(
         '/error',
         child: (context, state) => Scaffold(
           appBar: AppBar(title: const Text('Kazumi')),
-          body: const Center(child: Text('初始化失败')),
+          body: const GeneralErrorWidget(
+            title: '初始化失败',
+            errMsg: '请重新启动应用后再试。',
+          ),
         ),
       )
       ..module(tabModule)

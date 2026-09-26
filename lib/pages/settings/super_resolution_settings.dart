@@ -36,7 +36,8 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
       body: SettingsList(
         sections: [
           SettingsRadioSection<SuperResolutionMode>(
-            title: Text('超分辨率需要启用硬件解码, 若启用硬件解码后仍然不生效, 尝试切换视频渲染器为 gpu'),
+            title: Text(
+                '超分辨率需要启用硬件解码, 若启用硬件解码后仍然不生效, 尝试切换视频渲染器 (Windows 建议 gpu-next, Android 建议 gpu)'),
             groupValue: superResolutionMode,
             onChanged: (SuperResolutionMode? value) {
               if (value == null) return;

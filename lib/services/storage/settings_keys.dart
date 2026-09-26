@@ -15,6 +15,10 @@ enum SettingGroup {
   misc,
   magnet,
   media,
+
+  /// 不参与任何设置组的批量重置（如截图保存目录这类存储位置偏好，
+  /// 有独立的恢复默认入口）。
+  none,
 }
 
 class SettingContext {
@@ -97,6 +101,49 @@ class SettingsKeys {
   static const arrowKeySkipTime = SettingKey<int>(
     _SettingBoxKey.arrowKeySkipTime,
     10,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：字号（基准像素，SubtitleView 内部会按视频区域相对
+  /// 1920x1080 参考尺寸缩放）。
+  static const subtitleFontSize = SettingKey<double>(
+    'subtitleFontSize',
+    48.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：文字颜色（ARGB32 int）。
+  static const subtitleTextColor = SettingKey<int>(
+    'subtitleTextColor',
+    0xFFFF4081,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：描边宽度（0 表示关闭描边）。
+  static const subtitleBorderWidth = SettingKey<double>(
+    'subtitleBorderWidth',
+    1.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：描边颜色（ARGB32 int）。
+  static const subtitleBorderColor = SettingKey<int>(
+    'subtitleBorderColor',
+    0xFFFFFFFF,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：背景不透明度（0.0 ~ 1.0，0 表示无背景）。
+  static const subtitleBackgroundOpacity = SettingKey<double>(
+    'subtitleBackgroundOpacity',
+    0.0,
+    group: SettingGroup.player,
+  );
+
+  /// 字幕样式：是否加粗。
+  static const subtitleBold = SettingKey<bool>(
+    'subtitleBold',
+    true,
     group: SettingGroup.player,
   );
   static const danmakuEnhance = SettingKey<bool>(
@@ -184,6 +231,26 @@ class SettingsKeys {
     '',
     group: SettingGroup.danmaku,
   );
+
+  /// 历史番剧级（`bangumiID:0`）作用域偏移的一次性迁移标记：
+  /// 旧版自动检测在 episodeId 未知时把推荐偏移写成了番剧级作用域，
+  /// 会污染同番剧所有分集，迁移时统一清除。
+  static const danmakuTimeOffsetScopeMigrated = SettingKey<bool>(
+    _SettingBoxKey.danmakuTimeOffsetScopeMigrated,
+    false,
+    group: SettingGroup.danmaku,
+  );
+
+  /// 遗留全局弹幕轴偏移的一次性迁移标记：
+  /// 更早版本的手动调整与自动检测「应用推荐偏移」均直接写入全局设置，
+  /// 且会被当时的作用域偏移遮蔽「看似无效」，在全局累积出从未生效的值；
+  /// 偏移作用域化后该遗留值作为兜底污染所有未命中作用域的视频，
+  /// 迁移时统一清零（此后用户主动调整的全局偏移不再清除）。
+  static const danmakuTimeOffsetGlobalMigrated = SettingKey<bool>(
+    _SettingBoxKey.danmakuTimeOffsetGlobalMigrated,
+    false,
+    group: SettingGroup.danmaku,
+  );
   static const danmakuEnabledByDefault = SettingKey<bool>(
     _SettingBoxKey.danmakuEnabledByDefault,
     false,
@@ -251,7 +318,7 @@ class SettingsKeys {
   );
   static const showPlayerError = SettingKey<bool>(
     _SettingBoxKey.showPlayerError,
-    true,
+    false,
     group: SettingGroup.player,
   );
   static const oledEnhance = SettingKey<bool>(
@@ -284,11 +351,6 @@ class SettingsKeys {
     '/tab/popular/',
     group: SettingGroup.interface,
   );
-  static const isWideScreen = SettingKey<bool>(
-    _SettingBoxKey.isWideScreen,
-    false,
-    group: SettingGroup.interface,
-  );
   static const webDavEnable = SettingKey<bool>(
     _SettingBoxKey.webDavEnable,
     false,
@@ -303,6 +365,26 @@ class SettingsKeys {
     _SettingBoxKey.webDavEnableCollect,
     false,
     group: SettingGroup.webdav,
+  );
+  static const webDavEnableDanmakuShield = SettingKey<bool>(
+    'webDavEnableDanmakuShield',
+    false,
+    group: SettingGroup.webdav,
+  );
+  static const danmakuShieldSyncDeviceId = SettingKey<String>(
+    'danmakuShieldSyncDeviceId',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncState = SettingKey<String>(
+    'danmakuShieldSyncState',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const danmakuShieldSyncCorruptState = SettingKey<String>(
+    'danmakuShieldSyncCorruptState',
+    '',
+    group: SettingGroup.sync,
   );
   static const webDavURL = SettingKey<String>(
     _SettingBoxKey.webDavURL,
@@ -322,6 +404,12 @@ class SettingsKeys {
   static const lowMemoryMode = SettingKey<bool>(
     _SettingBoxKey.lowMemoryMode,
     false,
+    group: SettingGroup.player,
+  );
+  // Null preserves the legacy lowMemoryMode choice until a policy is selected.
+  static const lowMemoryPolicy = SettingKey<String?>(
+    'lowMemoryPolicy',
+    null,
     group: SettingGroup.player,
   );
   static const showWindowButton = SettingKey<bool>(
@@ -361,6 +449,11 @@ class SettingsKeys {
   );
   static const androidVideoRenderer = SettingKey<String>(
     _SettingBoxKey.androidVideoRenderer,
+    'auto',
+    group: SettingGroup.player,
+  );
+  static const windowsVideoRenderer = SettingKey<String>(
+    _SettingBoxKey.windowsVideoRenderer,
     'auto',
     group: SettingGroup.player,
   );
@@ -449,9 +542,9 @@ class SettingsKeys {
     true,
     group: SettingGroup.interface,
   );
-  static const showAnimeCounter = SettingKey<bool>(
-    _SettingBoxKey.showAnimeCounter,
-    false,
+  static const defaultCollectLayout = SettingKey<String>(
+    'defaultCollectLayout',
+    'list',
     group: SettingGroup.interface,
   );
   static const downloadParallelEpisodes = SettingKey<int>(
@@ -542,6 +635,41 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
 
+  /// 桌面端截图保存目录（绝对路径），留空使用软件目录下的
+  /// screenshots 文件夹（见 ScreenshotSaveService）。
+  ///
+  /// 归属 [SettingGroup.none]：「恢复默认播放设置」不应清除用户自定义
+  /// 的保存目录（截图设置页有独立的恢复默认入口）。
+  static const screenshotSavePath = SettingKey<String>(
+    'screenshotSavePath',
+    '',
+    group: SettingGroup.none,
+  );
+
+  /// 字幕延迟（秒，mpv sub-delay）：正值字幕延后显示，负值提前。
+  /// 持久化并在每次创建播放器时应用。
+  static const subtitleDelay = SettingKey<double>(
+    'subtitleDelay',
+    0.0,
+    group: SettingGroup.player,
+  );
+
+  /// 播完动作：autoNext（尊重「自动连播」设置）/ repeatOne（单集循环）/
+  /// pauseAfter（播完暂停，等价于关闭自动连播）。
+  static const playbackFinishMode = SettingKey<String>(
+    'playbackFinishMode',
+    'autoNext',
+    group: SettingGroup.player,
+  );
+
+  /// 移动端双击屏幕左右两侧快进/快退（替代双击播放/暂停），
+  /// 幅度同「方向键跳转」设置。默认关闭以保持既有双击习惯。
+  static const doubleTapSeekEnabled = SettingKey<bool>(
+    'doubleTapSeekEnabled',
+    false,
+    group: SettingGroup.player,
+  );
+
   // 磁力搜索 / 下载 / RSS 订阅相关设置
   static const mikanBaseUrl = SettingKey<String>(
     'mikanBaseUrl',
@@ -560,6 +688,13 @@ class SettingsKeys {
   static const magnetDefaultSource = SettingKey<String>(
     'magnetDefaultSource',
     'mikan',
+    group: SettingGroup.magnet,
+  );
+
+  /// 添加磁力任务时是否弹窗确认（弹窗内可为该任务单独指定下载目录）。
+  static const magnetAskDirOnAdd = SettingKey<bool>(
+    _SettingBoxKey.magnetAskDirOnAdd,
+    true,
     group: SettingGroup.magnet,
   );
 
@@ -916,6 +1051,13 @@ class SettingsKeys {
     group: SettingGroup.magnet,
   );
 
+  /// 磁力搜索历史关键词（JSON 数组字符串，新 → 旧）。
+  static const magnetSearchHistory = SettingKey<String>(
+    'magnetSearchHistory',
+    '[]',
+    group: SettingGroup.magnet,
+  );
+
   static final List<SettingKey<Object?>> all = [
     hAenable,
     hardwareDecoder,
@@ -928,6 +1070,12 @@ class SettingsKeys {
     defaultAspectRatioType,
     buttonSkipTime,
     arrowKeySkipTime,
+    subtitleFontSize,
+    subtitleTextColor,
+    subtitleBorderWidth,
+    subtitleBorderColor,
+    subtitleBackgroundOpacity,
+    subtitleBold,
     danmakuEnhance,
     danmakuBorder,
     danmakuBorderSize,
@@ -944,6 +1092,10 @@ class SettingsKeys {
     danmakuLineHeight,
     danmakuTimeOffset,
     danmakuTimeOffsetByEpisode,
+    danmakuTimeOffsetScopeMigrated,
+    danmakuTimeOffsetGlobalMigrated,
+    magnetAskDirOnAdd,
+    magnetSearchHistory,
     danmakuEnabledByDefault,
     danmakuBiliBiliSource,
     danmakuGamerSource,
@@ -964,14 +1116,18 @@ class SettingsKeys {
     enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
-    isWideScreen,
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,
+    webDavEnableDanmakuShield,
+    danmakuShieldSyncDeviceId,
+    danmakuShieldSyncState,
+    danmakuShieldSyncCorruptState,
     webDavURL,
     webDavUsername,
     webDavPassword,
     lowMemoryMode,
+    lowMemoryPolicy,
     showWindowButton,
     useDynamicColor,
     exitBehavior,
@@ -980,6 +1136,7 @@ class SettingsKeys {
     syncPlayUserName,
     androidEnableOpenSLES,
     androidVideoRenderer,
+    windowsVideoRenderer,
     androidAutoEnterPIP,
     defaultSuperResolutionMode,
     disableSuperResolutionWarning,
@@ -997,7 +1154,7 @@ class SettingsKeys {
     proxyUrl,
     proxyTestUrl,
     showRating,
-    showAnimeCounter,
+    defaultCollectLayout,
     downloadParallelEpisodes,
     downloadParallelSegments,
     downloadDanmaku,
@@ -1015,6 +1172,10 @@ class SettingsKeys {
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,
+    screenshotSavePath,
+    subtitleDelay,
+    playbackFinishMode,
+    doubleTapSeekEnabled,
     mikanBaseUrl,
     magnetSearchSources,
     magnetDefaultSource,
@@ -1069,7 +1230,7 @@ class SettingsKeys {
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {
     return [
       for (final key in all)
-        if (key.group == group) key
+        if (key.group == group) key,
     ];
   }
 
@@ -1107,6 +1268,9 @@ class _SettingBoxKey {
       danmakuLineHeight = 'danmakuLineHeight',
       danmakuTimeOffset = 'danmakuTimeOffset',
       danmakuTimeOffsetByEpisode = 'danmakuTimeOffsetByEpisode',
+      danmakuTimeOffsetScopeMigrated = 'danmakuTimeOffsetScopeMigrated',
+      danmakuTimeOffsetGlobalMigrated = 'danmakuTimeOffsetGlobalMigrated',
+      magnetAskDirOnAdd = 'magnetAskDirOnAdd',
       danmakuEnabledByDefault = 'danmakuEnabledByDefault',
       danmakuBiliBiliSource = 'danmakuBiliBiliSource',
       danmakuGamerSource = 'danmakuGamerSource',
@@ -1127,9 +1291,6 @@ class _SettingBoxKey {
       enableBangumiProxy = 'enableBangumiProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
-
-      /// Deprecated
-      isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
       webDavEnableCollect = 'webDavEnableCollect',
@@ -1144,6 +1305,7 @@ class _SettingBoxKey {
       syncPlayEndPoint = 'syncPlayEndPoint',
       androidEnableOpenSLES = 'androidEnableOpenSLES',
       androidVideoRenderer = 'androidVideoRenderer',
+      windowsVideoRenderer = 'windowsVideoRenderer',
       androidAutoEnterPIP = 'androidAutoEnterPIP',
       defaultSuperResolutionMode = 'defaultSuperResolutionType',
       disableSuperResolutionWarning = 'superResolutionWarn',
@@ -1161,7 +1323,6 @@ class _SettingBoxKey {
       proxyUrl = 'proxyUrl',
       proxyTestUrl = 'proxyTestUrl',
       showRating = 'showRating',
-      showAnimeCounter = 'showAnimeCounter',
       downloadParallelEpisodes = 'downloadParallelEpisodes',
       downloadParallelSegments = 'downloadParallelSegments',
       downloadDanmaku = 'downloadDanmaku',

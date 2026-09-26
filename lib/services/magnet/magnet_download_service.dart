@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show AppLifecycleState;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:kazumi/request/core/network_config.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
@@ -45,6 +47,21 @@ class MagnetDownloadService {
   Timer? _refreshTimer;
   static const Duration _refreshInterval = Duration(seconds: 2);
 
+  /// 应用退后台后的轮询间隔：降低 platform channel 与状态处理频率
+  /// （前台服务保活时持续 2s 轮询白白耗电），进度持久化与通知更新
+  /// 仍能以较低频率继续。
+  static const Duration _refreshIntervalBackground = Duration(seconds: 30);
+
+  /// 当前是否处于后台低频轮询模式。
+  bool _isBackgroundRefresh = false;
+
+  /// 应用生命周期监听：退后台切换低频轮询，回前台恢复。
+  AppLifecycleListener? _lifecycleListener;
+
+  /// 网络变化订阅：WiFi ↔ 移动数据切换时立即应用「仅 WiFi」策略，
+  /// 不必等最长一个策略周期（60s）的轮询。
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
   /// 元数据获取超时：超过该时长仍未拿到种子元数据则自动重试。
   static const Duration _metadataTimeout = Duration(minutes: 10);
 
@@ -78,6 +95,13 @@ class MagnetDownloadService {
   /// 本次会话内已做过「元数据就绪磁盘空间校验」的任务（不持久化），
   /// 重启后重新校验一次（files 已持久化，不能再用 files.isEmpty 判定）。
   final Set<String> _diskSpaceCheckedTaskIds = {};
+
+  /// 本次会话内已尝试导出 .torrent 元数据缓存的任务（不持久化）。
+  /// 导出本身幂等（文件已存在即跳过），集合只避免重复发起。
+  final Set<String> _torrentCacheExported = {};
+
+  /// .torrent 元数据缓存目录（应用支持目录下，惰性解析）。
+  String? _torrentCacheDirPath;
 
   /// 内置引擎状态变化回调（供 Controller 刷新 observable）。
   void Function(LibtorrentEngineState state)? onEngineStateChanged;
@@ -117,6 +141,28 @@ class MagnetDownloadService {
     _startTrackerScheduler();
     _startRefreshScheduler();
     _startPolicyScheduler();
+    _startLifecycleListener();
+    _startConnectivityListener();
+  }
+
+  /// 生命周期监听：退后台切低频轮询（省电），回前台恢复。
+  void _startLifecycleListener() {
+    _lifecycleListener ??= AppLifecycleListener(
+      onStateChange: (state) {
+        final background = state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.paused;
+        if (background == _isBackgroundRefresh) return;
+        _isBackgroundRefresh = background;
+        _startRefreshScheduler();
+      },
+    );
+  }
+
+  /// 网络变化监听：切换网络时立即应用「仅 WiFi」策略。
+  void _startConnectivityListener() {
+    _connectivitySub ??= Connectivity().onConnectivityChanged.listen((_) {
+      unawaited(_applyWifiOnlyPolicy());
+    });
   }
 
   Future<void> dispose() async {
@@ -128,6 +174,10 @@ class MagnetDownloadService {
     _refreshTimer = null;
     _policyTimer?.cancel();
     _policyTimer = null;
+    _lifecycleListener?.dispose();
+    _lifecycleListener = null;
+    await _connectivitySub?.cancel();
+    _connectivitySub = null;
     // 退出前持久化一次进度，供下次启动断点续传时恢复显示。
     await _saveEntries();
     await _engine.dispose();
@@ -230,9 +280,13 @@ class MagnetDownloadService {
   ///
   /// 引擎状态流由插件侧去重（字段不全时可能不推送），且订阅一旦断档
   /// 便不再更新；这里以固定间隔兜底，保证下载进度能实时刷到界面。
+  /// 应用退后台时按 [_refreshIntervalBackground] 低频轮询（省电）。
   void _startRefreshScheduler() {
     _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) => refresh());
+    _refreshTimer = Timer.periodic(
+      _isBackgroundRefresh ? _refreshIntervalBackground : _refreshInterval,
+      (_) => refresh(),
+    );
   }
 
   // ---------------- 环境策略（限速时段 / 仅 WiFi） ----------------
@@ -455,7 +509,12 @@ class MagnetDownloadService {
       final existing = LibtorrentFlutter.instance.torrents;
       var changed = false;
       final reconciled = <MagnetDownloadEntry>[];
-      for (final entry in _entries) {
+      // 快照迭代：循环体含 await（引擎重挂），期间用户可能新增 / 删除
+      // 任务，直接迭代 _entries 会抛 ConcurrentModificationError，且
+      // 结尾用旧快照整体覆盖会丢失并发变更。
+      final snapshot = List.of(_entries);
+      final snapshotIds = snapshot.map((e) => e.taskId).toSet();
+      for (final entry in snapshot) {
         final id = int.tryParse(entry.sessionGid ?? '');
         if (id != null && existing.containsKey(id)) {
           reconciled.add(entry);
@@ -545,9 +604,15 @@ class MagnetDownloadService {
         }
       }
       if (changed) {
+        // 合并循环期间的并发变更：保留仍存活的快照条目 + 循环期间
+        // 新增的任务，避免用旧快照整体覆盖丢数据 / 复活已删除任务。
+        final aliveIds = _entries.map((e) => e.taskId).toSet();
+        final addedDuringReconcile =
+            _entries.where((e) => !snapshotIds.contains(e.taskId)).toList();
         _entries
           ..clear()
-          ..addAll(reconciled);
+          ..addAll(reconciled.where((e) => aliveIds.contains(e.taskId)))
+          ..addAll(addedDuringReconcile);
         // 重启重挂后重算队列：所有任务默认恢复下载，超出上限的自动降级排队。
         _reconcileQueue();
         await _saveEntries();
@@ -626,6 +691,8 @@ class MagnetDownloadService {
     final savePath = (dir != null && dir.trim().isNotEmpty)
         ? dir.trim()
         : await LibtorrentEngine.resolveDownloadDir();
+    // 用户临时指定的目录可能尚未创建，交给引擎会因路径不存在而落盘失败。
+    await _ensureDownloadDir(savePath);
     // 添加前检查可用空间：明显不足时提示，避免无谓的元数据下载与写盘失败。
     unawaited(_warnLowDiskSpace(savePath));
     final sessionGid = await _engineAdd(uri, savePath: savePath);
@@ -646,6 +713,21 @@ class MagnetDownloadService {
     await _saveEntries();
     onChanged?.call(_entries);
     return entry.taskId;
+  }
+
+  /// 确保下载目录存在，创建失败时记录日志但不阻断任务提交
+  /// （引擎仍可能在其他位置给出更明确的错误）。
+  Future<void> _ensureDownloadDir(String dir) async {
+    try {
+      final directory = Directory(dir);
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+    } catch (e) {
+      KazumiLogger().w(
+          'MagnetDownloadService: create download dir failed: $dir',
+          error: e);
+    }
   }
 
   Future<bool> pause(String taskId) async {
@@ -1149,6 +1231,62 @@ class MagnetDownloadService {
     return null;
   }
 
+  /// 提取磁力链接的 info-hash（小写）；非磁力或缺失 btih 返回 null。
+  static String? _btihOf(String uri) {
+    final key = _dedupKey(uri);
+    if (key == null || !key.startsWith('btih:')) return null;
+    return key.substring('btih:'.length);
+  }
+
+  @visibleForTesting
+  static String? btihOfForTest(String uri) => _btihOf(uri);
+
+  /// .torrent 元数据缓存目录：`<应用支持目录>/magnet/torrents/`。
+  Future<String> _torrentCacheDir() async {
+    final cached = _torrentCacheDirPath;
+    if (cached != null) return cached;
+    final support = await getApplicationSupportDirectory();
+    return _torrentCacheDirPath = p.join(support.path, 'magnet', 'torrents');
+  }
+
+  /// 磁力 [uri] 对应的已缓存 .torrent 路径；无 btih / 未缓存 / 空文件
+  /// 返回 null。
+  Future<String?> _cachedTorrentFile(String uri) async {
+    final hash = _btihOf(uri);
+    if (hash == null) return null;
+    final dir = await _torrentCacheDir();
+    final file = File(p.join(dir, '$hash.torrent'));
+    if (!await file.exists() || await file.length() == 0) return null;
+    return file.path;
+  }
+
+  /// 把引擎内已就绪的元数据导出为 .torrent 缓存（按 info-hash 命名）。
+  ///
+  /// 元数据只存在于引擎进程内存中：进程重启后磁力任务必须重新从
+  /// DHT/peer 拉取。这里在元数据首次到达时落盘一份，重启重挂即可
+  /// 走 [addTorrentFile] 立即恢复。幂等：文件已存在（且非空）即跳过。
+  Future<void> _exportTorrentCache(int engineId, String sourceUri) async {
+    try {
+      final hash = _btihOf(sourceUri);
+      if (hash == null) return; // 非 btih 磁力源（种子 URL 等）无需缓存
+      final dir = await _torrentCacheDir();
+      final file = File(p.join(dir, '$hash.torrent'));
+      if (await file.exists() && await file.length() > 0) return;
+      if (!LibtorrentFlutter.isInitialized) return;
+      await file.parent.create(recursive: true);
+      if (LibtorrentFlutter.instance.exportTorrent(engineId, file.path)) {
+        KazumiLogger()
+            .i('MagnetDownloadService: cached torrent metadata $hash');
+      } else {
+        KazumiLogger().w(
+            'MagnetDownloadService: export torrent metadata failed ($hash)');
+      }
+    } catch (e) {
+      KazumiLogger()
+          .w('MagnetDownloadService: export torrent cache failed', error: e);
+    }
+  }
+
   /// 提取用于任务去重的规范化标识：磁力按 info-hash（xt=urn:btih）比较，
   /// 忽略 tracker / dn 等参数差异；其余地址（种子 URL / 本地路径）按原文比较。
   static String? _dedupKey(String uri) {
@@ -1287,6 +1425,11 @@ class MagnetDownloadService {
           effective = status;
         }
       }
+      if (t.hasMetadata && _torrentCacheExported.add(entry.taskId)) {
+        // 元数据已就绪：落盘一份 .torrent 缓存（幂等），供重启重挂
+        // 立即恢复，避免重新等待 DHT 拉取元数据。
+        unawaited(_exportTorrentCache(id, entry.sourceUri));
+      }
       if (t.hasMetadata && entry.files.isEmpty) {
         try {
           final files = LibtorrentFlutter.instance.getFiles(id);
@@ -1411,14 +1554,10 @@ class MagnetDownloadService {
     // 状态流转后重算队列：有任务离开下载态（完成 / 暂停 / 错误）时
     // 自动提升排队任务。
     _reconcileQueue();
-    // 已完成任务前置，便于 UI 展示。
+    // 展示顺序固定按添加时间倒序（新添加的在前），与任务状态无关，
+    // 避免任务在「下载中 → 已完成」流转时列表位置来回跳动。
     if (changed) {
-      _entries.sort((a, b) {
-        final aDone = a.status == 'complete';
-        final bDone = b.status == 'complete';
-        if (aDone != bDone) return aDone ? 1 : -1;
-        return a.addedAt.compareTo(b.addedAt) * -1;
-      });
+      _entries.sort((a, b) => b.addedAt.compareTo(a.addedAt));
       onChanged?.call(_entries);
       _maybePersistProgress(now);
     }
@@ -1752,7 +1891,26 @@ class MagnetDownloadService {
     final int id;
     try {
       if (trimmed.toLowerCase().startsWith('magnet:')) {
-        id = engine.addMagnet(trimmed, savePath);
+        // 优先使用已缓存的 .torrent：磁力链只含 info-hash，重挂若仍走
+        // 磁力，引擎必须重新从 DHT/peer 拉取元数据（重启后已完成任务
+        // 会先显示「获取元数据中」一段时间）；缓存命中时引擎立即拿到
+        // 完整文件布局，直接校验磁盘续做种 / 续传。缓存加载失败时回
+        // 退磁力，行为与之前一致。
+        var magnetId = -1;
+        final cached = await _cachedTorrentFile(trimmed);
+        if (cached != null) {
+          try {
+            magnetId = engine.addTorrentFile(cached, savePath);
+          } catch (e) {
+            magnetId = -1;
+            KazumiLogger().w(
+                'MagnetDownloadService: cached torrent load failed, fallback to magnet',
+                error: e);
+          }
+        }
+        id = magnetId >= 0
+            ? magnetId
+            : engine.addMagnet(trimmed, savePath);
       } else if (trimmed.toLowerCase().startsWith('http://') ||
           trimmed.toLowerCase().startsWith('https://')) {
         final torrentPath = await _downloadTorrent(trimmed);
@@ -1993,6 +2151,20 @@ class MagnetDownloadEntry {
 
   bool get isCompleted => status == 'complete';
   bool get isSeeding => status == 'seeding';
+
+  /// 下载已完成（文件完整落盘，无需继续下载），无论是否仍在做种。
+  /// 用于「播放」入口判断：已完成任务走本地播放逻辑而非边下边播。
+  bool get isFinished => isCompleted || isSeeding;
+
+  /// 文件是否已完整落盘（无论当前处于什么状态）。
+  ///
+  /// 除已完成 / 做种中外，还覆盖「下载完之后又被暂停」的任务：
+  /// 进入完成 / 做种态时 [verifiedLength] 会被对齐到总量并持久化，
+  /// 之后用户暂停、引擎句柄移除或重启都不会改变该值；而下载中途
+  /// 暂停的任务已验证字节必然小于总量。据此区分两种暂停，
+  /// 让「下载完再暂停」的任务同样能走本地播放而非边下边播。
+  bool get hasCompleteFiles =>
+      isFinished || (totalLength > 0 && verifiedLength >= totalLength);
   bool get isDownloading =>
       status == 'active' ||
       status == 'waiting' ||

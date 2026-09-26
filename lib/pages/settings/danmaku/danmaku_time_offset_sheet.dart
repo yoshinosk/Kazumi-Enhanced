@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
 
 const double _minDanmakuTimeOffset = -180;
 const double _maxDanmakuTimeOffset = 180;
@@ -31,8 +31,12 @@ String _formatDanmakuOffsetDuration(double value) {
 class DanmakuTimeOffsetSheet extends StatefulWidget {
   const DanmakuTimeOffsetSheet({
     super.key,
+    required this.danmakuController,
     this.onTimelineOffsetChanged,
   });
+
+  /// 当前弹幕控制器：读写当前番剧 / 分集作用域的有效偏移。
+  final PlayerDanmakuController danmakuController;
 
   final VoidCallback? onTimelineOffsetChanged;
 
@@ -46,17 +50,8 @@ class _DanmakuTimeOffsetSheetState extends State<DanmakuTimeOffsetSheet> {
   @override
   void initState() {
     super.initState();
-    final storedOffset =
-        GStorage.getSetting<double>(SettingsKeys.danmakuTimeOffset);
-    _offset = normalizeDanmakuTimeOffset(storedOffset);
-    if (_offset != storedOffset) {
-      GStorage.putSetting<double>(SettingsKeys.danmakuTimeOffset, _offset);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          widget.onTimelineOffsetChanged?.call();
-        }
-      });
-    }
+    _offset =
+        normalizeDanmakuTimeOffset(widget.danmakuController.timelineOffsetSeconds);
   }
 
   void _updateOffset(double value) {
@@ -67,8 +62,9 @@ class _DanmakuTimeOffsetSheetState extends State<DanmakuTimeOffsetSheet> {
     setState(() {
       _offset = offset;
     });
-    GStorage.putSetting<double>(SettingsKeys.danmakuTimeOffset, offset);
-    widget.onTimelineOffsetChanged?.call();
+    widget.danmakuController
+        .setTimelineOffset(offset)
+        .whenComplete(() => widget.onTimelineOffsetChanged?.call());
   }
 
   @override

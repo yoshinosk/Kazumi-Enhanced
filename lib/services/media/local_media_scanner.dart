@@ -45,6 +45,29 @@ class LocalMediaScanner {
     return result.folders;
   }
 
+  /// 计算目录 [dir] 在媒体库扫描（groupByFolder=true）后呈现的文件夹列表，
+  /// 供磁力下载等外部链路复用，保证搜刮结果键与媒体库扫描结果一致。
+  ///
+  /// 与 [scan] 对单个目录的分组口径相同：只统计 [dir] 的直接视频文件
+  /// （递归遍历的子目录文件归各自的目录分组）。目录内仅一个清洗后
+  /// 标题时文件夹路径为目录本身；多个标题时拆成 `<目录>/<清洗后标题>`
+  /// 的逻辑分组路径。目录不存在或读取失败时返回空列表。
+  List<LocalMediaFolder> scanFoldersForDir(String dir) {
+    if (!Directory(dir).existsSync()) return const [];
+    final files = <LocalMediaFile>[];
+    try {
+      for (final entity in Directory(dir).listSync(followLinks: false)) {
+        if (entity is! File) continue;
+        if (!isSupportedVideoFile(entity.path)) continue;
+        files.add(LocalMediaFile.fromFileSystemEntitySync(entity));
+      }
+    } on FileSystemException {
+      return const [];
+    }
+    files.sort(_compareMediaFiles);
+    return _splitIntoTitleGroups(dir, files).folders;
+  }
+
   /// 扫描单个文件夹并返回分组快照，见 [scan] 与 [LocalMediaScanResult]。
   Future<LocalMediaScanResult> scanWithGroupings(
     String rootPath, {

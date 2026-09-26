@@ -14,9 +14,9 @@ void main() {
     scanner = LocalMediaScanner();
   });
 
-  tearDown(() {
+  tearDown(() async {
     try {
-      temp.deleteSync(recursive: true);
+      await temp.delete(recursive: true);
     } catch (_) {}
   });
 
@@ -131,5 +131,43 @@ void main() {
       localMediaPathKey(grouping['matoseiheinoslave']!),
       localMediaPathKey(p.join(sub.path, 'Mato Seihei no Slave')),
     );
+  });
+
+  test('scanFoldersForDir 与 scan 的分组口径一致（磁力同步复用）', () async {
+    final sub = Directory(pathOf('downloads'));
+    sub.createSync(recursive: true);
+    // 单文件种子直接落在下载根目录：两部番剧各一个文件 → 扫描器会拆分。
+    File(p.join(sub.path, '[Group] Anime A - 01.mkv')).createSync();
+    File(p.join(sub.path, '[Group] Anime A - 02.mkv')).createSync();
+    File(p.join(sub.path, '[Group] Anime B - 01.mkv')).createSync();
+
+    // scanFoldersForDir 直接列出目录直接视频文件，结果应与把该目录
+    // 作为媒体库根扫描一致：按清洗后标题拆成两个逻辑分组。
+    final folders = scanner.scanFoldersForDir(sub.path);
+    expect(folders, hasLength(2));
+    final names = folders.map((f) => f.name).toSet();
+    expect(names, containsAll(['Anime A', 'Anime B']));
+    // 分组路径是「目录/清洗后标题」的逻辑路径（磁盘上不存在）
+    final groupA = folders.singleWhere((f) => f.name == 'Anime A');
+    expect(
+      localMediaPathKey(groupA.path),
+      localMediaPathKey(p.join(sub.path, 'Anime A')),
+    );
+
+    // 与 scan 的目录级结果一致
+    final scanned = await scanner.scan(sub.path, groupByFolder: true);
+    expect(scanned.map((f) => f.path).toSet(),
+        folders.map((f) => f.path).toSet());
+  });
+
+  test('scanFoldersForDir 单标题目录返回目录本身', () async {
+    final sub = Directory(pathOf('single'));
+    sub.createSync(recursive: true);
+    File(p.join(sub.path, '[Group] Anime C - 01.mkv')).createSync();
+    File(p.join(sub.path, '[Group] Anime C - 02.mkv')).createSync();
+
+    final folders = scanner.scanFoldersForDir(sub.path);
+    expect(folders, hasLength(1));
+    expect(folders.single.path, sub.path);
   });
 }

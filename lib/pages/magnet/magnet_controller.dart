@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -14,14 +15,16 @@ import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/magnet/magnet_subscription_service.dart';
 import 'package:kazumi/services/download/background_download_service.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
+import 'package:kazumi/services/media/local_media_scanner.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/notification/app_notifications.dart';
 import 'package:kazumi/services/platform/android_storage_access.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/utils/disk_space.dart';
+import 'package:kazumi/utils/format.dart' show formatSpeed;
 import 'package:kazumi/utils/local_episode_parser.dart';
-import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+import 'package:libtorrent_flutter/libtorrent_flutter.dart' hide formatSpeed;
 import 'package:mobx/mobx.dart';
 import 'package:path/path.dart' as p;
 
@@ -36,17 +39,18 @@ String? _cleanOptional(String? value) {
 
 abstract class _MagnetController with Store {
   _MagnetController({MediaController? mediaController})
-      : _engine = MagnetSearchEngine(),
-        _downloads = MagnetDownloadService(),
-        _subscriptions = MagnetSubscriptionService(),
-        _animesGarden = AnimesGardenService(),
-        _mediaController = mediaController;
+    : _engine = MagnetSearchEngine(),
+      _downloads = MagnetDownloadService(),
+      _subscriptions = MagnetSubscriptionService(),
+      _animesGarden = AnimesGardenService(),
+      _mediaController = mediaController;
 
   final MagnetSearchEngine _engine;
   final MagnetDownloadService _downloads;
   final MagnetSubscriptionService _subscriptions;
   final AnimesGardenService _animesGarden;
   final MediaScraper _scraper = MediaScraper();
+  final LocalMediaScanner _scanner = LocalMediaScanner();
 
   /// Android 前台下载服务（与在线视频下载共享，租约制）。
   final BackgroundDownloadService _bgService = BackgroundDownloadService();
@@ -68,6 +72,17 @@ abstract class _MagnetController with Store {
   final Set<String> _scrapeSyncingTaskIds = {};
   final Set<String> _autoImportedTaskIds = {};
   final Set<String> _autoImportingTaskIds = {};
+
+  /// 搜刮键缓存：taskId → (文件清单指纹, 键)。onChanged 每 2s 触发一次，
+  /// 未同步任务的键计算涉及目录分组扫描（同步 IO + 重量级 scraper），
+  /// 按指纹缓存避免重复计算；清单 / 选择 / 路径变化时指纹失效自动重算。
+  final Map<String, (int, String)> _scrapeKeyCache = {};
+
+  /// 搜刮结果同步到媒体库的连续失败计数（taskId → 次数）。
+  final Map<String, int> _scrapeSyncFailures = {};
+
+  /// 同步连续失败上限：超过后本会话不再重试，避免每 2s 一轮的无限重试。
+  static const int _maxScrapeSyncFailures = 3;
 
   /// 正在自动搜刮的任务 ID（防重入）。
   final Set<String> _autoScrapingTaskIds = {};
@@ -110,10 +125,26 @@ abstract class _MagnetController with Store {
   /// 当前搜索会话的字幕组筛选（仅 AG 源生效）。
   /// null 表示不限；初值取自设置默认值，可在搜索页覆盖。
   @observable
-  String? searchFansub =
-      _cleanOptional(GStorage.getSetting(SettingsKeys.animesGardenFansub));
+  String? searchFansub = _cleanOptional(
+    GStorage.getSetting(SettingsKeys.animesGardenFansub),
+  );
+
+  /// 当前关键词下搜索结果中出现过的字幕组候选（去重）。
+  /// 独立于 searchResults 缓存，避免选中某字幕组后
+  /// 服务端过滤导致候选列表只剩当前选中项。
+  final Set<String> _fansubOptions = {};
+  String? _fansubOptionsQuery;
+
+  /// 字幕组候选（排序后的副本），供筛选选择器展示。
+  List<String> get fansubOptions {
+    final list = _fansubOptions.toList()..sort();
+    return list;
+  }
 
   int _searchPage = 1;
+
+  /// 搜索请求代际：清空 / 发起新搜索时递增，在途旧请求据此丢弃回填。
+  int _searchGeneration = 0;
 
   @observable
   ObservableList<MagnetSubscription> subscriptions = ObservableList();
@@ -125,9 +156,21 @@ abstract class _MagnetController with Store {
   ObservableMap<String, ObservableList<MagnetSearchItem>> subscriptionFeeds =
       ObservableMap();
 
+  /// 条目加载失败的订阅 ID（展开区显示错误与重试入口）。
   @observable
-  String currentSourceId =
-      GStorage.getSetting(SettingsKeys.magnetDefaultSource);
+  ObservableSet<String> subscriptionFeedErrors = ObservableSet<String>();
+
+  /// 最近搜索关键词（新 → 旧，持久化在设置中）。
+  @observable
+  ObservableList<String> searchHistory = ObservableList();
+
+  /// 搜索历史保留条数上限。
+  static const int _maxSearchHistory = 20;
+
+  @observable
+  String currentSourceId = GStorage.getSetting(
+    SettingsKeys.magnetDefaultSource,
+  );
 
   bool get engineEnabled => _downloads.engineEnabled;
 
@@ -206,8 +249,9 @@ abstract class _MagnetController with Store {
         return false;
       }
       for (final item in items) {
-        final uri =
-            item.magnetLink.isNotEmpty ? item.magnetLink : item.torrentUrl;
+        final uri = item.magnetLink.isNotEmpty
+            ? item.magnetLink
+            : item.torrentUrl;
         if (uri.isEmpty || _downloads.hasDownload(uri)) continue;
         final taskId = await _downloads.add(item, dir: sub.downloadPath);
         if (taskId.isEmpty) return false;
@@ -217,16 +261,77 @@ abstract class _MagnetController with Store {
     try {
       await _downloads.init();
     } catch (e) {
-      KazumiLogger()
-          .w('MagnetController: download service init failed', error: e);
+      KazumiLogger().w(
+        'MagnetController: download service init failed',
+        error: e,
+      );
     }
     try {
       await _subscriptions.init();
     } catch (e) {
-      KazumiLogger()
-          .w('MagnetController: subscription service init failed', error: e);
+      KazumiLogger().w(
+        'MagnetController: subscription service init failed',
+        error: e,
+      );
     }
+    _loadSearchHistory();
     _refreshEngineInfo();
+  }
+
+  /// 从设置中恢复搜索历史（JSON 数组，旧 → 新）。
+  void _loadSearchHistory() {
+    final raw = GStorage.getSetting(SettingsKeys.magnetSearchHistory);
+    if (raw.isEmpty) return;
+    try {
+      final list = jsonDecode(raw) as List;
+      searchHistory
+        ..clear()
+        ..addAll(list.cast<String>().take(_maxSearchHistory));
+    } catch (e) {
+      KazumiLogger().w(
+        'MagnetController: load search history failed',
+        error: e,
+      );
+    }
+  }
+
+  /// 把关键词写入搜索历史（去重后置顶，超限截断）并持久化。
+  void _rememberSearchQuery(String keyword) {
+    searchHistory
+      ..removeWhere((k) => k == keyword)
+      ..insert(0, keyword);
+    if (searchHistory.length > _maxSearchHistory) {
+      searchHistory.removeRange(_maxSearchHistory, searchHistory.length);
+    }
+    unawaited(_saveSearchHistory());
+  }
+
+  Future<void> _saveSearchHistory() async {
+    try {
+      await GStorage.putSetting(
+        SettingsKeys.magnetSearchHistory,
+        jsonEncode(searchHistory.toList()),
+      );
+    } catch (e) {
+      KazumiLogger().w(
+        'MagnetController: save search history failed',
+        error: e,
+      );
+    }
+  }
+
+  /// 删除单条搜索历史。
+  @action
+  Future<void> removeSearchHistory(String keyword) async {
+    searchHistory.removeWhere((k) => k == keyword);
+    await _saveSearchHistory();
+  }
+
+  /// 清空全部搜索历史。
+  @action
+  Future<void> clearSearchHistory() async {
+    searchHistory.clear();
+    await _saveSearchHistory();
   }
 
   Future<void> dispose() async {
@@ -262,19 +367,18 @@ abstract class _MagnetController with Store {
     }
     _lastBgServiceUpdate = now;
     final total = entries.where((e) => e.isDownloading || e.isQueued).length;
-    final speed =
-        active.fold<int>(0, (sum, e) => sum + e.downloadSpeed);
-    final speedText = speed > 0
-        ? '${(speed / 1024 / 1024).toStringAsFixed(1)} MB/s'
-        : '等待中';
+    final speed = active.fold<int>(0, (sum, e) => sum + e.downloadSpeed);
+    final speedText = speed > 0 ? formatSpeed(speed.toDouble()) : '等待中';
     final firstName = active.first.fileName.isNotEmpty
         ? active.first.fileName
         : active.first.title;
-    unawaited(_bgService.updateNotification(
-      BackgroundDownloadService.magnetLease,
-      title: '磁力下载中 (${active.length}/$total)',
-      text: '$speedText · ${firstName.isNotEmpty ? firstName : '磁力下载'}',
-    ));
+    unawaited(
+      _bgService.updateNotification(
+        BackgroundDownloadService.magnetLease,
+        title: '磁力下载中 (${active.length}/$total)',
+        text: '$speedText · ${firstName.isNotEmpty ? firstName : '磁力下载'}',
+      ),
+    );
   }
 
   /// 暂停全部磁力下载任务。
@@ -286,6 +390,32 @@ abstract class _MagnetController with Store {
       }
     }
   }
+
+  /// 继续全部已暂停 / 排队中的磁力下载任务。
+  @action
+  Future<void> resumeAllDownloads() async {
+    for (final entry in List.of(downloadTasks)) {
+      if (entry.isPaused || entry.isQueued) {
+        await _downloads.unpause(entry.taskId);
+      }
+    }
+  }
+
+  /// 正在进行（下载 / 排队 / 校验 / 获取元数据 / 做种）的任务数。
+  int get activeDownloadCount => downloadTasks
+      .where((t) => t.isDownloading || t.isQueued || t.isSeeding)
+      .length;
+
+  /// 已暂停 / 排队等待继续的任务数。
+  int get pausableDownloadCount =>
+      downloadTasks.where((t) => t.isDownloading || t.isQueued).length;
+
+  int get resumableDownloadCount =>
+      downloadTasks.where((t) => t.isPaused || t.isQueued).length;
+
+  /// 全部任务的总下载速度（字节 / 秒）。
+  int get totalDownloadSpeed =>
+      downloadTasks.fold<int>(0, (sum, t) => sum + t.downloadSpeed);
 
   /// 同步引擎 / tracker 状态到 observable。
   void _refreshEngineInfo() {
@@ -338,11 +468,24 @@ abstract class _MagnetController with Store {
   @action
   Future<void> search(String keyword) async {
     final trimmed = keyword.trim();
+    // 请求代际：清空 / 新搜索会使在途请求的回填失效，避免旧请求
+    // 完成后把已清空的结果重新填回、或乱序覆盖新请求的结果。
+    final generation = ++_searchGeneration;
     if (trimmed.isEmpty) {
+      // 清空搜索：同时重置关键词，让工具栏（订阅当前搜索等）随之隐藏。
+      query = '';
+      isSearching = false;
       searchResults.clear();
       searchError = null;
       hasMoreSearchResults = false;
+      _fansubOptions.clear();
+      _fansubOptionsQuery = null;
       return;
+    }
+    if (_fansubOptionsQuery != trimmed) {
+      // 新关键词：重置字幕组候选缓存
+      _fansubOptionsQuery = trimmed;
+      _fansubOptions.clear();
     }
     isSearching = true;
     searchError = null;
@@ -354,18 +497,24 @@ abstract class _MagnetController with Store {
         defaultSource,
         fansub: searchFansub,
       );
+      if (generation != _searchGeneration) return;
       searchResults
         ..clear()
         ..addAll(result.items);
       hasMoreSearchResults = result.hasMore;
+      _rememberFansubs(result.items);
+      _rememberSearchQuery(trimmed);
       if (result.items.isEmpty) {
         searchError = '没有找到相关资源。可尝试切换其它搜索源，或检查代理设置（这些站点通常需要代理才能访问）';
       }
     } catch (e) {
+      if (generation != _searchGeneration) return;
       searchError = '搜索失败：$e';
       KazumiLogger().w('MagnetController: search failed', error: e);
     } finally {
-      isSearching = false;
+      if (generation == _searchGeneration) {
+        isSearching = false;
+      }
     }
   }
 
@@ -374,6 +523,7 @@ abstract class _MagnetController with Store {
   Future<void> loadMore() async {
     if (isLoadingMore || !hasMoreSearchResults) return;
     if (defaultSource.kind != MagnetSourceKind.json) return;
+    final generation = _searchGeneration;
     isLoadingMore = true;
     try {
       _searchPage += 1;
@@ -383,13 +533,25 @@ abstract class _MagnetController with Store {
         page: _searchPage,
         fansub: searchFansub,
       );
+      if (generation != _searchGeneration) return;
       searchResults.addAll(result.items);
       hasMoreSearchResults = result.hasMore;
+      _rememberFansubs(result.items);
     } catch (e) {
-      _searchPage -= 1;
+      if (generation == _searchGeneration) {
+        _searchPage -= 1;
+      }
       KazumiLogger().w('MagnetController: loadMore failed', error: e);
     } finally {
       isLoadingMore = false;
+    }
+  }
+
+  /// 将搜索结果中的字幕组并入候选缓存（忽略空白）。
+  void _rememberFansubs(Iterable<MagnetSearchItem> items) {
+    for (final item in items) {
+      final f = item.publisher?.trim();
+      if (f != null && f.isNotEmpty) _fansubOptions.add(f);
     }
   }
 
@@ -444,12 +606,23 @@ abstract class _MagnetController with Store {
   Future<void> removeSubscription(String id) async {
     await _subscriptions.remove(id);
     subscriptionFeeds.remove(id);
+    subscriptionFeedErrors.remove(id);
   }
 
   @action
   Future<void> loadSubscriptionFeed(MagnetSubscription sub) async {
-    final items = await _subscriptions.fetchLatest(sub);
-    subscriptionFeeds[sub.id] = ObservableList.of(items);
+    try {
+      final items = await _subscriptions.fetchLatest(sub);
+      subscriptionFeeds[sub.id] = ObservableList.of(items);
+      subscriptionFeedErrors.remove(sub.id);
+    } catch (e) {
+      // 拉取失败时记录错误态：展开区显示「加载失败 + 重试」而非永远转圈。
+      subscriptionFeedErrors.add(sub.id);
+      KazumiLogger().w(
+        'MagnetController: load subscription feed failed for ${sub.name}',
+        error: e,
+      );
+    }
   }
 
   @action
@@ -463,6 +636,12 @@ abstract class _MagnetController with Store {
   Future<void> setSubscriptionAutoDownload(String id, bool value) async {
     await _subscriptions.setAutoDownload(id, value);
   }
+
+  /// 是否已存在与 [item] 同源资源的下载任务（按 info-hash 规范化比较，
+  /// 忽略 tracker / 参数差异）。供剪贴板检测等入口在弹确认框前预判，
+  /// 与 [addDownload] 的去重口径保持一致。
+  bool isDownloadQueued(MagnetSearchItem item) =>
+      _downloads.alreadyQueued(item);
 
   @action
   Future<void> addDownload(
@@ -492,12 +671,16 @@ abstract class _MagnetController with Store {
 
   /// 提交下载前的磁盘空间检查：按资源体积估算所需空间，目标分区剩余不足时
   /// 弹出确认（用户可强制继续）。无法获取体积 / 分区信息时跳过检查。
-  Future<bool> _checkDiskSpaceBeforeAdd(MagnetSearchItem item, String? dir) async {
+  Future<bool> _checkDiskSpaceBeforeAdd(
+    MagnetSearchItem item,
+    String? dir,
+  ) async {
     final neededBytes = _parseSizeBytes(item.size);
     if (neededBytes == null || neededBytes <= 0) return true;
-    final targetDir = (dir ?? GStorage.getSetting(SettingsKeys.magnetDownloadDir))
-        .toString()
-        .trim();
+    final targetDir =
+        (dir ?? GStorage.getSetting(SettingsKeys.magnetDownloadDir))
+            .toString()
+            .trim();
     if (targetDir.isEmpty) return true;
     final freeBytes = await DiskSpace.availableBytes(targetDir);
     if (freeBytes == null) return true;
@@ -532,14 +715,21 @@ abstract class _MagnetController with Store {
   static int? _parseSizeBytes(String label) {
     if (label.trim().isEmpty) return null;
     final match = RegExp(
-            r'([\d.,]+)\s*([KMGT]?i?B)', caseSensitive: false)
-        .firstMatch(label.trim());
+      r'([\d.,]+)\s*([KMGT]?i?B)',
+      caseSensitive: false,
+    ).firstMatch(label.trim());
     if (match == null) return null;
     final raw = match.group(1)!.replaceAll(',', '');
     final value = double.tryParse(raw);
     if (value == null || value < 0) return null;
     final unit = match.group(2)!.toUpperCase().replaceAll('I', '');
-    const mult = {'B': 1, 'KB': 1024, 'MB': 1048576, 'GB': 1073741824, 'TB': 1099511627776};
+    const mult = {
+      'B': 1,
+      'KB': 1024,
+      'MB': 1048576,
+      'GB': 1073741824,
+      'TB': 1099511627776,
+    };
     final m = mult[unit];
     if (m == null) return null;
     return (value * m).round();
@@ -567,6 +757,8 @@ abstract class _MagnetController with Store {
     _scrapeSyncedTaskIds.removeWhere((key) => !ids.contains(key));
     _autoImportedTaskIds.removeWhere((key) => !ids.contains(key));
     _autoScrapingTaskIds.removeWhere((key) => !ids.contains(key));
+    _scrapeKeyCache.removeWhere((key, _) => !ids.contains(key));
+    _scrapeSyncFailures.removeWhere((key, _) => !ids.contains(key));
     for (final entry in entries) {
       final prev = _lastTaskStatuses[entry.taskId];
       _lastTaskStatuses[entry.taskId] = entry.status;
@@ -576,15 +768,13 @@ abstract class _MagnetController with Store {
         _sessionFinalTaskIds.add(entry.taskId);
       }
       if (prev != 'complete' && entry.status == 'complete') {
-        unawaited(AppNotifications.show(
-          title: '下载完成',
-          body: _entryDisplayName(entry),
-        ));
+        unawaited(
+          AppNotifications.show(title: '下载完成', body: _entryDisplayName(entry)),
+        );
       } else if (prev != 'error' && entry.status == 'error') {
-        unawaited(AppNotifications.show(
-          title: '下载失败',
-          body: _entryDisplayName(entry),
-        ));
+        unawaited(
+          AppNotifications.show(title: '下载失败', body: _entryDisplayName(entry)),
+        );
       }
     }
     _initialSnapshotHandled = true;
@@ -601,9 +791,11 @@ abstract class _MagnetController with Store {
   /// 文件完整落盘后同步刮削结果；只有停止做种进入 complete 后才自动入库。
   ///
   /// 这样把磁力下载目录加入本地媒体库后，无需手动搜刮即显示为已匹配番剧。
-  /// 同步以任务的实际落盘目录为键：多文件种子会落在 `<savePath>/<种子名>/`
-  /// 下（与扫描器按子目录建文件夹的口径一致），因此优先用引擎文件列表
-  /// 求真实目录，拿不到时回退 savePath；仅处理本轮会话内新完成的任务，
+  /// 同步以媒体库扫描器的分组口径为键：多文件种子落在 `<savePath>/<种子名>/`
+  /// 下（扫描器按子目录建文件夹，键即真实子目录）；单文件种子直接落在
+  /// savePath，若该目录混有多部番剧，扫描器会按清洗后标题拆出逻辑分组
+  /// 文件夹（`<savePath>/<清洗后标题>`），搜刮结果必须写在分组键上才能
+  /// 命中。仅处理本会话内新完成的任务 + 已落盘的历史任务，
   /// 且不覆盖媒体库已有的匹配结果。
   ///
   /// 未携带番剧信息的任务（订阅自动下载 / 手动添加）在完成后按设置
@@ -612,23 +804,26 @@ abstract class _MagnetController with Store {
     final media = _mediaController;
     if (media == null) return;
     for (final entry in entries) {
-      if (entry.status != 'complete' && entry.status != 'seeding') continue;
       if (entry.savePath.isEmpty) continue;
-      // 自动搜刮 / 自动入库只处理本会话内进入终态的任务：启动首帧的
-      // 历史已完成任务不应重跑（每次启动都搜刮 / 移动文件 / 弹权限）。
+      if (_scrapeSyncedTaskIds.contains(entry.taskId)) continue;
+      // 同步连续失败次数已达上限：本会话跳过，避免每 2s 一轮的
+      // existsSync / 分组扫描重复浪费（重启后可重新触发）。
+      if ((_scrapeSyncFailures[entry.taskId] ?? 0) >= _maxScrapeSyncFailures) {
+        continue;
+      }
+      // 历史任务（本会话未进入终态）：已搜刮 / 已入库任务幂等同步到媒体库。
+      // 不要求状态为 complete/seeding——文件已落盘但引擎状态尚未跳变
+      // （queued / metadata 等）的任务也应尽早让媒体库显示匹配，避免
+      // 「磁力页已搜刮、媒体库未匹配」的永久断层。
       if (!_sessionFinalTaskIds.contains(entry.taskId)) {
         if (entry.importedPath.isNotEmpty) {
           _syncScrapeInfo(entry, entry.importedPath);
-        } else if (entry.scrapeInfo != null) {
-          // 已匹配但未入库的历史任务：仍同步搜刮结果到媒体库（幂等），
-          // 让已匹配文件夹在媒体库中正常显示。
-          final folderPath = _actualDownloadDir(entry);
-          if (folderPath.isNotEmpty) {
-            _syncScrapeInfo(entry, folderPath);
-          }
+        } else if (entry.scrapeInfo != null && _hasDownloadedFiles(entry)) {
+          _syncScrapeInfo(entry, _scrapeKeyCachedFor(entry));
         }
         continue;
       }
+      if (entry.status != 'complete' && entry.status != 'seeding') continue;
       if (entry.scrapeInfo == null) {
         _maybeAutoScrape(entry);
         continue;
@@ -638,14 +833,15 @@ abstract class _MagnetController with Store {
         _syncScrapeInfo(entry, entry.importedPath);
         continue;
       }
-      final folderPath = _actualDownloadDir(entry);
+      final folderPath = _scrapeKeyForEntry(entry);
       if (folderPath.isEmpty) continue;
       // 自动入库需要同时满足：任务真正停止做种、用户开启开关、
       // 且搜刮置信度不低于阈值（详情页发起的任务置信度恒为 1.0）。
       // 边下边播在播的任务跳过入库：移动 / 重命名正被引擎流服务器
       // 读取的文件会让 HTTP 流断流；流停止后由下一轮状态同步重试
       // （此处不标记失败，避免永久跳过）。
-      final shouldAutoImport = entry.status == 'complete' &&
+      final shouldAutoImport =
+          entry.status == 'complete' &&
           GStorage.getSetting(SettingsKeys.magnetAutoImportToLibrary) &&
           entry.scrapeConfidence >=
               GStorage.getSetting(SettingsKeys.magnetAutoImportConfidence) &&
@@ -684,7 +880,8 @@ abstract class _MagnetController with Store {
         // 网络 / 服务错误：不置 scrapeAttempted，留待下次状态同步重试，
         // 避免瞬时失败把任务永久标记为「待确认」。
         KazumiLogger().w(
-            'MagnetController: auto scrape error for ${entry.fileName}');
+          'MagnetController: auto scrape error for ${entry.fileName}',
+        );
         return;
       }
       if (result.status == ScrapeStatus.matched && result.info != null) {
@@ -695,17 +892,20 @@ abstract class _MagnetController with Store {
           confidence: result.confidence,
         );
         KazumiDialog.showToast(
-          message: '已自动识别「${info.displayName}」'
+          message:
+              '已自动识别「${info.displayName}」'
               '（置信度 ${(result.confidence * 100).round()}%）',
           duration: const Duration(seconds: 3),
         );
         return;
       }
       KazumiLogger().i(
-          'MagnetController: auto scrape not matched for ${entry.fileName}');
+        'MagnetController: auto scrape not matched for ${entry.fileName}',
+      );
       await _downloads.markScrapeAttempted(entry.taskId);
       KazumiDialog.showToast(
-        message: '「${entry.title.isEmpty ? entry.fileName : entry.title}」'
+        message:
+            '「${entry.title.isEmpty ? entry.fileName : entry.title}」'
             '未能自动识别番剧，可在下载页手动匹配',
         duration: const Duration(seconds: 3),
       );
@@ -731,12 +931,14 @@ abstract class _MagnetController with Store {
     for (final file in entry.files) {
       if (selected != null && !selected.contains(file.index)) continue;
       if (!isSupportedVideoFile(file.name)) continue;
-      files.add(LocalMediaFile(
-        path: entry.absolutePathFor(file) ?? '',
-        name: file.name,
-        size: file.size,
-        modifiedAt: DateTime.now(),
-      ));
+      files.add(
+        LocalMediaFile(
+          path: entry.absolutePathFor(file) ?? '',
+          name: file.name,
+          size: file.size,
+          modifiedAt: DateTime.now(),
+        ),
+      );
     }
     if (files.isEmpty) return null;
     return LocalMediaFolder(path: dir, name: name, files: files);
@@ -747,18 +949,50 @@ abstract class _MagnetController with Store {
     if (media == null) return;
     if (media.getScrapeInfo(folderPath) != null) {
       _scrapeSyncedTaskIds.add(entry.taskId);
+      _scrapeSyncFailures.remove(entry.taskId);
     } else if (!_scrapeSyncedTaskIds.contains(entry.taskId) &&
+        (_scrapeSyncFailures[entry.taskId] ?? 0) < _maxScrapeSyncFailures &&
         _scrapeSyncingTaskIds.add(entry.taskId)) {
       unawaited(_runScrapeSync(entry, folderPath));
     }
   }
 
+  /// 带缓存的 [_scrapeKeyForEntry]：按文件清单指纹命中直接复用，
+  /// 避免每 2s 一轮的 onChanged 对未同步任务重复执行目录分组扫描。
+  String _scrapeKeyCachedFor(MagnetDownloadEntry entry) {
+    final fingerprint = Object.hash(
+      entry.savePath,
+      entry.fileName,
+      entry.files.length,
+      entry.selectedFileIndexes?.join(','),
+    );
+    final cached = _scrapeKeyCache[entry.taskId];
+    if (cached != null && cached.$1 == fingerprint) return cached.$2;
+    final key = _scrapeKeyForEntry(entry);
+    _scrapeKeyCache[entry.taskId] = (fingerprint, key);
+    return key;
+  }
+
   Future<void> _runScrapeSync(
-      MagnetDownloadEntry entry, String folderPath) async {
+    MagnetDownloadEntry entry,
+    String folderPath,
+  ) async {
     try {
       await _mediaController?.applyScrapeInfo(folderPath, entry.scrapeInfo!);
+      // 清理旧版本同步遗留的「真实目录键」死数据：目录被扫描器拆成
+      // 逻辑分组后，真实目录键不再对应任何媒体库文件夹，删掉避免
+      // 设置膨胀与后续误匹配。
+      final rawDir = _actualDownloadDir(entry);
+      if (rawDir.isNotEmpty && !localMediaPathsEqual(rawDir, folderPath)) {
+        await _mediaController?.removeScrapeResult(rawDir);
+      }
       _scrapeSyncedTaskIds.add(entry.taskId);
+      _scrapeSyncFailures.remove(entry.taskId);
     } catch (e) {
+      // 连续失败计数：超过上限后本会话不再重试（onChanged 每 2s
+      // 触发一次，不计数会无限重试）。
+      _scrapeSyncFailures[entry.taskId] =
+          (_scrapeSyncFailures[entry.taskId] ?? 0) + 1;
       KazumiLogger().w('MagnetController: sync scrape info failed', error: e);
     } finally {
       _scrapeSyncingTaskIds.remove(entry.taskId);
@@ -773,7 +1007,7 @@ abstract class _MagnetController with Store {
         // 入库失败：本次会话内静默跳过（onChanged 每 2s 触发一次，
         // 不标记会无限重试），保留搜刮结果供媒体库展示。
         _autoImportFailedTaskIds.add(entry.taskId);
-        _syncScrapeInfo(entry, _actualDownloadDir(entry));
+        _syncScrapeInfo(entry, _scrapeKeyForEntry(entry));
       }
     } finally {
       _autoImportingTaskIds.remove(entry.taskId);
@@ -796,6 +1030,55 @@ abstract class _MagnetController with Store {
     return p.normalize(entry.savePath);
   }
 
+  /// 任务在媒体库中的搜刮键：与媒体库扫描器的标题分组口径一致。
+  ///
+  /// 单文件种子直接落在下载根目录且该目录混有多部番剧时，扫描器会把
+  /// 目录拆成 `<目录>/<清洗后标题>` 的逻辑分组文件夹（磁盘上不存在），
+  /// 搜刮结果必须写在分组键上才能在媒体库命中；目录内只有单一标题时
+  /// 键即真实目录。用扫描器同款逻辑（`scanFoldersForDir`）求当前目录
+  /// 会呈现的文件夹，再按文件路径归属匹配出本任务所在分组。
+  ///
+  /// 拿不到任务文件清单 / 目录不可读时回退真实落盘目录（与旧行为一致）。
+  String _scrapeKeyForEntry(MagnetDownloadEntry entry) {
+    final dir = _actualDownloadDir(entry);
+    if (dir.isEmpty) return '';
+    final entryKeys = <String>{};
+    final selected = entry.selectedFileIndexes?.toSet();
+    for (final file in entry.files) {
+      if (selected != null && !selected.contains(file.index)) continue;
+      final absolutePath = entry.absolutePathFor(file);
+      if (absolutePath != null) entryKeys.add(localMediaPathKey(absolutePath));
+    }
+    if (entryKeys.isEmpty) return dir;
+    final folders = _scanner.scanFoldersForDir(dir);
+    for (final folder in folders) {
+      for (final f in folder.files) {
+        if (entryKeys.contains(localMediaPathKey(f.path))) return folder.path;
+      }
+    }
+    return dir;
+  }
+
+  /// 任务是否有文件已实际落盘（供历史任务同步搜刮结果时判定）。
+  ///
+  /// 有文件清单时按清单逐个检查；无清单（旧数据）时回退检查
+  /// 实际落盘目录是否存在。
+  bool _hasDownloadedFiles(MagnetDownloadEntry entry) {
+    final selected = entry.selectedFileIndexes?.toSet();
+    var checkedAny = false;
+    for (final file in entry.files) {
+      if (selected != null && !selected.contains(file.index)) continue;
+      checkedAny = true;
+      final absolutePath = entry.absolutePathFor(file);
+      if (absolutePath != null && File(absolutePath).existsSync()) return true;
+    }
+    if (!checkedAny) {
+      final dir = _actualDownloadDir(entry);
+      return dir.isNotEmpty && Directory(dir).existsSync();
+    }
+    return false;
+  }
+
   /// 下载完成后自动入库（需在设置中开启且任务已搜刮）：
   /// 把所选文件移动到 `<目标根>/<番剧名>/`，尽量按 `第N话` 重命名，
   /// 然后把目标文件夹加入媒体库并触发重扫。
@@ -813,7 +1096,8 @@ abstract class _MagnetController with Store {
       // 无读取权限时静默跳过（不弹窗）：自动入库发生在下载完成的后台
       // 时刻，弹权限窗没有 Activity 上下文；权限就绪后用户可重新触发。
       KazumiLogger().i(
-          'MagnetController: auto import skipped (no media read permission)');
+        'MagnetController: auto import skipped (no media read permission)',
+      );
       return false;
     }
     final root = await _resolveAutoImportRoot(media);
@@ -844,14 +1128,21 @@ abstract class _MagnetController with Store {
         final baseName = ep > 0
             ? '第${ep.toString().padLeft(2, '0')}话'
             : p.basenameWithoutExtension(f.name);
-        final dst = await _uniqueDestination(targetDirPath, baseName, ext,
-            p.basenameWithoutExtension(f.name), sourcePath);
+        final dst = await _uniqueDestination(
+          targetDirPath,
+          baseName,
+          ext,
+          p.basenameWithoutExtension(f.name),
+          sourcePath,
+        );
         try {
           await _moveVerified(src, dst);
           movedCount++;
         } catch (e) {
-          KazumiLogger()
-              .w('MagnetController: move file failed: ${src.path}', error: e);
+          KazumiLogger().w(
+            'MagnetController: move file failed: ${src.path}',
+            error: e,
+          );
         }
       }
       if (movedCount == 0) return false;
@@ -861,7 +1152,7 @@ abstract class _MagnetController with Store {
       } else {
         await media.scan();
       }
-      final previousFolder = _actualDownloadDir(entry);
+      final previousFolder = _scrapeKeyForEntry(entry);
       if (!localMediaPathsEqual(previousFolder, targetDirPath)) {
         await media.removeScrapeResult(previousFolder);
       }
@@ -902,8 +1193,13 @@ abstract class _MagnetController with Store {
     }
   }
 
-  static Future<File> _uniqueDestination(String directory, String baseName,
-      String extension, String original, String sourcePath) async {
+  static Future<File> _uniqueDestination(
+    String directory,
+    String baseName,
+    String extension,
+    String original,
+    String sourcePath,
+  ) async {
     var candidate = File(p.join(directory, '$baseName$extension'));
     if (!await candidate.exists() ||
         localMediaPathsEqual(candidate.path, sourcePath)) {
@@ -916,8 +1212,9 @@ abstract class _MagnetController with Store {
     }
     var suffix = 2;
     while (await candidate.exists()) {
-      candidate =
-          File(p.join(directory, '$baseName.$original-$suffix$extension'));
+      candidate = File(
+        p.join(directory, '$baseName.$original-$suffix$extension'),
+      );
       suffix++;
     }
     return candidate;
@@ -925,8 +1222,9 @@ abstract class _MagnetController with Store {
 
   /// 自动入库目标根目录：优先设置值，其次媒体库第一个文件夹。
   Future<String?> _resolveAutoImportRoot(MediaController media) async {
-    final configured =
-        GStorage.getSetting(SettingsKeys.magnetAutoImportRoot).trim();
+    final configured = GStorage.getSetting(
+      SettingsKeys.magnetAutoImportRoot,
+    ).trim();
     if (configured.isNotEmpty) return configured;
     if (media.folders.isNotEmpty) return media.folders.first;
     return null;
@@ -973,9 +1271,43 @@ abstract class _MagnetController with Store {
   Future<bool> recheckDownload(String taskId) => _downloads.recheck(taskId);
 
   @action
-  Future<void> removeDownload(String taskId, {bool deleteFiles = false}) async {
+  Future<bool> removeDownload(String taskId, {bool deleteFiles = false}) async {
     final ok = await _downloads.remove(taskId, deleteFiles: deleteFiles);
     if (!ok) KazumiDialog.showToast(message: '删除任务失败');
+    return ok;
+  }
+
+  /// 批量暂停选中的任务（仅处理处于可暂停状态的任务）。
+  @action
+  Future<void> pauseDownloads(Iterable<String> taskIds) async {
+    var failed = 0;
+    for (final id in taskIds) {
+      if (!await _downloads.pause(id)) failed++;
+    }
+    if (failed > 0) KazumiDialog.showToast(message: '有 $failed 个任务暂停失败');
+  }
+
+  /// 批量继续选中的任务。
+  @action
+  Future<void> resumeDownloads(Iterable<String> taskIds) async {
+    var failed = 0;
+    for (final id in taskIds) {
+      if (!await _downloads.unpause(id)) failed++;
+    }
+    if (failed > 0) KazumiDialog.showToast(message: '有 $failed 个任务继续失败');
+  }
+
+  /// 批量删除任务，返回成功移除的数量。
+  @action
+  Future<int> removeDownloads(
+    Iterable<String> taskIds, {
+    bool deleteFiles = false,
+  }) async {
+    var removed = 0;
+    for (final id in List.of(taskIds)) {
+      if (await _downloads.remove(id, deleteFiles: deleteFiles)) removed++;
+    }
+    return removed;
   }
 
   @action
@@ -1029,7 +1361,9 @@ abstract class _MagnetController with Store {
 
   /// 设置任务的文件选择（部分下载）。
   Future<bool> setDownloadFileSelection(
-      String taskId, List<int> selected) async {
+    String taskId,
+    List<int> selected,
+  ) async {
     final ok = await _downloads.setFileSelection(taskId, selected);
     if (!ok) KazumiDialog.showToast(message: '设置文件选择失败');
     return ok;

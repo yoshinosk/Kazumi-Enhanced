@@ -247,14 +247,7 @@ class SearchParser {
         .trim();
   }
 
-  bool hasSortSyntax() {
-    return _sortRegExp.hasMatch(query);
-  }
-
-  String removeSort() {
-    return query.replaceAll(_sortRegExp, '').trim();
-  }
-
+  /// 返回把排序字段替换为 [sortValue] 后的查询串。
   String updateSort(String sortValue) {
     final state = toFilterState().copyWith(sort: sortValue);
     return fromFilterState(state);
