@@ -2,6 +2,13 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.27
+
+- 桌面端全局支持 ESC 键返回：所有左上角带返回按钮的页面（番剧详情、播放、设置、搜索、磁力下载、历史记录、插件编辑等推入页面）按 ESC 等同点击返回键；行为细节与既有语义完全对齐——带 PopScope 状态保护的页面（编辑模式、同步中、保存中等）先触发各自守卫（如先退出编辑模式）再按才真正返回，嵌套路由（设置页子面板）先退最内层，对话框/底部弹层打开时 ESC 先关闭它们（Material 对话框原有行为），文本框聚焦时 ESC 留给输入不触发返回，主界面 tab 页（无返回按钮）按 ESC 无任何效果，播放器内 ESC 仍优先执行原语义（退全屏 / 隐藏窗口，走播放器 early 快捷键处理器不被本改动截胡）
+  - 新增 `EscBackScope` 组件：挂载于 `MaterialApp.router` 的 `builder`（根 Navigator 之上），通过 `CallbackShortcuts` 监听 ESC；处理时取 `FocusManager.primaryFocus` 所在上下文，跳过 `EditableText` 焦点，从焦点所属的最内层 Navigator 起逐级向上找第一个 `canPop` 的 Navigator 执行 `maybePop`（尊重 PopScope），全部不可弹出则无操作；仅桌面端（`isDesktop()`）启用，Android 路径零开销
+  - 新增 ESC 返回行为回归测试 5 项：推入页面 ESC 返回、嵌套路由先退最内层、主界面不可弹出无效果、文本框聚焦不触发返回、PopScope 保护页先触发守卫再返回（test/esc_back_scope_test.dart）
+    - 相关文件: lib/bean/widget/esc_back_scope.dart, lib/app_widget.dart, test/esc_back_scope_test.dart
+
 ## 2026.9.26（三）
 
 - 磁力下载任务列表新增多选操作：工具栏「多选任务」按钮或长按任务条目进入多选模式，条目以勾选框替代封面、点击切换勾选（不再跳转番剧页），顶部统计行切换为批量操作栏，支持全选/取消全选、批量暂停、批量继续、批量删除（删除前弹确认框，可勾选「同时删除已下载的文件」）；批量操作栏对当前勾选中不可暂停/继续的任务自动禁用对应按钮，全部/进行中/已完成三种筛选与按番剧分组视图下均可用，磁力页与下载中心两个入口共享

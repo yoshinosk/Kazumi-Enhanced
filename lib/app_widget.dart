@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/exit_confirmation_dialog.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
+import 'package:kazumi/bean/widget/esc_back_scope.dart';
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/device.dart';
@@ -326,6 +327,8 @@ class _AppWidgetState extends State<AppWidget>
           darkTheme: effectiveDarkTheme,
           themeMode: themeProvider.themeMode,
           scaffoldMessengerKey: rootScaffoldMessengerKey,
+          // 全局 ESC 返回：覆盖所有左上角带返回按钮的推入页面。
+          builder: (context, child) => EscBackScope(child: child),
           routerConfig: ModularApp.routerConfigOf(context),
         );
       },
