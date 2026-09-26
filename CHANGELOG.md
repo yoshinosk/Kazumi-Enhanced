@@ -2,6 +2,16 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.26
+
+- 修复音量滑块浮层审查问题（VOLUME_SLIDER_REVIEW.md，1 个 P1 + 1 个 P2 + 1 个 P3）：
+  - 【P1】浮层弹出时持有面板 hold（对齐 `PlayerPanelHoldMenuAnchor` 租约模式），悬停/拖动浮层期间控制层不再自动隐藏（此前鼠标在浮层上停超过"控制层消失时间"后，控制层连浮层一起消失并形成"弹出-消失"闪烁循环）；隐藏浮层时释放 hold 走常规隐藏计时，dispose 静默释放，全屏切换等场景由 `_releasePlayerPanelHolds` 统一回收。顺带修复从浮层移回按钮时 250ms 延迟隐藏未取消导致浮层在鼠标仍在按钮上时被关闭的重入问题
+  - 【P1 补充】拖动滑块时抑制 250ms 延迟隐藏（`onChangeStart`/`onChangeEnd` 接线拖动状态）：Flutter MouseTracker 在拖动中指针越出浮层命中区仍会派发 onExit，无抑制时拖出浮层边缘超 250ms 会在拖动中强行卸载滑块；松手时按当前悬停状态决定是否进入延迟隐藏，避免松手在浮层外导致浮层永驻
+  - 【P2】浮层配色固定为播放器暗色风格（黑底 85% + 白字白滑块 + 12% 白描边），与进度条悬停时间气泡一致；此前跟随 App 主题，浅色主题下 `surfaceContainerHighest` 浅底配白色音量数字对比度仅约 1.6:1 几乎不可读；SliderTheme 固定 activeTrackColor/inactiveTrackColor/thumbColor，不再受主题色干扰
+  - 【P3】浮层命中区向下扩展 8px（MouseRegion 内包裹 bottom padding，offset 归零保持卡片视觉位置不变），覆盖按钮与浮层之间的空隙，鼠标穿越空隙不再触发 250ms 延迟隐藏的"闪一下"
+  - 验证：dart analyze lib test 无新增 error/warning/info（player_item_panel 既有 1 处 info 与本次无关）；tools/build_windows_local.ps1 构建成功
+    - 相关文件: lib/pages/player/player_item_panel.dart
+
 ## 2026.9.24（八）
 
 - 全量代码审查修复（覆盖当日全部 7 个提交，高/中/低危问题 16 项）：

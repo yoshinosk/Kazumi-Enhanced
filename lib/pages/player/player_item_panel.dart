@@ -111,6 +111,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   OverlayEntry? _volumeOverlayEntry;
   Timer? _volumeOverlayHideTimer;
   ReactionDisposer? _volumeOverlayVisibilityReaction;
+  // 浮层存续期间持有面板 hold，防止悬停/拖动滑块时控制层自动隐藏。
+  PlayerPanelHold? _volumeOverlayHold;
+  bool _volumeOverlayHovered = false;
+  bool _volumeDragActive = false;
 
   bool get _desktop => switch (defaultTargetPlatform) {
     TargetPlatform.windows ||
@@ -127,24 +131,41 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     _volumeOverlayVisibilityReaction?.call();
     _volumeOverlayHideTimer?.cancel();
     _volumeOverlayEntry?.remove();
+    // 全量回收由 _releasePlayerPanelHolds 负责（全屏切换等场景），
+    // 这里静默释放，避免 dispose 回调里再起新的隐藏计时。
+    _volumeOverlayHold?.releaseSilently();
     textController.dispose();
     textFieldFocus.dispose();
     super.dispose();
   }
 
   void _showVolumeOverlay() {
-    if (!_desktop || _volumeOverlayEntry != null) return;
+    if (!_desktop) return;
+    // 重入（例如从浮层移回按钮）时也要取消待执行的延迟隐藏，
+    // 否则浮层会在鼠标仍位于按钮上时被定时器关闭。
     _cancelVolumeOverlayHide();
+    if (_volumeOverlayEntry != null) return;
+    if (_volumeOverlayHold == null || _volumeOverlayHold!.isReleased) {
+      _volumeOverlayHold = widget.acquirePlayerPanelHold();
+    }
     final entry = OverlayEntry(
       builder: (overlayContext) => CompositedTransformFollower(
         link: _volumeButtonLink,
         targetAnchor: Alignment.topCenter,
         followerAnchor: Alignment.bottomCenter,
-        offset: const Offset(0, -8),
+        // 命中区向下扩展 8px（bottom padding）覆盖与按钮之间的空隙，
+        // offset 相应归零，卡片视觉位置不变。
         child: MouseRegion(
-          onEnter: (_) => _cancelVolumeOverlayHide(),
-          onExit: (_) => _scheduleVolumeOverlayHide(),
-          child: _VolumeSliderCard(playerController: playerController),
+          onEnter: (_) => _onVolumeOverlayEnter(),
+          onExit: (_) => _onVolumeOverlayExit(),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _VolumeSliderCard(
+              playerController: playerController,
+              onDragStart: _onVolumeDragStart,
+              onDragEnd: _onVolumeDragEnd,
+            ),
+          ),
         ),
       ),
     );
@@ -152,7 +173,33 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     Overlay.of(context).insert(entry);
   }
 
+  void _onVolumeOverlayEnter() {
+    _volumeOverlayHovered = true;
+    _cancelVolumeOverlayHide();
+  }
+
+  void _onVolumeOverlayExit() {
+    _volumeOverlayHovered = false;
+    _scheduleVolumeOverlayHide();
+  }
+
+  void _onVolumeDragStart() {
+    _volumeDragActive = true;
+    _cancelVolumeOverlayHide();
+  }
+
+  void _onVolumeDragEnd() {
+    _volumeDragActive = false;
+    // 拖动中指针可能已越出浮层命中区（退出事件被拖动抑制），
+    // 松手时按当前悬停状态决定是否进入延迟隐藏。
+    if (!_volumeOverlayHovered) {
+      _scheduleVolumeOverlayHide();
+    }
+  }
+
   void _scheduleVolumeOverlayHide() {
+    // 拖动滑块时指针可能越出浮层命中区，隐藏计时一律挂起。
+    if (_volumeDragActive) return;
     _volumeOverlayHideTimer?.cancel();
     _volumeOverlayHideTimer = Timer(
       const Duration(milliseconds: 250),
@@ -168,6 +215,12 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   void _hideVolumeOverlay() {
     _volumeOverlayEntry?.remove();
     _volumeOverlayEntry = null;
+    _volumeOverlayHovered = false;
+    _volumeDragActive = false;
+    // 释放后由 onRelease 走常规隐藏计时；若 hold 已被
+    // _releasePlayerPanelHolds 静默回收，release 为空操作。
+    _volumeOverlayHold?.release();
+    _volumeOverlayHold = null;
   }
 
   Future<void> _submitDanmakuText(String message) async {
@@ -1459,25 +1512,30 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
 /// 桌面端音量滑块浮层：hover 音量按钮弹出，拖动实时调整
 /// （复用手势音量链路：onChanged 节流同步、onChangeEnd 持久化并清除静音态）。
+/// 配色固定为播放器暗色风格，不随 App 主题变化。
 class _VolumeSliderCard extends StatelessWidget {
-  const _VolumeSliderCard({required this.playerController});
+  const _VolumeSliderCard({
+    required this.playerController,
+    this.onDragStart,
+    this.onDragEnd,
+  });
 
   final PlayerController playerController;
+  final VoidCallback? onDragStart;
+  final VoidCallback? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       child: Container(
         width: 56,
         padding: const EdgeInsets.symmetric(vertical: 10),
+        // 与进度条悬停时间气泡一致的暗底，浅色主题下白字依然可读。
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.96),
+          color: Colors.black.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.34),
-          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.28),
@@ -1505,13 +1563,23 @@ class _VolumeSliderCard extends StatelessWidget {
                   height: 120,
                   child: RotatedBox(
                     quarterTurns: 3,
-                    child: Slider(
-                      value: volume.clamp(0.0, 200.0),
-                      min: 0,
-                      max: 200,
-                      onChanged: playerController.setVolumeDuringGesture,
-                      onChangeEnd: (_) =>
-                          unawaited(playerController.finishVolumeGesture()),
+                    child: SliderTheme(
+                      data: SliderThemeData(
+                        activeTrackColor: Colors.white,
+                        inactiveTrackColor: Colors.white24,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        value: volume.clamp(0.0, 200.0),
+                        min: 0,
+                        max: 200,
+                        onChanged: playerController.setVolumeDuringGesture,
+                        onChangeStart: (_) => onDragStart?.call(),
+                        onChangeEnd: (_) {
+                          onDragEnd?.call();
+                          unawaited(playerController.finishVolumeGesture());
+                        },
+                      ),
                     ),
                   ),
                 ),
