@@ -6,6 +6,7 @@ analyzer:
     - .dart_tool/**
     - build/**
     - fastlane/**
+    - tools/**
     - lib/bbcode/generated/**
     - "**/*.g.dart"
     - "**/*.freezed.dart"

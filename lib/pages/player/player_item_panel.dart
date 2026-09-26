@@ -116,6 +116,22 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   bool _volumeOverlayHovered = false;
   bool _volumeDragActive = false;
 
+  // 画面右键菜单开合的本地镜像，驱动命中层在菜单打开期间接管左键点击。
+  bool _surfaceContextMenuOpen = false;
+
+  // 菜单关闭可能由锚点在 Observer 重建中被卸载（如锁定面板）触发，
+  // setState 延迟到帧末执行，避免在 build 期间标记重建。
+  void _handleSurfaceContextMenuOpenChanged(bool isOpen) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _surfaceContextMenuOpen == isOpen) {
+        return;
+      }
+      setState(() {
+        _surfaceContextMenuOpen = isOpen;
+      });
+    });
+  }
+
   bool get _desktop => switch (defaultTargetPlatform) {
     TargetPlatform.windows ||
     TargetPlatform.linux ||
@@ -678,6 +694,46 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                         position: _bottomOffsetAnimation,
                         child: _buildBottomControls(compact),
                       ),
+              );
+            },
+          ),
+        ),
+        // 视频画面右键菜单：与顶栏「更多选项」共用同一份菜单项，
+        // 在光标处弹出（MenuAnchor 自动夹紧到窗口内）。
+        // 命中层为无 child 的 translucent GestureDetector：命中结果包含
+        // 本层（可接收右键事件），但不对上层 Stack 返回命中，下层
+        // 顶栏/底栏按钮与画面手势层的命中测试不受影响。
+        Positioned.fill(
+          child: Observer(
+            builder: (context) {
+              // 锁定面板时屏蔽右键菜单，与双击/长按手势的守卫一致。
+              if (playerController.panel.lockPanel) {
+                return const SizedBox.shrink();
+              }
+              return PlayerPanelHoldMenuAnchor(
+                acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
+                onVisibilityChanged: widget.onMenuVisibilityChanged,
+                onOpen: () => _handleSurfaceContextMenuOpenChanged(true),
+                onClose: () => _handleSurfaceContextMenuOpenChanged(false),
+                builder: (context, controller, child) {
+                  return GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    // 菜单打开期间接管左键：点击画面仅关闭菜单，
+                    // 不触发下层手势层的播放/暂停切换。
+                    onTap: _surfaceContextMenuOpen
+                        ? () => controller.close()
+                        : null,
+                    onSecondaryTapUp: (details) {
+                      if (controller.isOpen) {
+                        controller.close();
+                        return;
+                      }
+                      controller.open(position: details.localPosition);
+                    },
+                    child: const SizedBox.shrink(),
+                  );
+                },
+                menuChildren: _buildMoreMenuChildren(compact: compact),
               );
             },
           ),
@@ -1341,142 +1397,128 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                         icon: const Icon(Icons.more_vert, color: Colors.white),
                       );
                     },
-                menuChildren: [
-                  if (compact) ...[
-                    SubmenuButton(
-                      menuChildren: _aspectRatioItems,
-                      child: _menuLabel('视频比例'),
-                    ),
-                    SubmenuButton(
-                      menuChildren: _speedItems,
-                      child: _menuLabel('倍速'),
-                    ),
-                    SubmenuButton(
-                      menuChildren: _superResolutionItems,
-                      child: _menuLabel('超分辨率'),
-                    ),
-                    _syncPlayMenuItem,
-                  ],
-                  MenuItemButton(
-                    onPressed: widget.showDanmakuSwitch,
-                    child: _menuLabel('弹幕切换'),
-                  ),
-                  if (compact) _danmakuSettingsMenuItem,
-                  MenuItemButton(
-                    onPressed: widget.showVideoInfo,
-                    child: _menuLabel('视频详情'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _audioTrackItems,
-                    child: _menuLabel('音轨'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _subtitleTrackItems,
-                    child: _menuLabel('字幕'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _subtitleDelayItems,
-                    child: _menuLabel('字幕延迟'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _abLoopItems,
-                    child: _menuLabel('AB 循环'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _finishModeItems,
-                    child: _menuLabel('播完动作'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: _videoRotateItems,
-                    child: _menuLabel('画面旋转'),
-                  ),
-                  // 远程投屏依赖 currentPlugin.referer（在线模式专属），
-                  // 且本地路径 / 边下边播流地址对投屏目标不可达，非在线模式隐藏。
-                  if (videoPageController.isOnlinePlaybackMode)
-                    MenuItemButton(
-                      onPressed: () {
-                        final needRestart = playerController.playback.playing;
-                        playerController.pause();
-                        RemotePlay()
-                            .castVideo(
-                              playerController.videoUrl,
-                              videoPageController.currentPlugin.referer,
-                            )
-                            .whenComplete(() {
-                              if (mounted && needRestart) {
-                                playerController.play();
-                              }
-                            });
-                      },
-                      child: _menuLabel('远程投屏'),
-                    ),
-                  MenuItemButton(
-                    onPressed: playerController.launchExternalPlayer,
-                    child: _menuLabel('外部播放'),
-                  ),
-                  SubmenuButton(
-                    menuChildren: [
-                      MenuItemButton(
-                        onPressed: TimedShutdownService().cancel,
-                        child: _menuLabel(
-                          '不开启',
-                          selected: !TimedShutdownService().isActive,
-                        ),
-                      ),
-                      for (final int minutes in [15, 30, 60])
-                        MenuItemButton(
-                          onPressed: () {
-                            TimedShutdownService().start(
-                              minutes,
-                              onExpired: widget.pauseForTimedShutdown,
-                            );
-                            KazumiDialog.showToast(
-                              message:
-                                  '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭',
-                            );
-                          },
-                          child: _menuLabel(
-                            '$minutes 分钟',
-                            selected:
-                                TimedShutdownService().setMinutes == minutes,
-                          ),
-                        ),
-                      MenuItemButton(
-                        onPressed: () {
-                          TimedShutdownService.showCustomTimerDialog(
-                            onExpired: widget.pauseForTimedShutdown,
-                          );
-                        },
-                        child: _menuLabel('自定义'),
-                      ),
-                    ],
-                    child: Container(
-                      height: 48,
-                      constraints: BoxConstraints(minWidth: 112),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: ValueListenableBuilder<int>(
-                          valueListenable:
-                              TimedShutdownService().remainingSecondsNotifier,
-                          builder: (context, remainingSeconds, child) {
-                            return Text(
-                              remainingSeconds > 0
-                                  ? "定时关闭 (${TimedShutdownService().formatRemainingTime()})"
-                                  : "定时关闭",
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (!compact) _syncPlayMenuItem,
-                ],
+                menuChildren: _buildMoreMenuChildren(compact: compact),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// 顶栏「更多选项」按钮的菜单项。视频画面右键菜单复用同一份列表，
+  /// 两处入口的菜单内容自动保持一致。
+  List<Widget> _buildMoreMenuChildren({required bool compact}) {
+    return [
+      if (compact) ...[
+        SubmenuButton(
+          menuChildren: _aspectRatioItems,
+          child: _menuLabel('视频比例'),
+        ),
+        SubmenuButton(menuChildren: _speedItems, child: _menuLabel('倍速')),
+        SubmenuButton(
+          menuChildren: _superResolutionItems,
+          child: _menuLabel('超分辨率'),
+        ),
+        _syncPlayMenuItem,
+      ],
+      MenuItemButton(
+        onPressed: widget.showDanmakuSwitch,
+        child: _menuLabel('弹幕切换'),
+      ),
+      if (compact) _danmakuSettingsMenuItem,
+      MenuItemButton(
+        onPressed: widget.showVideoInfo,
+        child: _menuLabel('视频详情'),
+      ),
+      SubmenuButton(menuChildren: _audioTrackItems, child: _menuLabel('音轨')),
+      SubmenuButton(menuChildren: _subtitleTrackItems, child: _menuLabel('字幕')),
+      SubmenuButton(
+        menuChildren: _subtitleDelayItems,
+        child: _menuLabel('字幕延迟'),
+      ),
+      SubmenuButton(menuChildren: _abLoopItems, child: _menuLabel('AB 循环')),
+      SubmenuButton(menuChildren: _finishModeItems, child: _menuLabel('播完动作')),
+      SubmenuButton(menuChildren: _videoRotateItems, child: _menuLabel('画面旋转')),
+      // 远程投屏依赖 currentPlugin.referer（在线模式专属），
+      // 且本地路径 / 边下边播流地址对投屏目标不可达，非在线模式隐藏。
+      if (videoPageController.isOnlinePlaybackMode)
+        MenuItemButton(
+          onPressed: () {
+            final needRestart = playerController.playback.playing;
+            playerController.pause();
+            RemotePlay()
+                .castVideo(
+                  playerController.videoUrl,
+                  videoPageController.currentPlugin.referer,
+                )
+                .whenComplete(() {
+                  if (mounted && needRestart) {
+                    playerController.play();
+                  }
+                });
+          },
+          child: _menuLabel('远程投屏'),
+        ),
+      MenuItemButton(
+        onPressed: playerController.launchExternalPlayer,
+        child: _menuLabel('外部播放'),
+      ),
+      SubmenuButton(
+        menuChildren: [
+          MenuItemButton(
+            onPressed: TimedShutdownService().cancel,
+            child: _menuLabel(
+              '不开启',
+              selected: !TimedShutdownService().isActive,
+            ),
+          ),
+          for (final int minutes in [15, 30, 60])
+            MenuItemButton(
+              onPressed: () {
+                TimedShutdownService().start(
+                  minutes,
+                  onExpired: widget.pauseForTimedShutdown,
+                );
+                KazumiDialog.showToast(
+                  message:
+                      '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭',
+                );
+              },
+              child: _menuLabel(
+                '$minutes 分钟',
+                selected: TimedShutdownService().setMinutes == minutes,
+              ),
+            ),
+          MenuItemButton(
+            onPressed: () {
+              TimedShutdownService.showCustomTimerDialog(
+                onExpired: widget.pauseForTimedShutdown,
+              );
+            },
+            child: _menuLabel('自定义'),
+          ),
+        ],
+        child: Container(
+          height: 48,
+          constraints: BoxConstraints(minWidth: 112),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ValueListenableBuilder<int>(
+              valueListenable: TimedShutdownService().remainingSecondsNotifier,
+              builder: (context, remainingSeconds, child) {
+                return Text(
+                  remainingSeconds > 0
+                      ? "定时关闭 (${TimedShutdownService().formatRemainingTime()})"
+                      : "定时关闭",
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+      if (!compact) _syncPlayMenuItem,
+    ];
   }
 
   Widget get _rightControls {

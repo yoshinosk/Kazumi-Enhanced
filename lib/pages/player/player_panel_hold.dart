@@ -126,6 +126,8 @@ class PlayerPanelHoldMenuAnchor extends StatefulWidget {
     required this.builder,
     required this.menuChildren,
     this.consumeOutsideTap = false,
+    this.onOpen,
+    this.onClose,
   });
 
   final PlayerPanelHold Function() acquirePlayerPanelHold;
@@ -137,6 +139,11 @@ class PlayerPanelHoldMenuAnchor extends StatefulWidget {
   ) builder;
   final List<Widget> menuChildren;
   final bool consumeOutsideTap;
+
+  /// 菜单开合的额外观测点（onVisibilityChanged 之外的本地状态联动），
+  /// 首次开启/关闭各回调一次。
+  final VoidCallback? onOpen;
+  final VoidCallback? onClose;
 
   @override
   State<PlayerPanelHoldMenuAnchor> createState() =>
@@ -159,6 +166,7 @@ class _PlayerPanelHoldMenuAnchorState extends State<PlayerPanelHoldMenuAnchor> {
     }
     _isOpen = true;
     widget.onVisibilityChanged(true);
+    widget.onOpen?.call();
     if (_hold?.isReleased == false) {
       return;
     }
@@ -170,6 +178,7 @@ class _PlayerPanelHoldMenuAnchorState extends State<PlayerPanelHoldMenuAnchor> {
       _isOpen = false;
       widget.onVisibilityChanged(false);
     }
+    widget.onClose?.call();
     _hold?.release();
     _hold = null;
   }

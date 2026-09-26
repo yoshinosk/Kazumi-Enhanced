@@ -2,6 +2,17 @@
 
 每次修改后在此文件**最顶部**追加日志，格式见 `AGENTS.md`。
 
+## 2026.9.26（二）
+
+- 播放器视频画面新增右键菜单：在画面任意位置右键可弹出与顶栏「更多选项」按钮完全相同的菜单，菜单在光标处弹出并自动夹紧到窗口内
+  - `player_item_panel.dart`：将顶栏 `_buildTopControls` 内联的菜单项列表抽取为 `_buildMoreMenuChildren({required bool compact})`，顶栏按钮与画面右键两处入口复用同一份菜单项（含 compact 紧凑布局分支），内容自动保持一致
+  - `player_item_panel.dart`：`_buildPanel` Stack 末尾新增全屏右键命中层（Observer 内按 `lockPanel` 守卫，锁定面板时屏蔽，与双击/长按手势守卫一致）。命中层为无 child 的 `HitTestBehavior.translucent` GestureDetector：命中结果包含本层（可接收右键事件）但对上层 Stack 返回未命中，下层顶栏/底栏按钮与画面手势层（单击/双击/长按）的命中测试不受影响；`onSecondaryTapUp` 经 `MenuController.open(position:)` 在光标处打开菜单，菜单打开期间接管左键点击（点击画面仅关闭菜单，不触发播放/暂停），再次右键仅关闭；开合走 `PlayerPanelHoldMenuAnchor` 既有租约（面板驻留 + `_openPlayerMenuCount` 屏蔽键盘快捷键）
+  - `player_panel_hold.dart`：`PlayerPanelHoldMenuAnchor` 新增可选 `onOpen`/`onClose` 观测回调（`onVisibilityChanged` 之外的本地状态联动），顶栏按钮等既有用法不受影响
+  - `analysis_options.yaml`：analyzer exclude 增加 `tools/**`，排除本地 vendored SDK（git-ignored 的 `tools/_flutter_sdk`）对 `flutter analyze` 结果的污染
+  - 新增 `PlayerPanelHoldMenuAnchor` 开合回调回归测试：开/关对称触发、重复 open()（SDK 先关再重开语义）hold 不泄漏、锚点卸载时 onClose 与 hold 仍释放（test/player_panel_hold_menu_anchor_test.dart，3 用例）
+  - 验证：flutter test 412 项全过（含新增 3 项）；flutter analyze 无新增告警；tools/build_windows_local.ps1 构建成功
+    - 相关文件: lib/pages/player/player_item_panel.dart, lib/pages/player/player_panel_hold.dart, analysis_options.yaml, test/player_panel_hold_menu_anchor_test.dart
+
 ## 2026.9.26
 
 - 修复音量滑块浮层审查问题（VOLUME_SLIDER_REVIEW.md，1 个 P1 + 1 个 P2 + 1 个 P3）：
