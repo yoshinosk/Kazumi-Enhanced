@@ -9,8 +9,10 @@
   - 【P1 补充】拖动滑块时抑制 250ms 延迟隐藏（`onChangeStart`/`onChangeEnd` 接线拖动状态）：Flutter MouseTracker 在拖动中指针越出浮层命中区仍会派发 onExit，无抑制时拖出浮层边缘超 250ms 会在拖动中强行卸载滑块；松手时按当前悬停状态决定是否进入延迟隐藏，避免松手在浮层外导致浮层永驻
   - 【P2】浮层配色固定为播放器暗色风格（黑底 85% + 白字白滑块 + 12% 白描边），与进度条悬停时间气泡一致；此前跟随 App 主题，浅色主题下 `surfaceContainerHighest` 浅底配白色音量数字对比度仅约 1.6:1 几乎不可读；SliderTheme 固定 activeTrackColor/inactiveTrackColor/thumbColor，不再受主题色干扰
   - 【P3】浮层命中区向下扩展 8px（MouseRegion 内包裹 bottom padding，offset 归零保持卡片视觉位置不变），覆盖按钮与浮层之间的空隙，鼠标穿越空隙不再触发 250ms 延迟隐藏的"闪一下"
-  - 验证：dart analyze lib test 无新增 error/warning/info（player_item_panel 既有 1 处 info 与本次无关）；tools/build_windows_local.ps1 构建成功
-    - 相关文件: lib/pages/player/player_item_panel.dart
+  - 【高·返修】修复音量浮层被 Overlay tight 约束撑成"半窗口宽遮罩"：Overlay 的 `_RenderTheater` 对非 Positioned entry 施加全屏 tight 约束，浮层卡片必须自行放松约束；follower 内加 `UnconstrainedBox(alignment: Alignment.bottomCenter)`（UnconstrainedBox 自身仍占满 Overlay，bottomCenter 对齐使卡片底边中心与 followerAnchor 重合，恰好贴在按钮上方），卡片恢复 56 宽内容尺寸。此缺陷为浮层引入时既有（审查时误判约束数学正确），首次实测暴露
+  - 新增音量浮层几何回归测试：锁定卡片 56 宽内容尺寸与"贴按钮上方、空隙 8px、水平居中"的位置契约（test/volume_overlay_geometry_test.dart，2 用例）
+  - 验证：flutter test 409 项全过（含新增 2 项）；dart analyze lib test 无新增告警；tools/build_windows_local.ps1 构建成功
+    - 相关文件: lib/pages/player/player_item_panel.dart, test/volume_overlay_geometry_test.dart
 
 ## 2026.9.24（八）
 

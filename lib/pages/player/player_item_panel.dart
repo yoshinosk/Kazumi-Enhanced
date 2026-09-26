@@ -153,17 +153,24 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         link: _volumeButtonLink,
         targetAnchor: Alignment.topCenter,
         followerAnchor: Alignment.bottomCenter,
-        // 命中区向下扩展 8px（bottom padding）覆盖与按钮之间的空隙，
-        // offset 相应归零，卡片视觉位置不变。
-        child: MouseRegion(
-          onEnter: (_) => _onVolumeOverlayEnter(),
-          onExit: (_) => _onVolumeOverlayExit(),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _VolumeSliderCard(
-              playerController: playerController,
-              onDragStart: _onVolumeDragStart,
-              onDragEnd: _onVolumeDragEnd,
+        // Overlay 会给 entry 施加 tight 全屏约束，UnconstrainedBox 把
+        // 传给卡片的约束放松为无限制，否则卡片被撑满整个 Overlay 变成
+        // 覆盖画面的巨大遮罩。UnconstrainedBox 自身仍占满 Overlay，
+        // 用 bottomCenter 对齐让卡片底边中心与 followerAnchor
+        // （bottomCenter）重合，恰好贴在按钮上方；bottom padding 使
+        // 命中区向下扩展 8px 覆盖与按钮之间的空隙。
+        child: UnconstrainedBox(
+          alignment: Alignment.bottomCenter,
+          child: MouseRegion(
+            onEnter: (_) => _onVolumeOverlayEnter(),
+            onExit: (_) => _onVolumeOverlayExit(),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _VolumeSliderCard(
+                playerController: playerController,
+                onDragStart: _onVolumeDragStart,
+                onDragEnd: _onVolumeDragEnd,
+              ),
             ),
           ),
         ),
