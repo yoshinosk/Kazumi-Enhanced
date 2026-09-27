@@ -146,7 +146,12 @@ int? _airDateSortKey(String airDate) {
 
 abstract class _MediaController with Store {
   _MediaController()
-      : _scanner = LocalMediaScanner(),
+      : viewMode = GStorage.getSetting(SettingsKeys.localMediaViewMode),
+        sortMode = GStorage.getSetting(SettingsKeys.localMediaSortMode),
+        sortDescending = GStorage.getSetting(
+          SettingsKeys.localMediaSortDescending,
+        ),
+        _scanner = LocalMediaScanner(),
         _scraper = MediaScraper();
 
   final LocalMediaScanner _scanner;
@@ -219,35 +224,44 @@ abstract class _MediaController with Store {
   bool get groupByFolder =>
       GStorage.getSetting(SettingsKeys.localMediaGroupByFolder);
 
-  String get viewMode => GStorage.getSetting(SettingsKeys.localMediaViewMode);
+  /// 视图模式：`folder` / `anime` / `grid`。
+  ///
+  /// 持久化在设置盒子里，这里以 observable 字段镜像当前值：
+  /// AppBar 的视图切换 / 排序菜单只读取这些字段，若直接读设置盒
+  /// （非 MobX 数据源）将无法响应变化，菜单勾选与按钮图标会停留在旧状态。
+  @observable
+  String viewMode;
 
   bool get isAnimeMode => viewMode == 'anime';
 
   bool get isGridMode => viewMode == 'grid';
 
   /// 排序依据：`date` / `name` / `count`，仅对番剧视图与网格视图生效。
-  String get sortMode => GStorage.getSetting(SettingsKeys.localMediaSortMode);
+  @observable
+  String sortMode;
 
   /// 是否降序（日期越新、文件越多越靠前）。
-  bool get sortDescending =>
-      GStorage.getSetting(SettingsKeys.localMediaSortDescending);
+  @observable
+  bool sortDescending;
 
   @action
   Future<void> setSortMode(String mode) async {
+    sortMode = mode;
     await GStorage.putSetting(SettingsKeys.localMediaSortMode, mode);
     _refreshLibraryView();
   }
 
   @action
   Future<void> setSortDescending(bool value) async {
+    sortDescending = value;
     await GStorage.putSetting(SettingsKeys.localMediaSortDescending, value);
     _refreshLibraryView();
   }
 
-  /// 触发依赖 [library] 的 Observer 重建。
+  /// 重建 [library] 触发依赖它的 Observer 刷新。
   ///
-  /// 排序/视图模式存在设置盒子里而非 observable，改动后必须手动打一下
-  /// observable 引用，否则界面不会刷新。
+  /// 视图 / 排序模式本身已是 observable，此处为兜底：覆盖列表视图等
+  /// 未直接读取排序字段的展示路径。
   void _refreshLibraryView() {
     library = ObservableList.of(library.toList());
   }
@@ -642,6 +656,7 @@ abstract class _MediaController with Store {
 
   @action
   Future<void> setViewMode(String mode) async {
+    viewMode = mode;
     await GStorage.putSetting(SettingsKeys.localMediaViewMode, mode);
     _refreshLibraryView();
   }

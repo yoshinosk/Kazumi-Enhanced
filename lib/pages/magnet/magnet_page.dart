@@ -1594,19 +1594,20 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                 children: [
                   Expanded(
                     child: SegmentedButton<_DownloadsFilter>(
-                      segments: const [
-                        ButtonSegment(
-                          value: _DownloadsFilter.all,
-                          label: Text('全部'),
-                        ),
-                        ButtonSegment(
-                          value: _DownloadsFilter.active,
-                          label: Text('进行中'),
-                        ),
-                        ButtonSegment(
-                          value: _DownloadsFilter.completed,
-                          label: Text('已完成'),
-                        ),
+                      // 单行 + 放不下时自动缩小，避免窄屏 / 大字号下段内文字换行。
+                      segments: [
+                        for (final (value, label) in const [
+                          (_DownloadsFilter.all, '全部'),
+                          (_DownloadsFilter.active, '进行中'),
+                          (_DownloadsFilter.completed, '已完成'),
+                        ])
+                          ButtonSegment(
+                            value: value,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(label, maxLines: 1),
+                            ),
+                          ),
                       ],
                       selected: {_filter},
                       onSelectionChanged: (selection) =>
@@ -1618,6 +1619,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                     IconButton(
                       tooltip: '清除已完成记录（保留文件）',
                       icon: const Icon(Icons.delete_sweep_outlined),
+                      visualDensity: VisualDensity.compact,
                       onPressed: () => _confirmClearCompleted(context),
                     ),
                   IconButton(
@@ -1627,6 +1629,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                           ? Icons.library_books_rounded
                           : Icons.library_books_outlined,
                     ),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () => _setGrouped(!_grouped),
                   ),
                   IconButton(
@@ -1636,12 +1639,14 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                           ? Icons.close_rounded
                           : Icons.checklist_rounded,
                     ),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () =>
                         _selectMode ? _exitSelectMode() : _enterSelectMode(),
                   ),
                   IconButton(
                     tooltip: '手动添加磁力链接',
                     icon: const Icon(Icons.add_link_rounded),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () => _showAddMagnetDialog(context),
                   ),
                 ],

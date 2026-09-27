@@ -261,6 +261,60 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
+  late final _$viewModeAtom = Atom(
+    name: '_MediaController.viewMode',
+    context: context,
+  );
+
+  @override
+  String get viewMode {
+    _$viewModeAtom.reportRead();
+    return super.viewMode;
+  }
+
+  @override
+  set viewMode(String value) {
+    _$viewModeAtom.reportWrite(value, super.viewMode, () {
+      super.viewMode = value;
+    });
+  }
+
+  late final _$sortModeAtom = Atom(
+    name: '_MediaController.sortMode',
+    context: context,
+  );
+
+  @override
+  String get sortMode {
+    _$sortModeAtom.reportRead();
+    return super.sortMode;
+  }
+
+  @override
+  set sortMode(String value) {
+    _$sortModeAtom.reportWrite(value, super.sortMode, () {
+      super.sortMode = value;
+    });
+  }
+
+  late final _$sortDescendingAtom = Atom(
+    name: '_MediaController.sortDescending',
+    context: context,
+  );
+
+  @override
+  bool get sortDescending {
+    _$sortDescendingAtom.reportRead();
+    return super.sortDescending;
+  }
+
+  @override
+  set sortDescending(bool value) {
+    _$sortDescendingAtom.reportWrite(value, super.sortDescending, () {
+      super.sortDescending = value;
+    });
+  }
+
   late final _$setSortModeAsyncAction = AsyncAction(
     '_MediaController.setSortMode',
     context: context,
@@ -514,7 +568,10 @@ scrapeMatched: ${scrapeMatched},
 scrapeFailed: ${scrapeFailed},
 scrapeCurrentName: ${scrapeCurrentName},
 scrapeKeyword: ${scrapeKeyword},
-resumePoints: ${resumePoints}
+resumePoints: ${resumePoints},
+viewMode: ${viewMode},
+sortMode: ${sortMode},
+sortDescending: ${sortDescending}
     ''';
   }
 }

@@ -93,11 +93,21 @@ class _DownloadTabPageState extends State<DownloadTabPage>
           ? null
           : TabBar(
               controller: _tabController,
-              tabs: const [
-                Tab(text: '磁力搜索'),
-                Tab(text: '磁力下载'),
-                Tab(text: 'RSS 订阅'),
-                Tab(text: '离线缓存'),
+              // 窄屏 / 系统大字号下 tab 文字可能放不下：单行 + 自动缩小，
+              // 避免默认的换行渲染被固定 tab 高度裁掉下半截。
+              tabs: [
+                for (final label in const [
+                  '磁力搜索',
+                  '磁力下载',
+                  'RSS 订阅',
+                  '离线缓存',
+                ])
+                  Tab(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(label, maxLines: 1),
+                    ),
+                  ),
               ],
             ),
     );

@@ -372,13 +372,16 @@ class _ViewModeToggle extends StatelessWidget {
                 value: entry.$1,
                 child: Row(
                   children: [
+                    // 固定宽度的勾选位：选中标记紧贴左侧、各行文字对齐。
+                    SizedBox(
+                      width: 24,
+                      child: current == entry.$1
+                          ? const Icon(Icons.check_rounded, size: 18)
+                          : null,
+                    ),
                     Icon(entry.$3, size: 20),
                     const SizedBox(width: 12),
                     Text(entry.$2),
-                    if (current == entry.$1) ...[
-                      const Spacer(),
-                      const Icon(Icons.check_rounded, size: 18),
-                    ],
                   ],
                 ),
               ),
@@ -426,11 +429,14 @@ class _SortMenu extends StatelessWidget {
                 value: entry.$1,
                 child: Row(
                   children: [
+                    // 固定宽度的勾选位：选中标记紧贴左侧、各行文字对齐。
+                    SizedBox(
+                      width: 24,
+                      child: current == entry.$1
+                          ? const Icon(Icons.check_rounded, size: 18)
+                          : null,
+                    ),
                     Text(entry.$2),
-                    if (current == entry.$1) ...[
-                      const Spacer(),
-                      const Icon(Icons.check_rounded, size: 18),
-                    ],
                   ],
                 ),
               ),
@@ -869,126 +875,169 @@ class _AnimeGroupSection extends StatefulWidget {
 class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
   bool _expanded = false;
 
+  /// 宽于该值时头部操作按钮与标题同行（宽屏布局），否则移到标题下方整行右对齐。
+  static const double _actionsBreakpoint = 600;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final group = widget.group;
     final info = group.info;
     final resume = widget.controller.resumePointForFolders(group.folders);
+    // 头部操作按钮（展开箭头除外）：手机上放在标题信息下方右对齐，
+    // 桌面宽屏仍与标题同行靠右。
+    final actions = <Widget>[
+      if (resume != null)
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+          ),
+          onPressed: () => widget.onFileTap(
+            resume.file,
+            resume.folder.files,
+            widget.controller.getFileScrapeInfo(
+              resume.file,
+              resume.folder,
+            ),
+          ),
+          icon: const Icon(Icons.play_arrow_rounded, size: 18),
+          label: Text(_resumeSectionButtonLabel(resume)),
+        ),
+      if (info != null && info.bangumiId != null)
+        TextButton(
+          onPressed: () => context.pushNamed(
+            '/info/',
+            arguments: info.toBangumiItem(),
+          ),
+          child: const Text('详情'),
+        ),
+      if (info != null && info.bangumiId != null)
+        TextButton(
+          onPressed: () => _showMissingEpisodesSheet(
+            context,
+            widget.controller,
+            group,
+          ),
+          child: const Text('缺集'),
+        ),
+      if (info != null)
+        TextButton(
+          onPressed: () => _showManualMatchDialog(
+            context,
+            widget.controller,
+            folders: group.folders,
+            title: '修改识别结果',
+          ),
+          child: const Text('修改识别结果'),
+        ),
+    ];
+    final expandIcon = Icon(_expanded ? Icons.expand_less : Icons.expand_more);
+    // 封面
+    final cover = ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 56,
+        height: 78,
+        child: info != null && info.coverUrl.isNotEmpty
+            ? NetworkImgLayer(src: info.coverUrl, width: 56, height: 78)
+            : Container(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Icon(Icons.movie_outlined, size: 28),
+              ),
+      ),
+    );
+    // 标题信息
+    final infoColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          info?.displayName ?? '未匹配',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
+          style: theme.textTheme.bodySmall,
+        ),
+        if (info != null && info.airDate.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              info.airDate,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        if (resume != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              _resumeSectionLabel(resume),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
+    );
     final header = InkWell(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 封面
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 56,
-                height: 78,
-                child: info != null && info.coverUrl.isNotEmpty
-                    ? NetworkImgLayer(src: info.coverUrl, width: 56, height: 78)
-                    : Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Icon(Icons.movie_outlined, size: 28),
-                      ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // 标题信息
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final inlineActions = constraints.maxWidth >= _actionsBreakpoint;
+            if (inlineActions) {
+              // 宽屏：操作按钮与标题同行、贴右边。按钮组不参与 flex 分配，
+              // 剩余宽度全部留给标题（≥600px 时按钮必放得下，不会溢出）。
+              return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    info?.displayName ?? '未匹配',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall,
-                  ),
+                  cover,
+                  const SizedBox(width: 12),
+                  Expanded(child: infoColumn),
+                  if (actions.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 2,
+                      children: [expandIcon, ...actions],
+                    ),
+                  ],
+                ],
+              );
+            }
+            // 窄屏：操作按钮整行右对齐铺满，避免 flex 平分导致按钮右侧留白。
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    cover,
+                    const SizedBox(width: 12),
+                    Expanded(child: infoColumn),
+                    const SizedBox(width: 4),
+                    expandIcon,
+                  ],
+                ),
+                if (actions.isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
-                    style: theme.textTheme.bodySmall,
+                  SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 2,
+                      children: actions,
+                    ),
                   ),
-                  if (info != null && info.airDate.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        info.airDate,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                  if (resume != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        _resumeSectionLabel(resume),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                 ],
-              ),
-            ),
-            Flexible(
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 2,
-                children: [
-                  Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-                  if (resume != null)
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onPressed: () => widget.onFileTap(
-                        resume.file,
-                        resume.folder.files,
-                        widget.controller.getFileScrapeInfo(
-                          resume.file,
-                          resume.folder,
-                        ),
-                      ),
-                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                      label: Text(_resumeSectionButtonLabel(resume)),
-                    ),
-                  if (info != null && info.bangumiId != null)
-                    TextButton(
-                      onPressed: () => context.pushNamed(
-                        '/info/',
-                        arguments: info.toBangumiItem(),
-                      ),
-                      child: const Text('详情'),
-                    ),
-                  if (info != null && info.bangumiId != null)
-                    TextButton(
-                      onPressed: () => _showMissingEpisodesSheet(
-                        context,
-                        widget.controller,
-                        group,
-                      ),
-                      child: const Text('缺集'),
-                    ),
-                  if (info != null)
-                    TextButton(
-                      onPressed: () => _showManualMatchDialog(
-                        context,
-                        widget.controller,
-                        folders: group.folders,
-                        title: '修改识别结果',
-                      ),
-                      child: const Text('修改识别结果'),
-                    ),
-                ],
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
