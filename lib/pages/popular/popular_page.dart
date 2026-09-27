@@ -174,7 +174,8 @@ class _PopularPageState extends State<PopularPage> {
       elevation: 0,
       titleSpacing: 0,
       centerTitle: false,
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      // 不显式指定颜色：默认走 M3 的 surface；自定义背景启用时由外壳的
+      // appBarTheme 覆盖为半透明表面色，让背景透出。
       actions: buildActions(),
       title: null,
       flexibleSpace: SafeArea(

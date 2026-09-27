@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:kazumi/bean/settings/background_provider.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/pages/menu/route_visibility.dart';
@@ -98,6 +100,8 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
 
   @override
   Widget build(BuildContext context) {
+    final background = context.watch<BackgroundProvider>();
+    final hasBackground = background.hasImage;
     return RouteVisibility(
       isCovered: _isCovered,
       child: PopScope(
@@ -109,37 +113,73 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
         },
         child: OrientationBuilder(
           builder: (context, orientation) {
-            return orientation == Orientation.portrait
-                ? _bottomMenu(context, _selectedIndex)
-                : _sideMenu(context, _selectedIndex);
+            final Widget shell = orientation == Orientation.portrait
+                ? _bottomMenu(context, _selectedIndex, background)
+                : _sideMenu(context, _selectedIndex, background);
+            if (!hasBackground) {
+              return shell;
+            }
+            return Stack(
+              children: [
+                const Positioned.fill(child: AppBackgroundLayer()),
+                shell,
+              ],
+            );
           },
         ),
       ),
     );
   }
 
-  Widget _outlet(BuildContext context, {BorderRadius? borderRadius}) {
+  Widget _outlet(
+    BuildContext context,
+    BackgroundProvider background, {
+    BorderRadius? borderRadius,
+  }) {
     Widget child = NotificationListener<NavigationNotification>(
       // A non-poppable outlet must not override the shell's PopScope state.
       onNotification: (notification) => !notification.canHandlePop,
       child: RouterOutlet(key: _outletKey),
     );
+    if (background.hasImage) {
+      // 自定义背景透出：outlet 内页面的 Scaffold 与 AppBar 改为半透明
+      // 表面色（透明度跟随背景设置），由底下的 AppBackgroundLayer 绘制背景。
+      final theme = Theme.of(context);
+      final veil = backgroundVeilColor(context, background);
+      child = Theme(
+        data: theme.copyWith(
+          scaffoldBackgroundColor: veil,
+          appBarTheme: theme.appBarTheme.copyWith(backgroundColor: veil),
+        ),
+        child: child,
+      );
+    }
     if (borderRadius != null) {
       child = ClipRRect(borderRadius: borderRadius, child: child);
     }
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
+        color: background.hasImage
+            ? Colors.transparent
+            : Theme.of(context).colorScheme.primaryContainer,
         borderRadius: borderRadius,
       ),
       child: child,
     );
   }
 
-  Widget _bottomMenu(BuildContext context, int selectedIndex) {
+  Widget _bottomMenu(
+    BuildContext context,
+    int selectedIndex,
+    BackgroundProvider background,
+  ) {
+    final hasBackground = background.hasImage;
+    final veil = hasBackground ? backgroundVeilColor(context, background) : null;
     return Scaffold(
-      body: _outlet(context),
+      backgroundColor: hasBackground ? Colors.transparent : null,
+      body: _outlet(context, background),
       bottomNavigationBar: NavigationBar(
+        backgroundColor: veil,
         destinations: const <Widget>[
           NavigationDestination(
             selectedIcon: Icon(Icons.home),
@@ -178,18 +218,27 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     );
   }
 
-  Widget _sideMenu(BuildContext context, int selectedIndex) {
+  Widget _sideMenu(
+    BuildContext context,
+    int selectedIndex,
+    BackgroundProvider background,
+  ) {
     const borderRadius = BorderRadius.only(
       topLeft: Radius.circular(16),
       bottomLeft: Radius.circular(16),
     );
+    final hasBackground = background.hasImage;
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+      backgroundColor: hasBackground
+          ? Colors.transparent
+          : Theme.of(context).colorScheme.surfaceContainer,
       body: Row(
         children: [
           EmbeddedNativeControlArea(
             child: NavigationRail(
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+              backgroundColor: hasBackground
+                  ? backgroundVeilColor(context, background)
+                  : Theme.of(context).colorScheme.surfaceContainer,
               groupAlignment: 1,
               leading: FloatingActionButton(
                 elevation: 0,
@@ -234,7 +283,9 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
               onDestinationSelected: _selectDestination,
             ),
           ),
-          Expanded(child: _outlet(context, borderRadius: borderRadius)),
+          Expanded(
+            child: _outlet(context, background, borderRadius: borderRadius),
+          ),
         ],
       ),
     );

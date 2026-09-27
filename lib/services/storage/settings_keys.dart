@@ -296,6 +296,35 @@ class SettingsKeys {
     'default',
     group: SettingGroup.theme,
   );
+
+  // ---------- 自定义背景 ----------
+  /// 主界面自定义背景图的绝对路径（已拷贝进应用数据目录），空表示未启用。
+  static const customBackgroundPath = SettingKey<String>(
+    'customBackgroundPath',
+    '',
+    group: SettingGroup.theme,
+  );
+
+  /// 是否对背景图应用高斯模糊（毛玻璃效果）。
+  static const customBackgroundBlur = SettingKey<bool>(
+    'customBackgroundBlur',
+    false,
+    group: SettingGroup.theme,
+  );
+
+  /// 毛玻璃高斯模糊半径（sigma，4 ~ 50）。
+  static const customBackgroundBlurSigma = SettingKey<double>(
+    'customBackgroundBlurSigma',
+    24.0,
+    group: SettingGroup.theme,
+  );
+
+  /// 背景图不透明度（0.05 ~ 1.0），越高背景越明显、内容越通透。
+  static const customBackgroundOpacity = SettingKey<double>(
+    'customBackgroundOpacity',
+    0.35,
+    group: SettingGroup.theme,
+  );
   static const privateMode = SettingKey<bool>(
     _SettingBoxKey.privateMode,
     false,
@@ -1115,6 +1144,10 @@ class SettingsKeys {
     danmakuAxisAutoCheck,
     themeMode,
     themeColor,
+    customBackgroundPath,
+    customBackgroundBlur,
+    customBackgroundBlurSigma,
+    customBackgroundOpacity,
     privateMode,
     autoPlay,
     autoPlayNext,
