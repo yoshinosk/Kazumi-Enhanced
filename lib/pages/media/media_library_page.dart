@@ -402,7 +402,14 @@ class _SortMenu extends StatelessWidget {
 
   final MediaController controller;
 
-  static const _modes = [('date', '按番剧日期'), ('name', '按标题'), ('count', '按文件数')];
+  static const _modes = [
+    ('date', '按番剧日期'),
+    ('played', '按最近播放'),
+    ('updated', '按最近更新'),
+    ('season', '按番剧季度'),
+    ('name', '按标题'),
+    ('count', '按文件数'),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -461,6 +468,53 @@ class _SortMenu extends StatelessWidget {
       },
     );
   }
+}
+
+// ============ 排序分组标题 ============
+
+/// 分组型排序（最近播放 / 最近更新 / 番剧季度）的粘性分组标题：
+/// 滚动时固定在列表顶部，随所属分组滚出屏幕。
+class _SortGroupHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _SortGroupHeaderDelegate({required this.title});
+
+  final String title;
+
+  static const double _height = 36;
+
+  @override
+  double get minExtent => _height;
+
+  @override
+  double get maxExtent => _height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+        child: Align(
+          alignment: Alignment.bottomLeft,
+          child: Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _SortGroupHeaderDelegate oldDelegate) =>
+      oldDelegate.title != title;
 }
 
 // ============ 文件夹视图 ============
@@ -813,37 +867,60 @@ class _AnimeView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Observer(
       builder: (_) {
-        final groups = controller.animeGroups;
         final q = query.trim().toLowerCase();
-        final filtered = q.isEmpty
-            ? groups
-            : groups
-                  .where(
-                    (g) =>
-                        (g.info?.displayName.toLowerCase().contains(q) ??
-                            false) ||
-                        g.folders.any(
-                          (f) =>
-                              f.name.toLowerCase().contains(q) ||
-                              f.files.any(
-                                (file) => file.name.toLowerCase().contains(q),
-                              ),
-                        ),
-                  )
-                  .toList();
+        // 分组型排序（最近播放 / 最近更新 / 番剧季度）按分组标题分段展示；
+        // 其余排序为单一分组（title 为空，不渲染标题）。搜索过滤后空组剔除。
+        final sections = <MediaSortGroup<AnimeGroup>>[];
+        for (final section in controller.animeSections) {
+          final items = q.isEmpty
+              ? section.items
+              : section.items
+                    .where(
+                      (g) =>
+                          (g.info?.displayName.toLowerCase().contains(q) ??
+                              false) ||
+                          g.folders.any(
+                            (f) =>
+                                f.name.toLowerCase().contains(q) ||
+                                f.files.any(
+                                  (file) =>
+                                      file.name.toLowerCase().contains(q),
+                                ),
+                          ),
+                    )
+                    .toList();
+          if (items.isEmpty) continue;
+          sections.add(
+            MediaSortGroup(
+              key: section.key,
+              title: section.title,
+              items: items,
+            ),
+          );
+        }
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _AnimeGroupSection(
-                  controller: controller,
-                  group: filtered[index],
-                  onFileTap: onFileTap,
-                ),
-                childCount: filtered.length,
+            for (final section in sections)
+              SliverMainAxisGroup(
+                slivers: [
+                  if (section.title.isNotEmpty)
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _SortGroupHeaderDelegate(title: section.title),
+                    ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _AnimeGroupSection(
+                        controller: controller,
+                        group: section.items[index],
+                        onFileTap: onFileTap,
+                      ),
+                      childCount: section.items.length,
+                    ),
+                  ),
+                ],
               ),
-            ),
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         );
@@ -1245,61 +1322,92 @@ class _GridView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Observer(
       builder: (_) {
-        final items = controller.gridItems;
         final q = query.trim().toLowerCase();
-        final filtered = q.isEmpty
-            ? items
-            : items
-                  .where(
-                    (i) =>
-                        i.title.toLowerCase().contains(q) ||
-                        i.files.any((f) => f.name.toLowerCase().contains(q)),
-                  )
-                  .toList();
+        // 分组型排序按分组标题分段展示；其余排序为单一分组（不渲染标题）。
+        final sections = <MediaSortGroup<MediaGridItem>>[];
+        for (final section in controller.gridSections) {
+          final items = q.isEmpty
+              ? section.items
+              : section.items
+                    .where(
+                      (i) =>
+                          i.title.toLowerCase().contains(q) ||
+                          i.files.any((f) => f.name.toLowerCase().contains(q)),
+                    )
+                    .toList();
+          if (items.isEmpty) continue;
+          sections.add(
+            MediaSortGroup(
+              key: section.key,
+              title: section.title,
+              items: items,
+            ),
+          );
+        }
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              sliver: SliverGrid.builder(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  // 桌面宽屏下自动铺满，窄屏至少两列
-                  maxCrossAxisExtent: 168,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 14,
-                  childAspectRatio: 0.56,
-                ),
-                itemCount: filtered.length,
-                itemBuilder: (context, index) {
-                  final item = filtered[index];
-                  final resume = controller.resumePointForFolders(item.folders);
-                  final thumbPath = !item.isMatched && item.folders.isNotEmpty
-                      ? controller.thumbnails[item.folders.first.path]
-                      : null;
-                  return _GridCard(
-                    item: item,
-                    resume: resume,
-                    thumbPath: thumbPath,
-                    onResumeTap: resume == null
-                        ? null
-                        : () => onFileTap(
-                            resume.file,
-                            resume.folder.files,
-                            controller.getFileScrapeInfo(
-                              resume.file,
-                              resume.folder,
-                            ),
-                          ),
-                    onTap: () => _showGridItemSheet(
-                      context,
-                      controller,
-                      item,
-                      onFileTap,
+            for (final section in sections)
+              SliverMainAxisGroup(
+                slivers: [
+                  if (section.title.isNotEmpty)
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _SortGroupHeaderDelegate(title: section.title),
                     ),
-                  );
-                },
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      8,
+                      16,
+                      // 非分组模式（单组）保持原有底部留白。
+                      section.title.isEmpty ? 24 : 16,
+                    ),
+                    sliver: SliverGrid.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            // 桌面宽屏下自动铺满，窄屏至少两列
+                            maxCrossAxisExtent: 168,
+                            mainAxisSpacing: 16,
+                            crossAxisSpacing: 14,
+                            childAspectRatio: 0.56,
+                          ),
+                      itemCount: section.items.length,
+                      itemBuilder: (context, index) {
+                        final item = section.items[index];
+                        final resume = controller.resumePointForFolders(
+                          item.folders,
+                        );
+                        final thumbPath = !item.isMatched &&
+                                item.folders.isNotEmpty
+                            ? controller.thumbnails[item.folders.first.path]
+                            : null;
+                        return _GridCard(
+                          item: item,
+                          resume: resume,
+                          thumbPath: thumbPath,
+                          onResumeTap: resume == null
+                              ? null
+                              : () => onFileTap(
+                                  resume.file,
+                                  resume.folder.files,
+                                  controller.getFileScrapeInfo(
+                                    resume.file,
+                                    resume.folder,
+                                  ),
+                                ),
+                          onTap: () => _showGridItemSheet(
+                            context,
+                            controller,
+                            item,
+                            onFileTap,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-            ),
           ],
         );
       },

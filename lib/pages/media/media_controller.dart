@@ -144,6 +144,97 @@ int? _airDateSortKey(String airDate) {
   return year * 10000 + month * 100 + day;
 }
 
+/// 番剧季度分桶：从首播日期取「年·月」作为分组键（`year * 100 + month`，
+/// 仅有年份时月份记 0），标题如「2024年4月（春季）」「2024年」。
+///
+/// 季节名沿用月番惯例：1-3 月冬、4-6 月春、7-9 月夏、10-12 月秋。
+/// 解析失败返回 null（未知季度，恒定垫底）。
+(int, String)? _seasonBucketOf(String airDate) {
+  final key = _airDateSortKey(airDate);
+  if (key == null) return null;
+  final year = key ~/ 10000;
+  final month = (key ~/ 100) % 100;
+  if (month == 0) return (year * 100, '$year年');
+  const seasons = ['冬', '春', '夏', '秋'];
+  return (year * 100 + month, '$year年$month月（${seasons[(month - 1) ~/ 3]}季）');
+}
+
+/// 「最近播放 / 最近更新」的相对时间分桶（边界按自然日对齐）：
+/// 0=今天、1=昨天、2=最近 7 天、3=最近 30 天、4=更早。
+///
+/// 时间为 null（从未播放 / 无文件）返回 null，恒定垫底。
+(int, String)? _recencyBucketOf(DateTime? time) {
+  if (time == null) return null;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  int index;
+  if (!time.isBefore(today)) {
+    index = 0;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 1)))) {
+    index = 1;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 7)))) {
+    index = 2;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 30)))) {
+    index = 3;
+  } else {
+    index = 4;
+  }
+  const titles = ['今天', '昨天', '最近 7 天', '最近 30 天', '更早'];
+  return (index, titles[index]);
+}
+
+/// 分组型排序（最近播放 / 最近更新 / 番剧季度）下的一个展示分组。
+///
+/// 非分组型排序返回单一分组，[title] 为空串（不渲染分组标题）。
+class MediaSortGroup<T> {
+  const MediaSortGroup({
+    required this.key,
+    required this.title,
+    required this.items,
+  });
+
+  /// 分组键：相对时间桶序 / 「年 * 100 + 月」季度键；未知桶为 null。
+  final Object? key;
+
+  /// 分组标题（空串表示不渲染标题）。
+  final String title;
+
+  final List<T> items;
+}
+
+/// 把已排序的条目按分桶切分成展示组。
+///
+/// 比较器保证同桶条目在排序结果中相邻，因此按桶聚合即可恢复分组顺序；
+/// 桶为 null 的条目（未知季度 / 未播放）聚为最后一组。
+List<MediaSortGroup<T>> _splitSortGroups<T>(
+  List<T> entries,
+  (Object?, String)? Function(T entry) bucketOf,
+) {
+  final order = <Object?>[];
+  final titles = <Object?, String>{};
+  final grouped = <Object?, List<T>>{};
+  for (final entry in entries) {
+    final bucket = bucketOf(entry);
+    final key = bucket?.$1;
+    final items = grouped[key];
+    if (items == null) {
+      order.add(key);
+      titles[key] = bucket?.$2 ?? '';
+      grouped[key] = [entry];
+    } else {
+      items.add(entry);
+    }
+  }
+  return [
+    for (final key in order)
+      MediaSortGroup(
+        key: key,
+        title: titles[key] ?? '',
+        items: grouped[key]!,
+      ),
+  ];
+}
+
 abstract class _MediaController with Store {
   _MediaController()
       : viewMode = GStorage.getSetting(SettingsKeys.localMediaViewMode),
@@ -236,13 +327,22 @@ abstract class _MediaController with Store {
 
   bool get isGridMode => viewMode == 'grid';
 
-  /// 排序依据：`date` / `name` / `count`，仅对番剧视图与网格视图生效。
+  /// 排序依据：`date`（番剧日期）/ `played`（最近播放）/ `updated`（最近更新）/
+  /// `season`（番剧季度）/ `name`（标题）/ `count`（文件数），
+  /// 仅对番剧视图与网格视图生效。
+  ///
+  /// 其中 `played` / `updated` / `season` 为分组型排序：列表按分组标题
+  /// 分段展示（见 [isGroupedSortMode] 与 [animeSections] / [gridSections]）。
   @observable
   String sortMode;
 
-  /// 是否降序（日期越新、文件越多越靠前）。
+  /// 是否降序（日期越新、播放越近、文件越多越靠前）。
   @observable
   bool sortDescending;
+
+  /// 当前排序是否为分组型（番剧 / 网格视图按分组标题分段展示）。
+  bool get isGroupedSortMode =>
+      sortMode == 'played' || sortMode == 'updated' || sortMode == 'season';
 
   @action
   Future<void> setSortMode(String mode) async {
@@ -859,6 +959,10 @@ abstract class _MediaController with Store {
   }
 
   /// 按番剧分组返回，排序遵循 [sortMode] / [sortDescending]，未匹配组恒定排在末尾。
+  ///
+  /// 分组型排序（最近播放 / 最近更新 / 番剧季度）下，未匹配聚合组按组内
+  /// 最近播放 / 文件时间参与排序（番剧季度因无日期仍沉底）；其余模式维持
+  /// 原行为：未匹配组不参与排序，恒定垫底。
   List<AnimeGroup> get animeGroups {
     final matched = <String, AnimeGroup>{};
     final unmatched = <LocalMediaFolder>[];
@@ -878,28 +982,46 @@ abstract class _MediaController with Store {
         unmatched.add(folder);
       }
     }
-    final groups = matched.values.toList()
-      ..sort((a, b) => _compareEntries(
-            aDate: a.info!.airDate,
-            bDate: b.info!.airDate,
-            aName: a.info!.displayName,
-            bName: b.info!.displayName,
-            aCount: a.fileCount,
-            bCount: b.fileCount,
-          ));
-    if (unmatched.isNotEmpty) {
-      groups.add(AnimeGroup(info: null, folders: unmatched));
+    final unmatchedGroup =
+        unmatched.isEmpty ? null : AnimeGroup(info: null, folders: unmatched);
+    final groups = matched.values.toList();
+    if (unmatchedGroup != null && isGroupedSortMode) {
+      groups.add(unmatchedGroup);
+    }
+    final timed = [
+      for (final group in groups)
+        (
+          group: group,
+          played: resumePointForFolders(group.folders)?.updatedAt,
+          updated: latestModifiedAt(group.folders),
+        ),
+    ]..sort((a, b) => _compareEntries(
+          aDate: a.group.info!.airDate,
+          bDate: b.group.info!.airDate,
+          aName: a.group.info!.displayName,
+          bName: b.group.info!.displayName,
+          aCount: a.group.fileCount,
+          bCount: b.group.fileCount,
+          aPlayed: a.played,
+          bPlayed: b.played,
+          aUpdated: a.updated,
+          bUpdated: b.updated,
+        ));
+    final sorted = [for (final entry in timed) entry.group];
+    if (unmatchedGroup != null && !isGroupedSortMode) {
+      sorted.add(unmatchedGroup);
     }
     // 同番剧多季目录按季数排序（第 2 季排在「无季数标记」的第 1 季之后）。
-    for (final group in groups) {
+    for (final group in sorted) {
       group.folders.sort(_compareFoldersBySeason);
     }
-    return groups;
+    return sorted;
   }
 
   /// 网格视图数据源：已匹配番剧聚合成一张卡片，未匹配文件夹各自成卡。
   ///
   /// 默认按番剧首播日期降序（最新番在前），无日期的条目恒定沉底。
+  /// 分组型排序下未匹配条目按播放 / 文件时间参与排序；其余模式按名称垫底。
   List<MediaGridItem> get gridItems {
     final matched = <String, MediaGridItem>{};
     final unmatched = <MediaGridItem>[];
@@ -919,26 +1041,108 @@ abstract class _MediaController with Store {
         folders: [...?existing?.folders, folder],
       );
     }
-    final items = matched.values.toList()
-      ..sort((a, b) => _compareEntries(
-            aDate: a.airDate,
-            bDate: b.airDate,
-            aName: a.title,
-            bName: b.title,
-            aCount: a.fileCount,
-            bCount: b.fileCount,
-          ));
+    final items = matched.values.toList();
+    // 分组型排序（最近播放 / 最近更新 / 番剧季度）下未匹配条目有播放记录 /
+    // 文件时间可依，与已匹配条目一同参与排序；其余模式维持原行为：统一按
+    // 名称升序垫在最后。
+    final sortable = isGroupedSortMode ? [...items, ...unmatched] : items;
+    final timed = [
+      for (final item in sortable)
+        (
+          item: item,
+          played: resumePointForFolders(item.folders)?.updatedAt,
+          updated: latestModifiedAt(item.folders),
+        ),
+    ]..sort((a, b) => _compareEntries(
+          aDate: a.item.airDate,
+          bDate: b.item.airDate,
+          aName: a.item.title,
+          bName: b.item.title,
+          aCount: a.item.fileCount,
+          bCount: b.item.fileCount,
+          aPlayed: a.played,
+          bPlayed: b.played,
+          aUpdated: a.updated,
+          bUpdated: b.updated,
+        ));
+    final sorted = [for (final entry in timed) entry.item];
     // 同番剧多季目录按季数排序。
-    for (final item in items) {
+    for (final item in sorted) {
       item.folders.sort(_compareFoldersBySeason);
     }
-    // 未匹配条目没有元数据可排，统一按名称升序垫在最后。
+    if (isGroupedSortMode) {
+      return sorted;
+    }
     unmatched
         .sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    return [...items, ...unmatched];
+    return [...sorted, ...unmatched];
+  }
+
+  /// 一组文件夹内视频文件的最新修改时间（无文件为 null）。
+  ///
+  /// 「最近更新」排序以此为依据：下载新集落盘、外部改动都会推后该时间。
+  DateTime? latestModifiedAt(List<LocalMediaFolder> folders) {
+    DateTime? latest;
+    for (final folder in folders) {
+      for (final file in folder.files) {
+        if (latest == null || file.modifiedAt.isAfter(latest)) {
+          latest = file.modifiedAt;
+        }
+      }
+    }
+    return latest;
+  }
+
+  /// 条目在分组型排序下的分桶（分组键 + 分组标题）；非分组型排序返回 null。
+  (Object?, String)? _sortBucketOf({
+    required String airDate,
+    required DateTime? playedAt,
+    required DateTime? updatedAt,
+  }) {
+    return switch (sortMode) {
+      'played' => _recencyBucketOf(playedAt) ?? (null, '未播放'),
+      'updated' => _recencyBucketOf(updatedAt) ?? (null, '未知时间'),
+      'season' => _seasonBucketOf(airDate) ?? (null, '季度未知'),
+      _ => null,
+    };
+  }
+
+  /// 番剧视图数据源：分组型排序下按分组标题切分，其余模式为单一组（不显示标题）。
+  List<MediaSortGroup<AnimeGroup>> get animeSections {
+    final groups = animeGroups;
+    if (!isGroupedSortMode) {
+      return [MediaSortGroup(key: '', title: '', items: groups)];
+    }
+    return _splitSortGroups(
+      groups,
+      (g) => _sortBucketOf(
+        airDate: g.info?.airDate ?? '',
+        playedAt: resumePointForFolders(g.folders)?.updatedAt,
+        updatedAt: latestModifiedAt(g.folders),
+      ),
+    );
+  }
+
+  /// 网格视图数据源：分组切分逻辑同 [animeSections]。
+  List<MediaSortGroup<MediaGridItem>> get gridSections {
+    final items = gridItems;
+    if (!isGroupedSortMode) {
+      return [MediaSortGroup(key: '', title: '', items: items)];
+    }
+    return _splitSortGroups(
+      items,
+      (i) => _sortBucketOf(
+        airDate: i.airDate,
+        playedAt: resumePointForFolders(i.folders)?.updatedAt,
+        updatedAt: latestModifiedAt(i.folders),
+      ),
+    );
   }
 
   /// 番剧视图 / 网格视图共用的比较器。
+  ///
+  /// 分组型排序（最近播放 / 最近更新）以时间为第一键；番剧季度沿用日期键
+  /// 排序（季度桶序与日期序一致），分组由 [_splitSortGroups] 按桶切分恢复。
   int _compareEntries({
     required String aDate,
     required String bDate,
@@ -946,11 +1150,26 @@ abstract class _MediaController with Store {
     required String bName,
     required int aCount,
     required int bCount,
+    DateTime? aPlayed,
+    DateTime? bPlayed,
+    DateTime? aUpdated,
+    DateTime? bUpdated,
   }) {
     final desc = sortDescending;
     int byName() {
       final r = aName.toLowerCase().compareTo(bName.toLowerCase());
       return desc ? -r : r;
+    }
+
+    // 时间键比较：无时间的条目不参与方向反转，恒定沉底（同 date 的未知日期）。
+    int byTime(DateTime? a, DateTime? b) {
+      if (a == null && b == null) {
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      }
+      if (a == null) return 1;
+      if (b == null) return -1;
+      if (a != b) return desc ? b.compareTo(a) : a.compareTo(b);
+      return aName.toLowerCase().compareTo(bName.toLowerCase());
     }
 
     switch (sortMode) {
@@ -961,6 +1180,10 @@ abstract class _MediaController with Store {
           return desc ? bCount.compareTo(aCount) : aCount.compareTo(bCount);
         }
         return aName.toLowerCase().compareTo(bName.toLowerCase());
+      case 'played':
+        return byTime(aPlayed, bPlayed);
+      case 'updated':
+        return byTime(aUpdated, bUpdated);
       case 'date':
       default:
         final ka = _airDateSortKey(aDate);

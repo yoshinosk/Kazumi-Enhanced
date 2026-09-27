@@ -973,8 +973,10 @@ class SettingsKeys {
     group: SettingGroup.media,
   );
 
-  /// 番剧 / 网格视图的排序依据：`date`（首播日期）/ `name`（标题）/ `count`（文件数）。
+  /// 番剧 / 网格视图的排序依据：`date`（首播日期）/ `played`（最近播放）/
+  /// `updated`（最近更新）/ `season`（番剧季度）/ `name`（标题）/ `count`（文件数）。
   ///
+  /// 其中 `played` / `updated` / `season` 为分组型排序，列表按分组标题分段展示。
   /// 默认按番剧首播日期排序，配合 [localMediaSortDescending] 默认降序，
   /// 也就是「最新番剧排在最前面」。
   static const localMediaSortMode = SettingKey<String>(
@@ -983,7 +985,7 @@ class SettingsKeys {
     group: SettingGroup.media,
   );
 
-  /// 排序方向，true 为降序（日期越新 / 文件越多越靠前）。
+  /// 排序方向，true 为降序（日期越新 / 播放越近 / 文件越多越靠前）。
   static const localMediaSortDescending = SettingKey<bool>(
     'localMediaSortDescending',
     true,
