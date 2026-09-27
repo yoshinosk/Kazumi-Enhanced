@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:ui' show AppLifecycleState;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
@@ -12,10 +13,12 @@ import 'package:kazumi/request/core/network_config.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/magnet/libtorrent_engine.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
+import 'package:kazumi/services/magnet/torrent_file_meta.dart';
 import 'package:kazumi/services/magnet/tracker_updater.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/disk_space.dart';
+import 'package:kazumi/utils/format.dart' as app_format show formatBytes;
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -713,6 +716,90 @@ class MagnetDownloadService {
     await _saveEntries();
     onChanged?.call(_entries);
     return entry.taskId;
+  }
+
+  /// 从本地 .torrent 种子文件构造可提交的下载任务描述。
+  ///
+  /// 成功解析时把种子副本放入元数据缓存（按 info-hash 命名），并返回以
+  /// info-hash 磁力链描述的 [MagnetSearchItem]：去重、tracker 注入、
+  /// 重启重挂等行为与磁力任务完全一致，且引擎直接从缓存副本加载完整
+  /// 元数据（无需重新拉取）。解析失败（文件损坏或纯 BitTorrent v2 种子）
+  /// 时回退为缓存副本路径描述。文件不可读时返回 null。
+  ///
+  /// [title] 为用户显式输入的名称，优先于种子内建名称。
+  Future<MagnetSearchItem?> buildItemFromTorrentFile(
+    String filePath, {
+    String? title,
+  }) async {
+    List<int> bytes;
+    try {
+      bytes = await File(filePath).readAsBytes();
+    } catch (e) {
+      KazumiLogger()
+          .w('MagnetDownloadService: read torrent file failed', error: e);
+      return null;
+    }
+    final dir = await _torrentCacheDir();
+    try {
+      await Directory(dir).create(recursive: true);
+    } catch (e) {
+      KazumiLogger().w(
+          'MagnetDownloadService: create torrent cache dir failed',
+          error: e);
+    }
+    final displayName = _resolveTorrentTitle(filePath, title);
+    final meta = TorrentFileMeta.parse(bytes);
+    if (meta != null) {
+      final cached = File(p.join(dir, '${meta.infoHashHex}.torrent'));
+      try {
+        if (!await cached.exists() || await cached.length() == 0) {
+          await cached.writeAsBytes(bytes, flush: true);
+        }
+      } catch (e) {
+        KazumiLogger().w(
+            'MagnetDownloadService: cache torrent file failed',
+            error: e);
+      }
+      return MagnetSearchItem(
+        title: displayName.isNotEmpty
+            ? displayName
+            : (meta.name.isNotEmpty ? meta.name : '种子文件任务'),
+        magnetLink:
+            'magnet:?xt=urn:btih:${meta.infoHashHex}&dn=${Uri.encodeComponent(meta.name)}',
+        torrentUrl: '',
+        size: meta.totalLength > 0 ? app_format.formatBytes(meta.totalLength) : '',
+        publishDate: DateTime.now(),
+      );
+    }
+    // 解析失败：以缓存副本路径描述提交（引擎仍可直接加载该文件），
+    // 避免用户移动或删除原文件后任务无法重挂。按文件内容哈希命名，
+    // 同一文件重复添加时路径稳定，去重仍然生效。
+    final copy = File(p.join(dir, 'file_${sha1.convert(bytes)}.torrent'));
+    String sourcePath = filePath;
+    try {
+      if (!await copy.exists() || await copy.length() == 0) {
+        await copy.writeAsBytes(bytes, flush: true);
+      }
+      sourcePath = copy.path;
+    } catch (e) {
+      KazumiLogger().w(
+          'MagnetDownloadService: copy torrent file failed', error: e);
+    }
+    return MagnetSearchItem(
+      title: displayName.isNotEmpty ? displayName : '种子文件任务',
+      magnetLink: '',
+      torrentUrl: sourcePath,
+      size: '',
+      publishDate: DateTime.now(),
+    );
+  }
+
+  /// 任务显示名：用户输入优先，其次种子文件名（去扩展名）。
+  static String _resolveTorrentTitle(String filePath, String? title) {
+    final input = title?.trim();
+    if (input != null && input.isNotEmpty) return input;
+    final base = p.basenameWithoutExtension(filePath).trim();
+    return base;
   }
 
   /// 确保下载目录存在，创建失败时记录日志但不阻断任务提交

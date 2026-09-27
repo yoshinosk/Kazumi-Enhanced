@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -21,6 +22,7 @@ import 'package:kazumi/services/magnet/animes_garden_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
+import 'package:kazumi/services/magnet/torrent_file_meta.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -29,6 +31,7 @@ import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/directory_picker.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+import 'package:path/path.dart' as p;
 
 /// 番剧详情页发起的磁力搜索路由参数：搜索关键词 + 关联的番剧信息。
 ///
@@ -1644,7 +1647,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                         _selectMode ? _exitSelectMode() : _enterSelectMode(),
                   ),
                   IconButton(
-                    tooltip: '手动添加磁力链接',
+                    tooltip: '手动添加下载任务',
                     icon: const Icon(Icons.add_link_rounded),
                     visualDensity: VisualDensity.compact,
                     onPressed: () => _showAddMagnetDialog(context),
@@ -2543,7 +2546,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   }
 }
 
-/// 手动添加磁力链接 / 种子地址的对话框。
+/// 手动添加磁力链接 / 种子地址 / 本地 .torrent 种子文件的对话框。
 ///
 /// 自持有 [TextEditingController]，关闭时释放，避免泄漏。
 class _AddMagnetLinkDialog extends StatefulWidget {
@@ -2563,11 +2566,46 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
   String? _saveDir = MagnetSessionDownloadDir.lastPicked;
   bool _picking = false;
 
+  /// 已选择的本地 .torrent 种子文件路径；非空时提交优先走种子文件。
+  String? _torrentPath;
+  bool _pickingTorrent = false;
+
   @override
   void dispose() {
     _linkCtrl.dispose();
     _titleCtrl.dispose();
     super.dispose();
+  }
+
+  /// 选择本地 .torrent 种子文件，并预解析填充任务名。
+  Future<void> _pickTorrentFile() async {
+    if (_pickingTorrent) return;
+    setState(() => _pickingTorrent = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: '选择种子文件',
+        type: FileType.custom,
+        allowedExtensions: ['torrent'],
+      );
+      final path = result?.files.single.path;
+      if (path == null || !mounted) return;
+      TorrentFileMeta? meta;
+      try {
+        meta = TorrentFileMeta.parse(await File(path).readAsBytes());
+      } catch (_) {}
+      final name = (meta?.name.isNotEmpty ?? false)
+          ? meta!.name
+          : p.basename(path).trim();
+      if (!mounted) return;
+      setState(() {
+        _torrentPath = path;
+        if (_titleCtrl.text.trim().isEmpty && name.isNotEmpty) {
+          _titleCtrl.text = name;
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _pickingTorrent = false);
+    }
   }
 
   Future<void> _pickDir() async {
@@ -2587,12 +2625,22 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
   }
 
   void _submit() {
-    final link = _linkCtrl.text.trim();
-    if (link.isEmpty) {
-      KazumiDialog.showToast(message: '请输入磁力链接或种子地址');
+    final torrentPath = _torrentPath;
+    final title = _titleCtrl.text.trim();
+    if (torrentPath != null) {
+      Navigator.pop(context);
+      widget.controller.addTorrentFile(
+        torrentPath,
+        dir: _saveDir,
+        title: title.isEmpty ? null : title,
+      );
       return;
     }
-    final title = _titleCtrl.text.trim();
+    final link = _linkCtrl.text.trim();
+    if (link.isEmpty) {
+      KazumiDialog.showToast(message: '请输入磁力链接或种子地址，或选择种子文件');
+      return;
+    }
     Navigator.pop(context);
     final item = MagnetSearchItem(
       title: title.isEmpty ? '手动添加的任务' : title,
@@ -2622,6 +2670,46 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
               border: OutlineInputBorder(),
             ),
           ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: _pickingTorrent ? null : _pickTorrentFile,
+                icon: _pickingTorrent
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.file_open_rounded, size: 18),
+                label: const Text('选择种子文件'),
+              ),
+            ],
+          ),
+          if (_torrentPath != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.insert_drive_file_rounded,
+                      size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      p.basename(_torrentPath!),
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '移除种子文件',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => setState(() => _torrentPath = null),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 12),
           TextField(
             controller: _titleCtrl,
