@@ -4,6 +4,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart'
     show GeneralEmptyState;
+import 'package:kazumi/bean/widget/tab_pill_bar.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
@@ -48,12 +49,47 @@ class _DownloadTabPageState extends State<DownloadTabPage>
 
   @override
   Widget build(BuildContext context) {
-    // 桌面宽屏：顶部 TabBar 会把标签横向拉得很长，改用左侧 NavigationRail；
-    // 安卓 / 窄窗口保持顶部 TabBar 切换。
-    final useRail =
-        isDesktop() && MediaQuery.sizeOf(context).width >= _railBreakpoint;
+    // 桌面宽屏：默认 TabBar 会把标签等分拉伸得很宽，改为在标题栏内
+    // 放置按内容自适应的分类胶囊栏；安卓 / 窄窗口保持顶部 TabBar 切换。
+    final usePillBar =
+        isDesktop() && MediaQuery.sizeOf(context).width >= _pillBarBreakpoint;
     final appBar = SysAppBar(
-      title: const Text('下载'),
+      title: usePillBar
+          ? Row(
+              children: [
+                const Text('下载'),
+                Expanded(
+                  child: Center(
+                    child: TabPillBar(
+                      controller: _tabController,
+                      items: const [
+                        TabPillItem(
+                          icon: Icons.travel_explore_outlined,
+                          selectedIcon: Icons.travel_explore_rounded,
+                          label: '磁力搜索',
+                        ),
+                        TabPillItem(
+                          icon: Icons.download_outlined,
+                          selectedIcon: Icons.download_rounded,
+                          label: '磁力下载',
+                        ),
+                        TabPillItem(
+                          icon: Icons.rss_feed_outlined,
+                          selectedIcon: Icons.rss_feed_rounded,
+                          label: 'RSS 订阅',
+                        ),
+                        TabPillItem(
+                          icon: Icons.cloud_download_outlined,
+                          selectedIcon: Icons.cloud_download_rounded,
+                          label: '离线缓存',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : const Text('下载'),
       actions: [
         Observer(
           builder: (_) {
@@ -89,7 +125,7 @@ class _DownloadTabPageState extends State<DownloadTabPage>
           icon: const Icon(Icons.settings_rounded),
         ),
       ],
-      bottom: useRail
+      bottom: usePillBar
           ? null
           : TabBar(
               controller: _tabController,
@@ -123,57 +159,13 @@ class _DownloadTabPageState extends State<DownloadTabPage>
         _OfflineCacheTab(controller: widget.downloadController),
       ],
     );
-    // 两种布局共用同一棵树：TabBarView 固定在 Row 的 index 1 槽位，
-    // 宽窄切换时仅 index 0（侧栏/占位）变化，各 tab 的滚动位置等
-    // State 不会因子树重建而丢失。
-    return Scaffold(
-      appBar: appBar,
-      body: Row(
-        children: [
-          if (useRail)
-            AnimatedBuilder(
-              animation: _tabController,
-              builder: (context, _) => NavigationRail(
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
-                groupAlignment: -1,
-                labelType: NavigationRailLabelType.all,
-                selectedIndex: _tabController.index,
-                onDestinationSelected: (index) =>
-                    _tabController.animateTo(index),
-                destinations: const [
-                  NavigationRailDestination(
-                    icon: Icon(Icons.travel_explore_outlined),
-                    selectedIcon: Icon(Icons.travel_explore_rounded),
-                    label: Text('磁力搜索'),
-                  ),
-                  NavigationRailDestination(
-                    icon: Icon(Icons.download_outlined),
-                    selectedIcon: Icon(Icons.download_rounded),
-                    label: Text('磁力下载'),
-                  ),
-                  NavigationRailDestination(
-                    icon: Icon(Icons.rss_feed_outlined),
-                    selectedIcon: Icon(Icons.rss_feed_rounded),
-                    label: Text('RSS 订阅'),
-                  ),
-                  NavigationRailDestination(
-                    icon: Icon(Icons.cloud_download_outlined),
-                    selectedIcon: Icon(Icons.cloud_download_rounded),
-                    label: Text('离线缓存'),
-                  ),
-                ],
-              ),
-            )
-          else
-            const SizedBox.shrink(),
-          Expanded(child: tabBarView),
-        ],
-      ),
-    );
+    // 宽窄切换只影响标题栏内的组件，body 始终是同一个 TabBarView，
+    // 各 tab 的滚动位置等 State 不会因子树重建而丢失。
+    return Scaffold(appBar: appBar, body: tabBarView);
   }
 
-  /// 宽屏（≥ 700px）时切换到 NavigationRail 的断点。
-  static const double _railBreakpoint = 700;
+  /// 宽屏（≥ 700px）时切换到顶部胶囊标签栏的断点。
+  static const double _pillBarBreakpoint = 700;
 }
 
 /// 离线缓存概览：展示每部番剧的缓存进度，点击进入完整下载管理页。
