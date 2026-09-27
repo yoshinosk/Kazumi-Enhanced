@@ -351,6 +351,14 @@ class SettingsKeys {
     '/tab/popular/',
     group: SettingGroup.interface,
   );
+
+  /// 开机自启（Android / Windows）。持久化值与系统侧注册状态由
+  /// AutoStartService 在切换时同步维护，这里只作为界面显示的记录。
+  static const launchOnStartup = SettingKey<bool>(
+    'launchOnStartup',
+    false,
+    group: SettingGroup.interface,
+  );
   static const webDavEnable = SettingKey<bool>(
     _SettingBoxKey.webDavEnable,
     false,
@@ -1116,6 +1124,7 @@ class SettingsKeys {
     enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
+    launchOnStartup,
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,
