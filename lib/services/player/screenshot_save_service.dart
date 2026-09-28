@@ -29,17 +29,26 @@ class ScreenshotSaveService {
 
   /// 保存 PNG 截图并返回文件路径。
   ///
-  /// [title] 为当前播放的番剧标题，用于生成可辨识的文件名（自动过滤
-  /// Windows 非法字符并截断）。目录不存在时自动创建；文件名冲突时
-  /// 自动追加序号，避免同一秒内连续截图静默覆盖；写入失败时抛出
-  /// [FileSystemException]，由调用方提示用户修改保存位置。
-  Future<File> savePng(Uint8List bytes, {String? title}) async {
+  /// [title]（番剧标题）、[episode]（集数）与 [position]（播放进度）
+  /// 共同生成可辨识的文件名（自动过滤 Windows 非法字符并截断）。
+  /// 目录不存在时自动创建；文件名冲突时自动追加序号，避免连续截图
+  /// 静默覆盖；写入失败时抛出 [FileSystemException]，由调用方提示
+  /// 用户修改保存位置。
+  Future<File> savePng(
+    Uint8List bytes, {
+    String? title,
+    int? episode,
+    Duration? position,
+  }) async {
     final directory = resolveDirectory();
     try {
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
-      final fileName = await _resolveUniqueFileName(directory, title);
+      final fileName = await _resolveUniqueFileName(
+        directory,
+        buildFileBaseName(title: title, episode: episode, position: position),
+      );
       final file = File(p.join(directory.path, fileName));
       await file.writeAsBytes(bytes, flush: true);
       return file;
@@ -57,45 +66,54 @@ class ScreenshotSaveService {
     }
   }
 
-  /// 生成形如 `Kazumi_20260924_161234_812_标题.png` 的文件名（含毫秒）。
-  String _buildFileName(String? title) {
-    final now = DateTime.now();
-    final stamp = StringBuffer()
-      ..write(now.year.toString().padLeft(4, '0'))
-      ..write(now.month.toString().padLeft(2, '0'))
-      ..write(now.day.toString().padLeft(2, '0'))
-      ..write('_')
-      ..write(now.hour.toString().padLeft(2, '0'))
-      ..write(now.minute.toString().padLeft(2, '0'))
-      ..write(now.second.toString().padLeft(2, '0'))
-      // 毫秒：避免同一秒内连按两次截图快捷键生成完全相同的文件名。
-      ..write('_')
-      ..write(now.millisecond.toString().padLeft(3, '0'));
-
-    final name = StringBuffer('Kazumi_');
-    name.write(stamp);
+  /// 生成形如 `标题_第01话_12-34` 的基础文件名（不含扩展名）。
+  ///
+  /// 缺失的部分自动跳过；全部缺失时回落到 `Kazumi_时间戳`，保证
+  /// 文件名始终非空。播放进度超过 1 小时才带小时段（`01-02-03`）。
+  String buildFileBaseName({String? title, int? episode, Duration? position}) {
     final sanitized = _sanitizeTitle(title);
-    if (sanitized.isNotEmpty) {
-      name
-        ..write('_')
-        ..write(sanitized);
+    final parts = <String>[
+      if (sanitized.isNotEmpty) sanitized,
+      if (episode != null && episode > 0)
+        '第${episode.toString().padLeft(2, '0')}话',
+      if (position != null) _formatPosition(position),
+    ];
+    if (parts.isEmpty) {
+      final now = DateTime.now();
+      return 'Kazumi_'
+          '${now.year.toString().padLeft(4, '0')}'
+          '${now.month.toString().padLeft(2, '0')}'
+          '${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}'
+          '${now.minute.toString().padLeft(2, '0')}'
+          '${now.second.toString().padLeft(2, '0')}_'
+          '${now.millisecond.toString().padLeft(3, '0')}';
     }
-    name.write('.png');
-    return name.toString();
+    return parts.join('_');
+  }
+
+  /// 进度格式化为文件名安全的 `分-秒` / `时-分-秒`（冒号在 Windows
+  /// 文件名中非法，故用连字符）。
+  String _formatPosition(Duration position) {
+    String pad(int n) => n.toString().padLeft(2, '0');
+    final hours = position.inHours;
+    final minutes = position.inMinutes % 60;
+    final seconds = position.inSeconds % 60;
+    if (hours > 0) {
+      return '${pad(hours)}-${pad(minutes)}-${pad(seconds)}';
+    }
+    return '${pad(minutes)}-${pad(seconds)}';
   }
 
   /// 文件名已存在时追加 `_2`、`_3`… 序号，保证不覆盖旧截图。
   Future<String> _resolveUniqueFileName(
     Directory directory,
-    String? title,
+    String baseName,
   ) async {
-    final candidate = _buildFileName(title);
-    final extension = p.extension(candidate);
-    final base = p.basenameWithoutExtension(candidate);
-    var name = candidate;
+    var name = '$baseName.png';
     var counter = 2;
     while (await File(p.join(directory.path, name)).exists()) {
-      name = '$base$counter$extension';
+      name = '$baseName$counter.png';
       counter++;
     }
     return name;
