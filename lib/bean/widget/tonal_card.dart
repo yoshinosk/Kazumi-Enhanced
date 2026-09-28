@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 const double tonalCardRadius = 24;
 
@@ -15,7 +16,7 @@ class TonalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(tonalCardRadius),
+        shape: cardShape(context, tonalCardRadius),
         clipBehavior: Clip.antiAlias,
         child: Padding(padding: padding, child: child),
       );

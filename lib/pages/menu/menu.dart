@@ -142,14 +142,12 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
       child: RouterOutlet(key: _outletKey),
     );
     if (background.hasImage) {
-      // 自定义背景透出：outlet 内页面的 Scaffold 与 AppBar 改为半透明
-      // 表面色（透明度跟随背景设置），由底下的 AppBackgroundLayer 绘制背景。
-      final theme = Theme.of(context);
-      final veil = backgroundVeilColor(context, background);
+      // 自定义背景透出：outlet 内页面的 Scaffold / AppBar 与卡片表面改为半透明，
+      // 卡片补一层描边，由底下的 AppBackgroundLayer 绘制背景。
       child = Theme(
-        data: theme.copyWith(
-          scaffoldBackgroundColor: veil,
-          appBarTheme: theme.appBarTheme.copyWith(backgroundColor: veil),
+        data: backgroundSurfaceTheme(
+          Theme.of(context),
+          backgroundVeilAlpha(background),
         ),
         child: child,
       );

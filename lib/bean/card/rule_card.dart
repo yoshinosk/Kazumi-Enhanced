@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:kazumi/utils/surface_theme.dart';
+
 class RuleCard extends StatelessWidget {
   const RuleCard({
     super.key,
@@ -52,9 +54,12 @@ class RuleCard extends StatelessWidget {
                 ? colors.secondaryContainer
                 : colors.surfaceContainerLow,
             borderRadius: BorderRadius.circular(selected ? 20 : 28),
+            // 未选中时描边跟随卡片表面样式（背景启用时才有），保持与其它卡片一致。
             border: Border.all(
-              color: selected ? colors.secondary : Colors.transparent,
-              width: 2,
+              color: selected
+                  ? colors.secondary
+                  : context.surfaces.cardOutline.color,
+              width: selected ? 2 : context.surfaces.cardOutline.width,
             ),
           ),
           child: Material(

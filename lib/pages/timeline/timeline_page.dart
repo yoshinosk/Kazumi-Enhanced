@@ -16,6 +16,7 @@ import 'package:kazumi/pages/history/continue_watching_section.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/anime_season.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 part 'timeline_options.dart';
 part 'timeline_week_selector.dart';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:kazumi/bean/widget/tonal_card.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 const double splitListOuterRadius = tonalCardRadius;
 const double splitListInnerRadius = 4;
@@ -54,6 +55,8 @@ class _SplitListRowState extends State<SplitListRow> {
             child: widget.child,
           );
     // Animate color as well as shape; Material alone snaps color changes.
+    final topRadius = _pressed ? widget.pressedRadius : widget.topRadius;
+    final bottomRadius = _pressed ? widget.pressedRadius : widget.bottomRadius;
     return AnimatedContainer(
       duration: MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
@@ -62,11 +65,11 @@ class _SplitListRowState extends State<SplitListRow> {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: colors.surfaceContainerLow,
+        // 描边只画在分组外缘：组内相邻行之间已有间隙，再各描一道会显得杂乱。
+        border: _outlineBorder(context, topRadius, bottomRadius),
         borderRadius: BorderRadius.vertical(
-          top: Radius.circular(
-              _pressed ? widget.pressedRadius : widget.topRadius),
-          bottom: Radius.circular(
-              _pressed ? widget.pressedRadius : widget.bottomRadius),
+          top: Radius.circular(topRadius),
+          bottom: Radius.circular(bottomRadius),
         ),
       ),
       child: Material(
@@ -83,6 +86,17 @@ class _SplitListRowState extends State<SplitListRow> {
           child: _SplitRowScope(onPressChanged: _reportPress, child: child),
         ),
       ),
+    );
+  }
+
+  /// 分组内只有首行顶边、末行底边属于外缘，左右两边始终是外缘。
+  Border _outlineBorder(BuildContext context, double top, double bottom) {
+    final side = context.surfaces.cardOutline;
+    return Border(
+      left: side,
+      right: side,
+      top: top >= splitListOuterRadius ? side : BorderSide.none,
+      bottom: bottom >= splitListOuterRadius ? side : BorderSide.none,
     );
   }
 }

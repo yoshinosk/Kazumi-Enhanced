@@ -27,6 +27,7 @@ class _TimelineWeekSelector extends StatelessWidget {
       return DecoratedBox(
         decoration: BoxDecoration(
           color: colors.surfaceContainerLow,
+          border: Border.fromBorderSide(context.surfaces.cardOutline),
           borderRadius: BorderRadius.circular(28),
         ),
         child: Padding(

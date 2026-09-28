@@ -3,6 +3,7 @@ import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:kazumi/bean/widget/content_section.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/my/watch_stats.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 import 'package:material_new_shapes/material_new_shapes.dart';
 
 enum MyDestination {
@@ -243,7 +244,7 @@ class _WatchStatsPanel extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Material(
       color: compact ? colors.primaryContainer : colors.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(compact ? 28 : 48),
+      shape: cardShape(context, compact ? 28 : 48),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Column(
@@ -509,7 +510,7 @@ class _PreferencesPanel extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Material(
       color: colors.surfaceContainerLow,
-      borderRadius: _tileRadius,
+      shape: cardShape(context, 28),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -731,6 +732,7 @@ class _ExpressiveActionState extends State<_ExpressiveAction> {
           decoration: BoxDecoration(
             color: widget.color,
             borderRadius: _pressed ? BorderRadius.circular(16) : widget.radius,
+            border: Border.fromBorderSide(context.surfaces.cardOutline),
           ),
           child: Material(
             type: MaterialType.transparency,

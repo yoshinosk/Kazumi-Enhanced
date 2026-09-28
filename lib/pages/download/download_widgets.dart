@@ -5,6 +5,7 @@ import 'package:kazumi/bean/card/rule_card.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/utils/format.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 const Duration _kExpandDuration = Duration(milliseconds: 250);
 const Curve _kExpandCurve = Curves.easeInOutCubic;
@@ -69,7 +70,7 @@ class DownloadRecordCard extends StatelessWidget {
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
       color: colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: cardShape(context, 16),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

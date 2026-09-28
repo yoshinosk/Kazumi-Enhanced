@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 class BangumiTimelineCard extends StatelessWidget {
   const BangumiTimelineCard({
@@ -74,9 +75,7 @@ class BangumiTimelineCard extends StatelessWidget {
         elevation: 0,
         margin: EdgeInsets.zero,
         color: Theme.of(context).colorScheme.surfaceContainerLow,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(_cornerRadius)),
-        ),
+        shape: cardShape(context, _cornerRadius),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
