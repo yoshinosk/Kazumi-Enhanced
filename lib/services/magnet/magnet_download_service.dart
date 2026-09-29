@@ -1997,7 +1997,7 @@ class MagnetDownloadService {
         }
         id = magnetId >= 0
             ? magnetId
-            : engine.addMagnet(trimmed, savePath);
+            : engine.addMagnet(_withCachedTrackers(engine, trimmed), savePath);
       } else if (trimmed.toLowerCase().startsWith('http://') ||
           trimmed.toLowerCase().startsWith('https://')) {
         final torrentPath = await _downloadTorrent(trimmed);
@@ -2035,6 +2035,21 @@ class MagnetDownloadService {
   /// 取缓存 tracker 中适合注入引擎的数量上限（过多 tracker 反而拖慢握手）。
   static List<String> _cachedTrackersForEngine() =>
       TrackerUpdater.instance.cachedTrackers().take(20).toList();
+
+  /// 原生库缺少 `lt_add_trackers` 时（陈旧的 Android prebuilt），把缓存 tracker
+  /// 直接拼进磁力链交给 libtorrent 解析注册，使新增任务仍具备 peer 发现能力。
+  /// 支持该符号的平台（Windows）保持原样，仍走运行时注入。
+  static String _withCachedTrackers(
+      LibtorrentFlutter engine, String magnet) {
+    if (engine.supportsRuntimeTrackers) return magnet;
+    var out = magnet;
+    for (final tr in _cachedTrackersForEngine()) {
+      final encoded = Uri.encodeComponent(tr);
+      if (out.contains(encoded)) continue;
+      out += '&tr=$encoded';
+    }
+    return out;
+  }
 
   /// 下载 .torrent 到临时目录，返回本地路径。
   Future<String?> _downloadTorrent(String url) async {

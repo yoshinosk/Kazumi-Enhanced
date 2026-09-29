@@ -277,7 +277,10 @@ class TorrentBridgeBindings {
   late final LtAddMagnet          addMagnet;
   late final LtAddTorrentFile     addTorrentFile;
   late final LtRemoveTorrent      removeTorrent;
-  late final LtAddTrackers        addTrackers;
+  /// Optional binding: absent on prebuilt libs built before
+  /// `lt_add_trackers` existed (e.g. stale Android prebuilts). Runtime
+  /// tracker injection then degrades to magnet-URI injection only.
+  late final LtAddTrackers?       addTrackers;
   late final LtPauseTorrent       pauseTorrent;
   late final LtResumeTorrent      resumeTorrent;
   late final LtRecheckTorrent     recheckTorrent;
@@ -313,7 +316,6 @@ class TorrentBridgeBindings {
     addMagnet           = _lib.lookup<NativeFunction<_AddMagnetN>>('lt_add_magnet').asFunction<LtAddMagnet>();
     addTorrentFile      = _lib.lookup<NativeFunction<_AddTorrentFileN>>('lt_add_torrent_file').asFunction<LtAddTorrentFile>();
     removeTorrent       = _lib.lookup<NativeFunction<_RemoveTorrentN>>('lt_remove_torrent').asFunction<LtRemoveTorrent>();
-    addTrackers         = _lib.lookup<NativeFunction<_AddTrackersN>>('lt_add_trackers').asFunction<LtAddTrackers>();
     pauseTorrent        = _lib.lookup<NativeFunction<_PauseTorrentN>>('lt_pause_torrent').asFunction<LtPauseTorrent>();
     resumeTorrent       = _lib.lookup<NativeFunction<_ResumeTorrentN>>('lt_resume_torrent').asFunction<LtResumeTorrent>();
     recheckTorrent      = _lib.lookup<NativeFunction<_RecheckTorrentN>>('lt_recheck_torrent').asFunction<LtRecheckTorrent>();
@@ -321,6 +323,8 @@ class TorrentBridgeBindings {
     // the whole engine init — metadata caching simply stays disabled.
     exportTorrent = _tryLookup(() =>
         _lib.lookup<NativeFunction<_ExportTorrentN>>('lt_export_torrent').asFunction<LtExportTorrent>());
+    addTrackers = _tryLookup(() =>
+        _lib.lookup<NativeFunction<_AddTrackersN>>('lt_add_trackers').asFunction<LtAddTrackers>());
     getTorrentCount     = _lib.lookup<NativeFunction<_GetTorrentCountN>>('lt_get_torrent_count').asFunction<LtGetTorrentCount>();
     getAllStatuses       = _lib.lookup<NativeFunction<_GetAllStatusesN>>('lt_get_all_statuses').asFunction<LtGetAllStatuses>();
     getStatus           = _lib.lookup<NativeFunction<_GetStatusN>>('lt_get_status').asFunction<LtGetStatus>();

@@ -274,9 +274,18 @@ class LibtorrentFlutter {
     }
   }
 
+  /// Whether the native lib exposes `lt_add_trackers`, i.e. trackers can be
+  /// pushed into already-mounted torrents at runtime. False on prebuilt libs
+  /// predating that symbol (stale Android prebuilts) — new tasks then only
+  /// get trackers through magnet-URI injection.
+  bool get supportsRuntimeTrackers => _b.addTrackers != null;
+
   /// Add announce trackers to a torrent (deduplicated by URL natively).
+  ///
+  /// No-op when the native lib predates `lt_add_trackers`.
   void addTrackers(int torrentId, List<String> trackers) {
-    if (trackers.isEmpty) return;
+    final addTrackers = _b.addTrackers;
+    if (addTrackers == null || trackers.isEmpty) return;
     final ptrs = <Pointer<Utf8>>[];
     try {
       for (final t in trackers) {
@@ -287,7 +296,7 @@ class LibtorrentFlutter {
         for (var i = 0; i < ptrs.length; i++) {
           buf[i] = ptrs[i];
         }
-        _b.addTrackers(_session, torrentId, buf, ptrs.length);
+        addTrackers(_session, torrentId, buf, ptrs.length);
       } finally {
         calloc.free(buf);
       }
