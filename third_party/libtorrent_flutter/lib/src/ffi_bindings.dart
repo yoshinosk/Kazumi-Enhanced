@@ -63,6 +63,9 @@ typedef LtAlertCallbackDart = void Function(
     int alertType, int id, Pointer<Utf8> message, Pointer<Void> userData);
 
 // ─── Session ──────────────────────────────────────────────────────────────────
+typedef _SetSslCertPathN = Void Function(Pointer<Utf8>);
+typedef LtSetSslCertPath = void Function(Pointer<Utf8>);
+
 typedef _CreateSessionN = Pointer<LtSessionOpaque> Function(
     Pointer<Utf8>, Int32, Int32);
 typedef LtCreateSession = Pointer<LtSessionOpaque> Function(
@@ -272,6 +275,11 @@ class TorrentBridgeBindings {
 
   late final LtCreateSession      createSession;
   late final LtDestroySession     destroySession;
+
+  /// Optional binding: pre-2.0.0 native libs hard-fail session creation unless
+  /// a CA bundle is installed first, and expose `lt_set_ssl_cert_path` for it.
+  /// Absent on newer libs, which resolve the trust store themselves.
+  late final LtSetSslCertPath?   setSslCertPath;
   late final LtPollAlerts         pollAlerts;
   late final LtSetAlertCallback   setAlertCallback;
   late final LtAddMagnet          addMagnet;
@@ -310,6 +318,8 @@ class TorrentBridgeBindings {
 
   TorrentBridgeBindings(this._lib) {
     createSession       = _lib.lookup<NativeFunction<_CreateSessionN>>('lt_create_session').asFunction<LtCreateSession>();
+    setSslCertPath = _tryLookup(() =>
+        _lib.lookup<NativeFunction<_SetSslCertPathN>>('lt_set_ssl_cert_path').asFunction<LtSetSslCertPath>());
     destroySession      = _lib.lookup<NativeFunction<_DestroySessionN>>('lt_destroy_session').asFunction<LtDestroySession>();
     pollAlerts          = _lib.lookup<NativeFunction<_PollAlertsN>>('lt_poll_alerts').asFunction<LtPollAlerts>();
     setAlertCallback    = _lib.lookup<NativeFunction<_SetAlertCallbackN>>('lt_set_alert_callback').asFunction<LtSetAlertCallback>();

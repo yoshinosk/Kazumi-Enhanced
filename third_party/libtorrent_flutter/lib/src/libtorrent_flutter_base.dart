@@ -3,11 +3,14 @@
 // status polling, and a built-in HTTP streaming server.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'ffi_bindings.dart';
 import 'models.dart';
@@ -54,6 +57,97 @@ class TrackerManager {
 }
 
 // ─── Status converters ──────────────────────────────────────────────────────
+
+// ─── Trust store (OpenSSL) ───────────────────────────────────────────────────
+
+/// Installs a CA bundle for libtorrent's statically linked OpenSSL.
+///
+/// Native libs from the 2.x Android line read `SSL_CERT_FILE` during
+/// `lt_create_session` and abort with "SSL_CERT_FILE was not set" when it is
+/// missing. Android ships no PEM bundle an app can point at, so its system
+/// trust store is concatenated into one.
+class TrustStore {
+  TrustStore._();
+
+  /// Candidate CA bundles, in preference order. First existing one wins.
+  static const _candidates = <String>[
+    '/etc/ssl/certs/ca-certificates.crt', // Debian/Ubuntu
+    '/etc/pki/tls/certs/ca-bundle.crt', // Fedora/RHEL
+    '/etc/ssl/ca-bundle.pem', // SUSE
+    '/etc/ssl/cert.pem', // Alpine
+  ];
+
+  static const _androidStoreDir = '/system/etc/security/cacerts';
+
+  static const _bundleName = 'cacert-bundle.pem';
+
+  /// Resolves a usable CA bundle path, writing one out if necessary.
+  ///
+  /// Always yields a path when [setPath] is non-null: a partial bundle still
+  /// lets the session start (DHT/uTP/plain peers keep working) and only costs
+  /// HTTPS tracker announces, which beats failing to start at all.
+  static Future<String> resolve(
+    void Function(Pointer<Utf8>)? setPath, {
+    void Function(String message)? onWarn,
+  }) async {
+    if (setPath == null) return '';
+
+    for (final path in _candidates) {
+      if (await File(path).exists()) return path;
+    }
+
+    final out = File('${Directory.systemTemp.path}/$_bundleName');
+    if (await out.exists() && await out.length() > 1024) {
+      return out.path;
+    }
+
+    final built = await _buildFromAndroidStore();
+    if (built != null && await built.length() > 1024) return built.path;
+
+    onWarn?.call(
+      'no CA bundle found; HTTPS announces will fail but the session can start',
+    );
+    return out.path;
+  }
+
+  /// Concatenates Android's hashed DER cert store into a single PEM file.
+  static Future<File?> _buildFromAndroidStore() async {
+    try {
+      final dir = Directory(_androidStoreDir);
+      if (!dir.existsSync()) return null;
+
+      final out = File('${Directory.systemTemp.path}/$_bundleName');
+      final sink = out.openWrite();
+      var count = 0;
+      try {
+        for (final entity in dir.listSync()) {
+          if (entity is! File) continue;
+          // Android ships raw DER certs under an OpenSSL subject-hash name.
+          if (!entity.path.endsWith('.0')) continue;
+          Uint8List der;
+          try {
+            der = await entity.readAsBytes();
+          } catch (_) {
+            continue;
+          }
+          final b64 = base64.encode(der);
+          sink.writeln('-----BEGIN CERTIFICATE-----');
+          for (var i = 0; i < b64.length; i += 64) {
+            sink.writeln(b64.substring(i, min(i + 64, b64.length)));
+          }
+          sink.writeln('-----END CERTIFICATE-----');
+          count++;
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+      return count == 0 ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+}
 
 TorrentInfo _toTorrentInfo(LtTorrentStatus s) => TorrentInfo(
   id:            s.id,
@@ -174,6 +268,24 @@ class LibtorrentFlutter {
 
     final lib = TorrentBridgeBindings.open();
     engine._b = lib;
+
+    // Some native builds abort session creation when OpenSSL has no CA bundle
+    // configured, so install the trust store first when they expose the hook.
+    final setSslCertPath = lib.setSslCertPath;
+    if (setSslCertPath != null) {
+      final certPath = await TrustStore.resolve(
+        (p) => setSslCertPath(p),
+        onWarn: (m) => debugPrint('LibtorrentFlutter: $m'),
+      );
+      if (certPath.isNotEmpty) {
+        final cp = certPath.toNativeUtf8();
+        try {
+          setSslCertPath(cp);
+        } finally {
+          malloc.free(cp);
+        }
+      }
+    }
 
     final iface = listenInterface.toNativeUtf8();
     try {

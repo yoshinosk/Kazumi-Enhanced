@@ -4,7 +4,7 @@
 
 ## 2026.9.29
 
-- 修复：Android 上磁力下载引擎启动失败（提示缺少 `lt_add_trackers` 符号）导致完全无法使用的问题；并保证用户配置的 tracker 源在新增磁力任务时依然生效。
+- 修复：Android 上磁力下载引擎无法启动的问题（先后修复「缺少 lt_add_trackers 符号」与「SSL_CERT_FILE was not set」两个报错）；并保证用户配置的 tracker 源在新增磁力任务时依然生效。
 
 ## 2026.9.28
 
