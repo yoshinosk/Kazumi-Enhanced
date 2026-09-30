@@ -96,18 +96,24 @@ class TrustStore {
       if (await File(path).exists()) return path;
     }
 
-    final out = File('${Directory.systemTemp.path}/$_bundleName');
-    if (await out.exists() && await out.length() > 1024) {
-      return out.path;
+    // Build from the platform trust store before reusing any cached file, so a
+    // truncated bundle left behind by an earlier run cannot pin a broken CA
+    // set for the rest of the install's life.
+    final out = await _buildFromAndroidStore();
+    if (out != null && await out.length() > 1024) return out.path;
+
+    final cached = File('${Directory.systemTemp.path}/$_bundleName');
+    if (await cached.exists() && await cached.length() > 1024) {
+      return cached.path;
     }
 
-    final built = await _buildFromAndroidStore();
-    if (built != null && await built.length() > 1024) return built.path;
-
+    // Nothing usable: still hand back a path so the native side gets a
+    // (non-empty) SSL_CERT_FILE and the session can start with plaintext
+    // peers, rather than aborting on an unset env var.
     onWarn?.call(
       'no CA bundle found; HTTPS announces will fail but the session can start',
     );
-    return out.path;
+    return cached.path;
   }
 
   /// Concatenates Android's hashed DER cert store into a single PEM file.
@@ -116,8 +122,11 @@ class TrustStore {
       final dir = Directory(_androidStoreDir);
       if (!dir.existsSync()) return null;
 
+      // Build into a side file, then swap it in, so a process killed
+      // mid-write cannot leave a partial bundle that later runs would reuse.
       final out = File('${Directory.systemTemp.path}/$_bundleName');
-      final sink = out.openWrite();
+      final pending = File('${out.path}.pending');
+      final sink = pending.openWrite();
       var count = 0;
       try {
         for (final entity in dir.listSync()) {
@@ -130,6 +139,7 @@ class TrustStore {
           } catch (_) {
             continue;
           }
+          if (der.isEmpty) continue;
           final b64 = base64.encode(der);
           sink.writeln('-----BEGIN CERTIFICATE-----');
           for (var i = 0; i < b64.length; i += 64) {
@@ -142,7 +152,12 @@ class TrustStore {
         await sink.flush();
         await sink.close();
       }
-      return count == 0 ? null : out;
+      if (count == 0) {
+        await pending.delete().catchError((_) => pending);
+        return null;
+      }
+      await pending.rename(out.path);
+      return out;
     } catch (_) {
       return null;
     }
