@@ -77,7 +77,13 @@ class TrustStore {
     '/etc/ssl/cert.pem', // Alpine
   ];
 
-  static const _androidStoreDir = '/system/etc/security/cacerts';
+  /// Android system trust-store locations, in preference order. Android 14+
+  /// relocated the store into the Conscrypt APEX; earlier releases use the
+  /// legacy `/system` path, and some OEM images keep both.
+  static const _androidStoreDirs = <String>[
+    '/apex/com.android.conscrypt/cacerts',
+    '/system/etc/security/cacerts',
+  ];
 
   static const _bundleName = 'cacert-bundle.pem';
 
@@ -116,10 +122,24 @@ class TrustStore {
     return cached.path;
   }
 
-  /// Concatenates Android's hashed DER cert store into a single PEM file.
+  /// Concatenates Android's system trust store into a single PEM file.
+  ///
+  /// The store's on-disk format is not stable across Android versions: older
+  /// releases keep raw DER under `<subject-hash>.0` names, while Android 14+
+  /// moved to `/apex/com.android.conscrypt/cacerts` and ships PEM text. So the
+  /// format is sniffed per file -- base64-wrapping an already-PEM file yields
+  /// bytes that OpenSSL rejects with "asn1 encoding routines::wrong tag".
   static Future<File?> _buildFromAndroidStore() async {
+    for (final dir in _androidStoreDirs) {
+      final built = await _buildFromDir(dir);
+      if (built != null) return built;
+    }
+    return null;
+  }
+
+  static Future<File?> _buildFromDir(String path) async {
     try {
-      final dir = Directory(_androidStoreDir);
+      final dir = Directory(path);
       if (!dir.existsSync()) return null;
 
       // Build into a side file, then swap it in, so a process killed
@@ -131,21 +151,16 @@ class TrustStore {
       try {
         for (final entity in dir.listSync()) {
           if (entity is! File) continue;
-          // Android ships raw DER certs under an OpenSSL subject-hash name.
-          if (!entity.path.endsWith('.0')) continue;
-          Uint8List der;
+          Uint8List raw;
           try {
-            der = await entity.readAsBytes();
+            raw = await entity.readAsBytes();
           } catch (_) {
             continue;
           }
-          if (der.isEmpty) continue;
-          final b64 = base64.encode(der);
-          sink.writeln('-----BEGIN CERTIFICATE-----');
-          for (var i = 0; i < b64.length; i += 64) {
-            sink.writeln(b64.substring(i, min(i + 64, b64.length)));
-          }
-          sink.writeln('-----END CERTIFICATE-----');
+          if (raw.isEmpty) continue;
+          final pem = _toPem(raw);
+          if (pem == null) continue;
+          sink.write(pem);
           count++;
         }
       } finally {
@@ -161,6 +176,44 @@ class TrustStore {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Wraps one trust-store file as a PEM block, or returns null if it is not a
+  /// certificate we can use.
+  static String? _toPem(Uint8List raw) {
+    const header = '-----BEGIN CERTIFICATE-----';
+    const footer = '-----END CERTIFICATE-----';
+
+    // Already PEM: pass the certificate through unchanged. The header is
+    // searched for rather than tested at offset 0, because trust stores
+    // (and Android's Conscrypt APEX in particular) prefix each file with a
+    // "# <subject>" comment line.
+    final head = ascii.decode(
+      raw.length <= 1024 ? raw : raw.sublist(0, 1024),
+      allowInvalid: true,
+    );
+    final begin = head.indexOf(header);
+    if (begin >= 0) {
+      final text = ascii.decode(raw, allowInvalid: true);
+      final from = begin + header.length;
+      final end = text.indexOf(footer, from);
+      if (end < 0) return null;
+      final body = text.substring(from, end).replaceAll(RegExp(r'\s'), '');
+      if (body.isEmpty) return null;
+      return '$header\n$body\n$footer\n';
+    }
+
+    // Raw DER: an X.509 Certificate is a SEQUENCE, so the first tag must be
+    // 0x30. Anything else means this file is not a bare certificate.
+    if (raw[0] != 0x30) return null;
+
+    final b64 = base64.encode(raw);
+    final buf = StringBuffer('$header\n');
+    for (var i = 0; i < b64.length; i += 64) {
+      buf.writeln(b64.substring(i, min(i + 64, b64.length)));
+    }
+    buf.writeln(footer);
+    return buf.toString();
   }
 }
 
