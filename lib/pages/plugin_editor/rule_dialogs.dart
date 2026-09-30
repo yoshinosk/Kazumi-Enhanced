@@ -9,6 +9,7 @@ import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 import 'package:kazumi/services/plugin/plugin_import_parser.dart';
 import 'package:kazumi/utils/encoding.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 enum RuleAddSource { catalog, clipboard, file, create }
 
@@ -297,7 +298,7 @@ class _RuleDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return AlertDialog(
-      backgroundColor: colors.surfaceContainerHigh,
+      backgroundColor: modalSurfaceColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       constraints: const BoxConstraints(maxWidth: 560),
       insetPadding: const EdgeInsets.all(24),

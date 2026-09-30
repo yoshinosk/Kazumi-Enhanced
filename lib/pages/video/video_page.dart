@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/bean/widget/media_error_widget.dart';
@@ -327,29 +328,34 @@ class _VideoPageState extends State<VideoPage>
         return VideoSystemBars(
           fullscreen: videoPageController.isFullscreen,
           isPip: isPip,
-          child: Scaffold(
-            body: VideoPageLayout(
-              fullscreen: videoPageController.isFullscreen,
-              isPip: isPip,
-              playerBuilder: (context, layout) => ColoredBox(
-                color: Colors.black,
-                child: Focus(
-                  focusNode: keyboardFocus,
-                  autofocus: true,
-                  // Cleanup resets loading while the route is still visible.
-                  child: _isExiting
-                      ? const SizedBox.expand()
-                      : Observer(builder: (_) => _buildPlayerBody(layout)),
-                ),
-              ),
-              tabs: tabBody,
-              sidePanel: VideoSidePanel(
-                key: _sidePanelKey,
+          child: Theme(
+            // 画面本身压着背景图，界面控件的半透明表面在这里会看不清，
+            // 播放器整棵子树退出玻璃表面。
+            data: opaqueSurfaceTheme(Theme.of(context)),
+            child: Scaffold(
+              body: VideoPageLayout(
                 fullscreen: videoPageController.isFullscreen,
-                disableAnimations: disableAnimations,
-                onOpened: _revealCurrentEpisode,
-                onClosed: keyboardFocus.requestFocus,
-                child: tabBody,
+                isPip: isPip,
+                playerBuilder: (context, layout) => ColoredBox(
+                  color: Colors.black,
+                  child: Focus(
+                    focusNode: keyboardFocus,
+                    autofocus: true,
+                    // Cleanup resets loading while the route is still visible.
+                    child: _isExiting
+                        ? const SizedBox.expand()
+                        : Observer(builder: (_) => _buildPlayerBody(layout)),
+                  ),
+                ),
+                tabs: tabBody,
+                sidePanel: VideoSidePanel(
+                  key: _sidePanelKey,
+                  fullscreen: videoPageController.isFullscreen,
+                  disableAnimations: disableAnimations,
+                  onOpened: _revealCurrentEpisode,
+                  onClosed: keyboardFocus.requestFocus,
+                  child: tabBody,
+                ),
               ),
             ),
           ),

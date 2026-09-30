@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/exit_confirmation_dialog.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/esc_back_scope.dart';
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/utils/device.dart';
@@ -309,7 +310,11 @@ class _AppWidgetState extends State<AppWidget>
           themeMode: themeProvider.themeMode,
           scaffoldMessengerKey: rootScaffoldMessengerKey,
           // 全局 ESC 返回：覆盖所有左上角带返回按钮的推入页面。
-          builder: (context, child) => EscBackScope(child: child),
+          // AppSurfaceLayer 位于根 Navigator 之上，自定义背景图与半透明
+          // 表面因此对所有页面生效（播放器等全屏页面自行退出玻璃态）。
+          builder: (context, child) => AppSurfaceLayer(
+            child: EscBackScope(child: child ?? const SizedBox.shrink()),
+          ),
           routerConfig: ModularApp.routerConfigOf(context),
         );
       },

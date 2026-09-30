@@ -80,7 +80,8 @@ class SettingsDetailScaffold extends StatelessWidget {
       );
     }
 
-    // Routed panes must paint an opaque surface for page transitions.
+    // Routed panes paint their own surface so page transitions don't blend two
+    // panes together; the theme decides whether that surface is translucent.
     return Scaffold(
       appBar: appBar,
       body: body,

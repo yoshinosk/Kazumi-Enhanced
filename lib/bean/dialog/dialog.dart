@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/utils/constants.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 /// Single-use ownership of a route, including before its first frame.
 class KazumiDialogHandle<T> {
@@ -304,6 +305,8 @@ class _SimpleLoadingDialog extends StatelessWidget {
   Widget build(BuildContext context) => Center(
         child: Card(
           elevation: 8,
+          // 模态浮层：底色保持不透明，玻璃态的卡片底色会让文字发虚。
+          color: modalSurfaceColor(context),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(

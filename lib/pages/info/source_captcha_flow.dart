@@ -120,7 +120,7 @@ class _VerifyDialogFrame extends StatelessWidget {
     final colors = theme.colorScheme;
     return AlertDialog(
       scrollable: true,
-      backgroundColor: colors.surfaceContainerHigh,
+      backgroundColor: modalSurfaceColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       constraints: const BoxConstraints(maxWidth: 420),
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),

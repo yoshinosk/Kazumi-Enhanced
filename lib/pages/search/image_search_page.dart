@@ -237,11 +237,8 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: colors.surface,
       appBar: SysAppBar(
-        backgroundColor: colors.surface,
         actions: [
           IconButton(
               onPressed: _showHelp,

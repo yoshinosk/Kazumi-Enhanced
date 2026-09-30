@@ -385,14 +385,15 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                     child: SizedBox(
                       height: 120,
                       width: double.infinity,
-                      // 预览与主界面一致的叠加效果：背景图 + 半透明表面色。
+                      // 预览与实际一致的叠加效果：背景图 + 半透明表面色。
+                      // 表面色直接取环境主题的值：AppSurfaceLayer 已经把整棵树
+                      // 换成玻璃态，这里再乘一次遮罩会比实际更透。
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
                           const AppBackgroundLayer(),
                           ColoredBox(
-                            color: backgroundVeilColor(
-                                context, backgroundProvider),
+                            color: Theme.of(context).scaffoldBackgroundColor,
                           ),
                         ],
                       ),
@@ -451,7 +452,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                   },
                 ),
             ],
-            bottomInfo: Text('背景图显示于主界面，播放器等页面不受影响'),
+            bottomInfo: Text('背景图显示于所有页面，播放器与图片预览不受影响'),
           ),
           SettingsSection(
             title: Text('显示'),

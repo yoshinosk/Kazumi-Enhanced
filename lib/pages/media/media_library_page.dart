@@ -22,6 +22,7 @@ import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:kazumi/utils/file_system.dart' show revealInFileManager;
 import 'package:kazumi/utils/format.dart' show formatBytes;
+import 'package:kazumi/utils/surface_theme.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
@@ -494,18 +495,27 @@ class _SortGroupHeaderDelegate extends SliverPersistentHeaderDelegate {
     bool overlapsContent,
   ) {
     final theme = Theme.of(context);
-    return ColoredBox(
-      color: theme.scaffoldBackgroundColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-        child: Align(
-          alignment: Alignment.bottomLeft,
-          child: Text(
-            title,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
+    // 分组标题是盖在列表之上的浮层：与卡片同款的玻璃底色 + 描边，
+    // 两侧留窄边并加圆角，滚动时下方内容会从玻璃后透出。
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        height: _height - 4,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.fromBorderSide(context.surfaces.cardOutline),
+        ),
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),

@@ -3,7 +3,6 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter/services.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/background_provider.dart';
-import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/pages/menu/route_visibility.dart';
@@ -101,7 +100,6 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
   @override
   Widget build(BuildContext context) {
     final background = context.watch<BackgroundProvider>();
-    final hasBackground = background.hasImage;
     return RouteVisibility(
       isCovered: _isCovered,
       child: PopScope(
@@ -111,21 +109,11 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
             _handleSystemBack(context);
           }
         },
+        // 背景图与半透明表面由 AppSurfaceLayer 统一铺在根 Navigator 之下。
         child: OrientationBuilder(
-          builder: (context, orientation) {
-            final Widget shell = orientation == Orientation.portrait
-                ? _bottomMenu(context, _selectedIndex, background)
-                : _sideMenu(context, _selectedIndex, background);
-            if (!hasBackground) {
-              return shell;
-            }
-            return Stack(
-              children: [
-                const Positioned.fill(child: AppBackgroundLayer()),
-                shell,
-              ],
-            );
-          },
+          builder: (context, orientation) => orientation == Orientation.portrait
+              ? _bottomMenu(context, _selectedIndex, background)
+              : _sideMenu(context, _selectedIndex, background),
         ),
       ),
     );
@@ -141,17 +129,6 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
       onNotification: (notification) => !notification.canHandlePop,
       child: RouterOutlet(key: _outletKey),
     );
-    if (background.hasImage) {
-      // 自定义背景透出：outlet 内页面的 Scaffold / AppBar 与卡片表面改为半透明，
-      // 卡片补一层描边，由底下的 AppBackgroundLayer 绘制背景。
-      child = Theme(
-        data: backgroundSurfaceTheme(
-          Theme.of(context),
-          backgroundVeilAlpha(background),
-        ),
-        child: child,
-      );
-    }
     if (borderRadius != null) {
       child = ClipRRect(borderRadius: borderRadius, child: child);
     }
@@ -166,18 +143,24 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     );
   }
 
+  /// 导航栏 / 侧边栏的底色：背景启用时跟随页面遮罩色。
+  ///
+  /// 遮罩色已由 AppSurfaceLayer 淡化成半透明，这里直接取环境主题的值，
+  /// 再乘一次遮罩会淡得过头。
+  Color? _navSurface(BuildContext context, BackgroundProvider background) =>
+      background.hasImage ? Theme.of(context).scaffoldBackgroundColor : null;
+
   Widget _bottomMenu(
     BuildContext context,
     int selectedIndex,
     BackgroundProvider background,
   ) {
     final hasBackground = background.hasImage;
-    final veil = hasBackground ? backgroundVeilColor(context, background) : null;
     return Scaffold(
       backgroundColor: hasBackground ? Colors.transparent : null,
       body: _outlet(context, background),
       bottomNavigationBar: NavigationBar(
-        backgroundColor: veil,
+        backgroundColor: _navSurface(context, background),
         destinations: const <Widget>[
           NavigationDestination(
             selectedIcon: Icon(Icons.home),
@@ -234,9 +217,8 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
         children: [
           EmbeddedNativeControlArea(
             child: NavigationRail(
-              backgroundColor: hasBackground
-                  ? backgroundVeilColor(context, background)
-                  : Theme.of(context).colorScheme.surfaceContainer,
+              backgroundColor: _navSurface(context, background) ??
+                  Theme.of(context).colorScheme.surfaceContainer,
               groupAlignment: 1,
               leading: FloatingActionButton(
                 elevation: 0,

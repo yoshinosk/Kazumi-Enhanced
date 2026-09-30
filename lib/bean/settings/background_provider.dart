@@ -8,8 +8,8 @@ import 'package:kazumi/services/storage/storage.dart';
 
 /// 自定义背景图的全局状态。
 ///
-/// 背景图仅作用于主界面外壳（底部导航 / 侧边栏与其承载的页面），
-/// 播放器、设置等覆盖在根导航上的页面不受影响。
+/// 背景图铺在整窗底部（AppSurfaceLayer），所有页面都能透出；卡片等表面在
+/// 玻璃态下半透明，播放器与图片预览自行退出玻璃效果。
 class BackgroundProvider extends ChangeNotifier {
   BackgroundProvider() {
     final stored = GStorage.getSetting(SettingsKeys.customBackgroundPath);

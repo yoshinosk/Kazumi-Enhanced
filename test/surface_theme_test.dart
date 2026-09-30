@@ -4,8 +4,11 @@ import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/utils/surface_theme.dart';
 import 'package:kazumi/utils/theme.dart';
 
-ThemeData _baseTheme() =>
-    buildAppTheme(brightness: Brightness.dark, fontFamily: null, color: Colors.green);
+ThemeData _baseTheme({Brightness brightness = Brightness.dark}) => buildAppTheme(
+      brightness: brightness,
+      fontFamily: null,
+      color: Colors.green,
+    );
 
 void main() {
   group('backgroundSurfaceTheme', () {
@@ -20,15 +23,30 @@ void main() {
       expect(colors.surfaceContainerLow.a,
           closeTo(0.65 * cardSurfaceAlphaScale, 0.0001));
       expect(colors.surfaceContainerHighest.a, lessThan(0.3));
-      // 弹窗、底部弹层叠在页面之上，必须保持不透明。
+      // 底部弹层等浮层叠在页面之上，必须保持不透明。
       expect(colors.surface.a, base.colorScheme.surface.a);
-      expect(colors.surfaceContainerLowest.a, base.colorScheme.surfaceContainerLowest.a);
+      expect(colors.surfaceContainerLowest.a,
+          base.colorScheme.surfaceContainerLowest.a);
+    });
+
+    test('浮层主题（弹窗 / 菜单 / 底部弹层）保持不透明', () {
+      final base = _baseTheme();
+      final theme = backgroundSurfaceTheme(base, 0.65);
+
+      expect(theme.dialogTheme.backgroundColor!.a, 1.0);
+      expect(theme.popupMenuTheme.color!.a, 1.0);
+      expect(theme.bottomSheetTheme.backgroundColor!.a, 1.0);
+      expect(theme.menuTheme.style!.backgroundColor!.resolve({})?.a, 1.0);
+      expect(
+          theme.dropdownMenuTheme.menuStyle!.backgroundColor!.resolve({})?.a,
+          1.0);
     });
 
     test('卡片补上描边，未自带 shape 的 Card 由 cardTheme 带上', () {
       final theme = backgroundSurfaceTheme(_baseTheme(), 0.65);
       final outline = theme.extension<KazumiSurfaces>()!.cardOutline;
 
+      expect(theme.extension<KazumiSurfaces>()!.glass, isTrue);
       expect(outline.width, 1);
       expect(outline.color.a, closeTo(0.14, 0.0001));
       final shape = theme.cardTheme.shape! as RoundedRectangleBorder;
@@ -46,9 +64,10 @@ void main() {
     });
 
     test('浅色主题下卡片底色接近白色半透明', () {
-      final base = buildAppTheme(
-          brightness: Brightness.light, fontFamily: null, color: Colors.green);
-      final card = backgroundSurfaceTheme(base, 0.65).colorScheme.surfaceContainerLow;
+      final card = backgroundSurfaceTheme(
+        _baseTheme(brightness: Brightness.light),
+        0.65,
+      ).colorScheme.surfaceContainerLow;
 
       expect(card.a, closeTo(0.65 * cardSurfaceAlphaScale, 0.0001));
       // 浅色主题的 surfaceContainerLow 本身就是接近白的颜色。
@@ -56,21 +75,47 @@ void main() {
     });
   });
 
+  group('opaqueSurfaceTheme', () {
+    test('把玻璃表面还原为不透明，主题配色不变', () {
+      final base = _baseTheme();
+      final glass = backgroundSurfaceTheme(base, 0.65);
+      final solid = opaqueSurfaceTheme(glass);
+
+      expect(solid.scaffoldBackgroundColor.a, 1.0);
+      expect(solid.colorScheme.surfaceContainerLow.a, 1.0);
+      expect(solid.colorScheme.surfaceContainer.a, 1.0);
+      expect(solid.colorScheme.primaryContainer.a, 1.0);
+      // 淡化只改 alpha，还原后应与未启用背景图时完全一致。
+      expect(solid.colorScheme.surfaceContainerLow,
+          base.colorScheme.surfaceContainerLow);
+      expect(solid.scaffoldBackgroundColor, base.scaffoldBackgroundColor);
+      expect(solid.extension<KazumiSurfaces>()!.glass, isFalse);
+      expect((solid.cardTheme.shape! as RoundedRectangleBorder).side,
+          BorderSide.none);
+    });
+
+    test('未启用背景图时原样返回', () {
+      final base = _baseTheme();
+      expect(opaqueSurfaceTheme(base), same(base));
+    });
+  });
+
   group('KazumiSurfaces', () {
     test('未启用背景图时不描边，视觉与引入前一致', () {
       final surfaces = _baseTheme().extension<KazumiSurfaces>()!;
 
-      expect(surfaces, isNotNull);
+      expect(surfaces.glass, isFalse);
       expect(surfaces.cardOutline, BorderSide.none);
       expect(surfaces.cardOutline.width, 0);
     });
 
     test('copyWith / lerp 保持描边描述完整', () {
       final glass = KazumiSurfaces.glass(_baseTheme().colorScheme);
-      final solid = const KazumiSurfaces.solid();
+      const solid = KazumiSurfaces.solid();
 
       expect(glass.copyWith().cardOutline, glass.cardOutline);
       expect(solid.lerp(glass, 0.5).cardOutline.width, closeTo(0.5, 0.0001));
+      expect(solid.lerp(glass, 1).glass, isTrue);
       expect(glass.lerp(null, 0.5), glass);
     });
   });

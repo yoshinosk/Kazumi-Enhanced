@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 enum ExitDialogAction { exit, minimizeToTray }
 
@@ -49,7 +50,7 @@ class _ExitConfirmationDialogState extends State<ExitConfirmationDialog> {
     return AlertDialog(
       constraints: const BoxConstraints(minWidth: 280, maxWidth: 440),
       insetPadding: const EdgeInsets.all(24),
-      backgroundColor: colors.surfaceContainerHigh,
+      backgroundColor: modalSurfaceColor(context),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       clipBehavior: Clip.antiAlias,
