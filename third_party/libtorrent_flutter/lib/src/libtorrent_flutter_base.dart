@@ -741,16 +741,25 @@ class LibtorrentFlutter {
     } finally { calloc.free(buf); }
   }
 
+  // totalUploaded MUST participate in the comparison: for a seeding torrent
+  // (progress pinned at 1.0, no download activity) it is the only field that
+  // keeps moving, and the app derives the seed-ratio stop condition from it.
+  // Without it a stable-seed snapshot (steady upload rate, constant peer
+  // count) never refreshes, so the app's `totalUploaded` — and with it the
+  // ratio threshold check — freezes at a stale value and the torrent keeps
+  // seeding forever even after the configured stop condition is met.
   bool _changed(TorrentInfo a, TorrentInfo b) =>
-      a.state       != b.state       ||
-      a.progress    != b.progress    ||
-      a.downloadRate!= b.downloadRate||
-      a.uploadRate  != b.uploadRate  ||
-      a.totalDone   != b.totalDone   ||
-      a.numPeers    != b.numPeers    ||
-      a.isPaused    != b.isPaused    ||
-      a.hasMetadata != b.hasMetadata ||
-      a.name        != b.name;
+      a.state         != b.state         ||
+      a.progress      != b.progress      ||
+      a.downloadRate  != b.downloadRate  ||
+      a.uploadRate    != b.uploadRate    ||
+      a.totalDone     != b.totalDone     ||
+      a.totalUploaded != b.totalUploaded ||
+      a.numPeers      != b.numPeers      ||
+      a.numSeeds      != b.numSeeds      ||
+      a.isPaused      != b.isPaused      ||
+      a.hasMetadata   != b.hasMetadata   ||
+      a.name          != b.name;
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 

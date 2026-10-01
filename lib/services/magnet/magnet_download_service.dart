@@ -1628,6 +1628,27 @@ class MagnetDownloadService {
           }
         }
       }
+      // 幂等兜底：状态为「已完成」的任务必须与引擎解绑（停止上传）。
+      // 翻转当轮可能因边下边播在播保留句柄、或移除调用失败而残留句柄；
+      // 此后状态不再变化，一次性副作用便没有重试机会，任务会一直做种。
+      // 这里每轮补做移除（removeTorrent 幂等：句柄不存在时为 no-op），
+      // 保证达标任务最终一定停止上传。在播任务豁免，由
+      // stopStreamsForTask 在流停止后补做移除。
+      if (entry.status == 'complete' &&
+          entry.sessionGid != null &&
+          !_streamingTaskIds.contains(entry.taskId)) {
+        try {
+          LibtorrentFlutter.instance.removeTorrent(id, deleteFiles: false);
+          entry.sessionGid = null;
+          KazumiLogger().i(
+              'MagnetDownloadService: stop seeding (deferred) for '
+              '${entry.fileName.isNotEmpty ? entry.fileName : entry.title}');
+        } catch (e) {
+          KazumiLogger().w(
+              'MagnetDownloadService: stop seeding (deferred) failed',
+              error: e);
+        }
+      }
       // 关键状态切换立即持久化，避免进程退出 / 崩溃时把状态丢掉。
       if (prevStatus != entry.status &&
           (entry.status == 'complete' ||
