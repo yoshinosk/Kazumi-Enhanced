@@ -305,6 +305,13 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
     await controller.setSearchFansub(picked.isEmpty ? null : picked);
   }
 
+  /// 非 Animes Garden 源点击字幕组筛选：功能不支持，提示切换搜索源。
+  void _hintFansubSource() {
+    KazumiDialog.showToast(
+      message: '字幕组筛选仅 Animes Garden 源支持，请先通过右上角按钮切换搜索源',
+    );
+  }
+
   void _createSubscriptionFromSearch() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -361,58 +368,59 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
             ),
             onSubmitted: (value) => controller.search(value),
           ),
-          // 搜索条件工具栏：字幕组筛选（仅 AG 源）+ 按当前条件创建订阅
+          // 搜索条件工具栏：字幕组筛选 + 按当前条件创建订阅。
+          // 字幕组筛选始终展示：仅 Animes Garden 源支持，其它源置灰、
+          // 点击提示切换源，避免默认 Mikan 源时整个入口凭空消失。
           Observer(
             builder: (_) {
               final isAg =
                   controller.defaultSource.kind == MagnetSourceKind.json;
               final hasQuery = controller.query.trim().isNotEmpty;
-              if (!isAg && !hasQuery) {
-                return const SizedBox(height: 4);
-              }
               return Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(
                   children: [
-                    if (isAg)
-                      Expanded(
-                        child: InkWell(
-                          onTap: _pickSearchFansub,
-                          borderRadius: BorderRadius.circular(8),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              prefixIcon: const Icon(
-                                Icons.groups_rounded,
-                                size: 18,
-                              ),
-                              prefixIconConstraints: const BoxConstraints(
-                                minWidth: 32,
-                              ),
+                    Expanded(
+                      child: InkWell(
+                        onTap: isAg ? _pickSearchFansub : _hintFansubSource,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
                             ),
-                            child: Text(
-                              controller.searchFansub ?? '字幕组：不限',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: controller.searchFansub == null
-                                    ? Theme.of(context).hintColor
-                                    : null,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            prefixIcon: Icon(
+                              Icons.groups_rounded,
+                              size: 18,
+                              color: isAg
+                                  ? null
+                                  : Theme.of(context).disabledColor,
+                            ),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 32,
                             ),
                           ),
+                          child: Text(
+                            isAg
+                                ? (controller.searchFansub ?? '字幕组：不限')
+                                : '字幕组：不限',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isAg && controller.searchFansub != null
+                                  ? null
+                                  : Theme.of(context).hintColor,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      )
-                    else
-                      const Spacer(),
+                      ),
+                    ),
                     if (hasQuery) ...[
                       const SizedBox(width: 8),
                       TextButton.icon(
@@ -3226,6 +3234,9 @@ class _DownloadTaskTile extends StatelessWidget {
     final theme = Theme.of(context);
     final progress = task.progress;
     final info = task.scrapeInfo;
+    // 窄屏（手机竖屏 / 窄窗口，与媒体库 600px 断点一致）紧凑模式：
+    // 标题单行、元信息裁剪次要字段，避免 Wrap 折成多行把单条任务撑得很高。
+    final compact = MediaQuery.sizeOf(context).width < 600;
     // 分组子条目：番剧名在组头已展示，这里用文件名（含集数，最能区分
     // 各条目）/ 任务名作为标题；未分组时维持「番剧名 → 任务名 → 文件名」。
     final displayTitle = grouped
@@ -3270,7 +3281,7 @@ class _DownloadTaskTile extends StatelessWidget {
             Expanded(
               child: Text(
                 displayTitle.isEmpty ? task.fileName : displayTitle,
-                maxLines: 2,
+                maxLines: compact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium,
               ),
@@ -3292,8 +3303,9 @@ class _DownloadTaskTile extends StatelessWidget {
               ),
             ],
             // 分组子条目的组头已表明番剧归属，不再显示「已搜刮」标记；
+            // 窄屏下该标记信息量最低也一并隐藏，把宽度留给标题；
             // 「待确认」「已入库」仍保留（有独立信息量）。
-            if (!grouped && task.isScraped) ...[
+            if (!grouped && !compact && task.isScraped) ...[
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -3358,7 +3370,10 @@ class _DownloadTaskTile extends StatelessWidget {
               children: [
                 Expanded(
                   child: Wrap(
-                    spacing: 14,
+                    // 窄屏下收紧间距并裁掉次要元信息（做种 / 连接数、下载中
+                    // 的上传速度与做种率、与状态芯片重复的校验 / 元数据提示），
+                    // 保证进度条下方的元信息最多折成两行。
+                    spacing: compact ? 10 : 14,
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
@@ -3374,20 +3389,26 @@ class _DownloadTaskTile extends StatelessWidget {
                           color: theme.colorScheme.primary,
                           text: '${_formatBytes(task.downloadSpeed)}/s',
                         ),
-                      if (task.uploadSpeed > 0 && !task.isCompleted)
+                      // 上传速度：窄屏仅在未下载（做种中）时显示，避免与下载
+                      // 速度同屏挤成多行。
+                      if (task.uploadSpeed > 0 &&
+                          !task.isCompleted &&
+                          (!compact || task.downloadSpeed <= 0))
                         _TaskMeta(
                           icon: Icons.north_rounded,
                           color: theme.colorScheme.secondary,
                           text: '${_formatBytes(task.uploadSpeed)}/s',
                         ),
                       if (task.numSeeds + task.numPeers > 0 &&
-                          !task.isCompleted)
+                          !task.isCompleted &&
+                          !compact)
                         _TaskMeta(
                           icon: Icons.groups_2_outlined,
                           color: theme.colorScheme.onSurfaceVariant,
                           text: '做种 ${task.numSeeds} · 连接 ${task.numPeers}',
                         ),
-                      if (task.seedRatio > 0)
+                      // 做种率：窄屏仅做种中显示（决定自动停止时机）。
+                      if (task.seedRatio > 0 && (!compact || task.isSeeding))
                         _TaskMeta(
                           icon: Icons.sync_rounded,
                           color: theme.colorScheme.onSurfaceVariant,
@@ -3399,18 +3420,20 @@ class _DownloadTaskTile extends StatelessWidget {
                           color: theme.colorScheme.onSurfaceVariant,
                           text: '剩余 ${_formatEta(task.etaSeconds)}',
                         ),
-                      if (task.status == 'checking')
-                        _TaskMeta(
-                          icon: Icons.verified_outlined,
-                          color: theme.colorScheme.tertiary,
-                          text: '正在校验已下载文件',
-                        ),
-                      if (task.status == 'metadata')
-                        _TaskMeta(
-                          icon: Icons.hub_outlined,
-                          color: theme.colorScheme.tertiary,
-                          text: '正在获取种子元数据',
-                        ),
+                      if (!compact) ...[
+                        if (task.status == 'checking')
+                          _TaskMeta(
+                            icon: Icons.verified_outlined,
+                            color: theme.colorScheme.tertiary,
+                            text: '正在校验已下载文件',
+                          ),
+                        if (task.status == 'metadata')
+                          _TaskMeta(
+                            icon: Icons.hub_outlined,
+                            color: theme.colorScheme.tertiary,
+                            text: '正在获取种子元数据',
+                          ),
+                      ],
                     ],
                   ),
                 ),
