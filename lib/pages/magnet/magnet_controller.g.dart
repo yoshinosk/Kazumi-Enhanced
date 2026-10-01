@@ -566,6 +566,18 @@ mixin _$MagnetController on _MagnetController, Store {
     );
   }
 
+  late final _$addTorrentFileAsyncAction = AsyncAction(
+    '_MagnetController.addTorrentFile',
+    context: context,
+  );
+
+  @override
+  Future<void> addTorrentFile(String filePath, {String? dir, String? title}) {
+    return _$addTorrentFileAsyncAction.run(
+      () => super.addTorrentFile(filePath, dir: dir, title: title),
+    );
+  }
+
   late final _$pauseDownloadAsyncAction = AsyncAction(
     '_MagnetController.pauseDownload',
     context: context,
