@@ -75,3 +75,6 @@ build_runner.log
 
 # 本地发布构建产物
 /dist/
+
+# libtorrent_flutter 安卓原生库本地构建工作区（源码下载与中间产物）
+third_party/libtorrent_flutter/build_android/
