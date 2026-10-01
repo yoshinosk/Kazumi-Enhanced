@@ -70,6 +70,18 @@ class MediaGridItem {
       ];
 }
 
+/// 播放位置的可读展示（如 `12:34` / `1:02:03`），无效位置返回空串。
+String localMediaPositionLabel(Duration position) {
+  final total = position.inSeconds;
+  if (total <= 0) return '';
+  final h = total ~/ 3600;
+  final m = (total % 3600) ~/ 60;
+  final s = total % 60;
+  final mm = m.toString().padLeft(2, '0');
+  final ss = s.toString().padLeft(2, '0');
+  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+}
+
 /// 媒体库中一个文件的续播点：来自本地播放历史（adapterName='local'，
 /// episodePageUrl 精确匹配文件路径）。
 class MediaResumePoint {
@@ -78,6 +90,8 @@ class MediaResumePoint {
     required this.file,
     required this.position,
     required this.updatedAt,
+    this.finished = false,
+    this.nextFile,
   });
 
   /// 文件所在的媒体库文件夹（用于取选集列表）。
@@ -92,6 +106,14 @@ class MediaResumePoint {
   /// 最近一次进度更新时间。
   final DateTime updatedAt;
 
+  /// 上次播放的一集是否已看完：距结尾过近的进度落库时被归零，
+  /// 位置为 0 即视为看完。
+  final bool finished;
+
+  /// 看完后的下一个文件（同一文件夹内 [file] 的后一个）。
+  /// 未看完、或 [file] 已是最后一个文件时为 null。
+  final LocalMediaFile? nextFile;
+
   /// 从文件名解析的集数（失败为 0）。
   int get episode => parseLocalEpisodeNumber(file.name);
 
@@ -105,7 +127,9 @@ class MediaResumePoint {
               localMediaPathKey(folder.path) &&
           localMediaPathKey(other.file.path) == localMediaPathKey(file.path) &&
           other.position == position &&
-          other.updatedAt == updatedAt;
+          other.updatedAt == updatedAt &&
+          other.finished == finished &&
+          (other.nextFile?.path ?? '') == (nextFile?.path ?? '');
 
   @override
   int get hashCode => Object.hash(
@@ -113,19 +137,36 @@ class MediaResumePoint {
         localMediaPathKey(file.path),
         position,
         updatedAt,
+        finished,
+        nextFile?.path ?? '',
       );
 
   /// 播放位置的可读展示（如 `12:34` / `1:02:03`）。
-  String get positionLabel {
-    final total = position.inSeconds;
-    if (total <= 0) return '';
-    final h = total ~/ 3600;
-    final m = (total % 3600) ~/ 60;
-    final s = total % 60;
-    final mm = m.toString().padLeft(2, '0');
-    final ss = s.toString().padLeft(2, '0');
-    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-  }
+  String get positionLabel => localMediaPositionLabel(position);
+}
+
+/// 一个文件夹的分集观看状态快照：文件名解析的集数 → 最后观看位置
+/// （看完的集为 0，与落库时「距结尾过近归零」的口径一致）。
+///
+/// 本地历史按番剧存一条（progresses 以文件名解析的集数为 key），
+/// 同番剧多目录共用一条历史时跨目录同集数的进度会互相覆盖；因此快照
+/// 只为「最后观看文件所在目录」生成，保证展示的进度是精确的。解析不出
+/// 集数的文件播放时以列表序号落库，无法反查，不参与分集标注。
+class MediaFolderWatchProgress {
+  const MediaFolderWatchProgress({required this.positions});
+
+  final Map<int, Duration> positions;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MediaFolderWatchProgress &&
+          mapEquals(other.positions, positions);
+
+  @override
+  int get hashCode => Object.hashAllUnordered(
+        positions.keys.map((key) => Object.hash(key, positions[key])),
+      );
 }
 
 /// 从 `YYYY-MM-DD` / `YYYY-MM` / `YYYY` 形式的首播日期解析出可比较的整数键。
@@ -309,6 +350,12 @@ abstract class _MediaController with Store {
   @observable
   ObservableMap<String, MediaResumePoint> resumePoints = ObservableMap();
 
+  /// 分集观看状态缓存：文件夹路径键 → 各集最后观看位置。
+  /// 与续播点同源重建，驱动分集列表的「已看完 / 看到 h:mm:ss」标注。
+  @observable
+  ObservableMap<String, MediaFolderWatchProgress> watchProgresses =
+      ObservableMap();
+
   /// 是否请求取消当前搜刮。
   bool _scrapeCancelRequested = false;
 
@@ -431,8 +478,8 @@ abstract class _MediaController with Store {
     }
   }
 
-  /// 从本地播放历史重建续播点缓存（按 episodePageUrl 精确匹配文件路径，
-  /// 同一文件夹只保留最近更新的那一条）。
+  /// 从本地播放历史重建续播点与分集观看状态缓存（按 episodePageUrl 精确
+  /// 匹配文件路径，同一文件夹只保留最近更新的那一条）。
   @action
   void _refreshResumePoints() {
     final byFile = <String, ({LocalMediaFolder folder, LocalMediaFile file})>{};
@@ -441,7 +488,16 @@ abstract class _MediaController with Store {
         byFile[localMediaPathKey(file.path)] = (folder: folder, file: file);
       }
     }
+    // 同一文件夹内某文件的后一个文件（看完时续播目标推进到这里）。
+    LocalMediaFile? nextInFolder(LocalMediaFolder folder, LocalMediaFile file) {
+      final index =
+          folder.files.indexWhere((f) => localMediaPathsEqual(f.path, file.path));
+      if (index < 0 || index + 1 >= folder.files.length) return null;
+      return folder.files[index + 1];
+    }
+
     final latest = <String, MediaResumePoint>{};
+    final latestWatch = <String, MediaFolderWatchProgress>{};
     try {
       for (final history in _historyRepository.getAllHistories()) {
         if (!isLocalMediaHistory(history)) continue;
@@ -455,11 +511,22 @@ abstract class _MediaController with Store {
         final folderKey = localMediaPathKey(target.folder.path);
         final existing = latest[folderKey];
         if (existing == null || updatedAt.isAfter(existing.updatedAt)) {
+          // 距结尾过近的进度落库时被归零：位置为 0 即上次一集已看完。
+          final position = progress?.progress ?? Duration.zero;
+          final finished = position <= Duration.zero;
           latest[folderKey] = MediaResumePoint(
             folder: target.folder,
             file: target.file,
-            position: progress?.progress ?? Duration.zero,
+            position: position,
             updatedAt: updatedAt,
+            finished: finished,
+            nextFile: finished ? nextInFolder(target.folder, target.file) : null,
+          );
+          latestWatch[folderKey] = MediaFolderWatchProgress(
+            positions: {
+              for (final entry in history.progresses.values)
+                entry.episode: entry.progress,
+            },
           );
         }
       }
@@ -469,6 +536,9 @@ abstract class _MediaController with Store {
     }
     if (!mapEquals(latest, Map.from(resumePoints))) {
       resumePoints = ObservableMap.of(latest);
+    }
+    if (!mapEquals(latestWatch, Map.from(watchProgresses))) {
+      watchProgresses = ObservableMap.of(latestWatch);
     }
   }
 
@@ -571,6 +641,10 @@ abstract class _MediaController with Store {
     }
     return best;
   }
+
+  /// 文件夹的分集观看位置（解析集数 → 最后观看位置，无历史则 null）。
+  Map<int, Duration>? watchPositionsFor(LocalMediaFolder folder) =>
+      watchProgresses[localMediaPathKey(folder.path)]?.positions;
 
   /// Android：确保已授予媒体视频读取权限（无权限时请求一次）。
   Future<void> _ensureAndroidReadAccess() async {

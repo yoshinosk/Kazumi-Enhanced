@@ -261,6 +261,24 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
+  late final _$watchProgressesAtom = Atom(
+    name: '_MediaController.watchProgresses',
+    context: context,
+  );
+
+  @override
+  ObservableMap<String, MediaFolderWatchProgress> get watchProgresses {
+    _$watchProgressesAtom.reportRead();
+    return super.watchProgresses;
+  }
+
+  @override
+  set watchProgresses(ObservableMap<String, MediaFolderWatchProgress> value) {
+    _$watchProgressesAtom.reportWrite(value, super.watchProgresses, () {
+      super.watchProgresses = value;
+    });
+  }
+
   late final _$viewModeAtom = Atom(
     name: '_MediaController.viewMode',
     context: context,
@@ -569,6 +587,7 @@ scrapeFailed: ${scrapeFailed},
 scrapeCurrentName: ${scrapeCurrentName},
 scrapeKeyword: ${scrapeKeyword},
 resumePoints: ${resumePoints},
+watchProgresses: ${watchProgresses},
 viewMode: ${viewMode},
 sortMode: ${sortMode},
 sortDescending: ${sortDescending}
