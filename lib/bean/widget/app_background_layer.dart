@@ -43,10 +43,10 @@ ThemeData backgroundSurfaceTheme(ThemeData base, double veil) {
     scaffoldBackgroundColor:
         base.scaffoldBackgroundColor.withValues(alpha: veilAlpha),
     appBarTheme: base.appBarTheme.copyWith(
-      // AppBar 默认底色是 colorScheme.surface（保持不透明），这里按遮罩淡化成半透明，
-      // 那些不显式指定底色的 AppBar / SliverAppBar 才能透出背景图。
-      backgroundColor: (base.appBarTheme.backgroundColor ?? colors.surface)
-          .withValues(alpha: veilAlpha),
+      // 页面遮罩已经铺在整页上：Scaffold appBar: 槽位的标题条下方没有内容，
+      // 再叠一层遮罩只会多出一条深色带，这里直接透明，由页面遮罩统一供底。
+      // 需要遮住滚动内容的悬浮头部自己用 [HeaderScrim]。
+      backgroundColor: Colors.transparent,
     ),
     colorScheme: colors.copyWith(
       surfaceContainer: fade(colors.surfaceContainer),
@@ -119,6 +119,55 @@ ThemeData opaqueSurfaceTheme(ThemeData theme) {
 extension on Color {
   /// 还原不透明：玻璃态的淡化只改 alpha，RGB 保持不变。
   Color solidAlpha() => withValues(alpha: 1);
+}
+
+/// 悬浮头部（吸顶标签栏、固定分组标题）的遮罩。
+///
+/// 头部下方有内容滚动经过，不能完全透明；但整块铺实色会在半透明页面上留下一条
+/// 深色硬边，而页面遮罩之上再叠一层遮罩会更深。玻璃态下改成「顶部实色 → 底部
+/// 渐隐」：内容从底部淡出，硬边消失，下半部分仍透出背景图。未启用背景图时行为
+/// 与之前一致（铺实色）。
+///
+/// [fade] 是底部渐隐占头部高度的比例，其余部分为实色。
+class HeaderScrim extends StatelessWidget {
+  const HeaderScrim({
+    super.key,
+    required this.child,
+    this.fade = 0.6,
+    this.strength = 1,
+  });
+
+  final Widget child;
+
+  /// 底部渐隐所占比例（0 表示全部实色，1 表示整条渐隐）。
+  final double fade;
+
+  /// 遮罩浓度：可随标题栏收起进度淡入淡出（展开时无需遮罩）。
+  final double strength;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final glass = theme.extension<KazumiSurfaces>()?.glass ?? false;
+    if (!glass || fade >= 1) {
+      return ColoredBox(color: theme.scaffoldBackgroundColor, child: child);
+    }
+    final solid = theme.scaffoldBackgroundColor.solidAlpha();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            solid.withValues(alpha: strength.clamp(0.0, 1.0)),
+            solid.withValues(alpha: 0),
+          ],
+          stops: [1 - fade.clamp(0.0, 1.0), 1],
+        ),
+      ),
+      child: child,
+    );
+  }
 }
 
 /// 自定义背景图层：铺满整窗，并把整棵路由树换成半透明玻璃表面。

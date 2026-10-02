@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
 import 'package:kazumi/bean/widget/custom_dropdown_menu.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -174,62 +175,88 @@ class _PopularPageState extends State<PopularPage> {
       elevation: 0,
       titleSpacing: 0,
       centerTitle: false,
-      // 不显式指定颜色：默认走 M3 的 surface；自定义背景启用时由外壳的
-      // appBarTheme 覆盖为半透明表面色，让背景透出。
+      // 吸顶时卡片会从标题栏下面滚过，需要遮罩；这里用 HeaderScrim 的渐变，
+      // 避免在半透明页面上叠出一条深色带。
+      backgroundColor: Colors.transparent,
       actions: buildActions(),
       title: null,
-      flexibleSpace: SafeArea(
-        child: dtb.DragToMoveArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final double maxExtent = 120 - MediaQuery.of(context).padding.top;
-              final t = (1 -
-                  ((constraints.maxHeight - kToolbarHeight) /
-                          (maxExtent - kToolbarHeight))
-                      .clamp(0.0, 1.0));
-              // 字重收缩后为 w500，展开时为 w700
-              final fontWeight = t < 0.5 ? FontWeight.w700 : FontWeight.w500;
-              final fontSize = lerpDouble(28, 20, t)!;
-              return Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.only(
-                      left: 16, top: 8, bottom: 8, right: 60),
-                  child: SizedBox(
-                    height: 44,
-                    child: Observer(
-                      builder: (_) {
-                        final bool isTrend = popularController.currentTag == '';
-                        return InkWell(
-                          key: selectorKey,
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: showTagMenu,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                isTrend ? '热门番组' : popularController.currentTag,
-                                style: theme.textTheme.headlineMedium!.copyWith(
-                                  fontWeight: fontWeight,
-                                  fontSize: fontSize,
-                                ),
+      flexibleSpace: Builder(
+        // 展开时下方没有内容滚过，无需遮罩；随标题栏收起把遮罩淡入。
+        builder: (context) => HeaderScrim(
+          fade: 0.35,
+          strength: _collapseProgress(context),
+          child: SafeArea(
+            child: dtb.DragToMoveArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final double maxExtent =
+                      120 - MediaQuery.of(context).padding.top;
+                  final t = (1 -
+                      ((constraints.maxHeight - kToolbarHeight) /
+                              (maxExtent - kToolbarHeight))
+                          .clamp(0.0, 1.0));
+                  // 字重收缩后为 w500，展开时为 w700
+                  final fontWeight =
+                      t < 0.5 ? FontWeight.w700 : FontWeight.w500;
+                  final fontSize = lerpDouble(28, 20, t)!;
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                          left: 16, top: 8, bottom: 8, right: 60),
+                      child: SizedBox(
+                        height: 44,
+                        child: Observer(
+                          builder: (_) {
+                            final bool isTrend =
+                                popularController.currentTag == '';
+                            return InkWell(
+                              key: selectorKey,
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: showTagMenu,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    isTrend
+                                        ? '热门番组'
+                                        : popularController.currentTag,
+                                    style:
+                                        theme.textTheme.headlineMedium!.copyWith(
+                                      fontWeight: fontWeight,
+                                      fontSize: fontSize,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.keyboard_arrow_down,
+                                      size: fontSize,
+                                      color: theme.iconTheme.color),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              Icon(Icons.keyboard_arrow_down,
-                                  size: fontSize, color: theme.iconTheme.color),
-                            ],
-                          ),
-                        );
-                      },
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            },
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// 吸顶标题栏的收起进度：完全展开 0，完全收起 1。
+  static double _collapseProgress(BuildContext context) {
+    final settings =
+        context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+    if (settings == null) return 1;
+    final range = settings.maxExtent - settings.minExtent;
+    if (range <= 0) return 1;
+    return ((settings.maxExtent - settings.currentExtent) / range)
+        .clamp(0.0, 1.0);
   }
 
   List<Widget> buildActions() {

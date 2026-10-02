@@ -4,6 +4,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/bangumi_timeline_card.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
 import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
@@ -231,7 +232,6 @@ class _TimelinePageState extends State<TimelinePage> {
                             pinned: true,
                             delegate: _WeekHeaderDelegate(
                               height: weekHeight,
-                              color: theme.scaffoldBackgroundColor,
                               child: weekSelector,
                             ),
                           ),
@@ -469,12 +469,10 @@ class _TimelineScrollView extends StatelessWidget {
 class _WeekHeaderDelegate extends SliverPersistentHeaderDelegate {
   const _WeekHeaderDelegate({
     required this.height,
-    required this.color,
     required this.child,
   });
 
   final double height;
-  final Color color;
   final Widget child;
 
   @override
@@ -486,11 +484,11 @@ class _WeekHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
           BuildContext context, double shrinkOffset, bool overlapsContent) =>
-      ColoredBox(color: color, child: child);
+      // 吸顶：上方的「继续观看」等区块会从这块下面滚过，需要遮罩；
+      // 用渐变而不是实色，避免在半透明页面上留下一条深色带。
+      HeaderScrim(child: child);
 
   @override
   bool shouldRebuild(covariant _WeekHeaderDelegate oldDelegate) =>
-      oldDelegate.height != height ||
-      oldDelegate.color != color ||
-      oldDelegate.child != child;
+      oldDelegate.height != height || oldDelegate.child != child;
 }

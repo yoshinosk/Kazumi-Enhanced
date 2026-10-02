@@ -18,7 +18,9 @@ void main() {
       final colors = theme.colorScheme;
 
       expect(theme.scaffoldBackgroundColor.a, closeTo(0.65, 0.0001));
-      expect(theme.appBarTheme.backgroundColor!.a, closeTo(0.65, 0.0001));
+      // Scaffold appBar: 槽位的标题栏下方没有内容，叠遮罩只会多出一条深色带，
+      // 因此底色透明，由页面遮罩统一供底。
+      expect(theme.appBarTheme.backgroundColor!.a, 0);
       // 卡片比页面更透，背景图在卡片内更明显。
       expect(colors.surfaceContainerLow.a,
           closeTo(0.65 * cardSurfaceAlphaScale, 0.0001));
