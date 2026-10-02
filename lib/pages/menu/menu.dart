@@ -204,10 +204,15 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     int selectedIndex,
     BackgroundProvider background,
   ) {
-    const borderRadius = BorderRadius.only(
-      topLeft: Radius.circular(16),
-      bottomLeft: Radius.circular(16),
-    );
+    // 无背景图时 outlet 铺的是实色面板，左侧圆角是面板造型的一部分。
+    // 启用背景图后面板变透明，圆角会把页面的半透明遮罩一起裁掉，
+    // 在内容区左上/左下角留下一小片没有遮罩的亮斑，这里直接不裁。
+    final borderRadius = background.hasImage
+        ? null
+        : const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            bottomLeft: Radius.circular(16),
+          );
     final hasBackground = background.hasImage;
     return Scaffold(
       backgroundColor: hasBackground
