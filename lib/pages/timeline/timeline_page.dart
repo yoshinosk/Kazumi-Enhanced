@@ -16,6 +16,7 @@ import 'package:kazumi/pages/history/continue_watching_section.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/anime_season.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 part 'timeline_options.dart';
 part 'timeline_week_selector.dart';
@@ -230,7 +231,6 @@ class _TimelinePageState extends State<TimelinePage> {
                             pinned: true,
                             delegate: _WeekHeaderDelegate(
                               height: weekHeight,
-                              color: theme.scaffoldBackgroundColor,
                               child: weekSelector,
                             ),
                           ),
@@ -468,12 +468,10 @@ class _TimelineScrollView extends StatelessWidget {
 class _WeekHeaderDelegate extends SliverPersistentHeaderDelegate {
   const _WeekHeaderDelegate({
     required this.height,
-    required this.color,
     required this.child,
   });
 
   final double height;
-  final Color color;
   final Widget child;
 
   @override
@@ -485,11 +483,12 @@ class _WeekHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
           BuildContext context, double shrinkOffset, bool overlapsContent) =>
-      ColoredBox(color: color, child: child);
+      // 吸顶但不再铺底色：上方「继续观看」等区块滚过来时，从半透明的星期胶囊
+      // 与两侧留白透出即可——铺实色会在半透明页面上留下一条深色带，
+      // 与媒体库的分组标题条保持同一种玻璃卡片观感。
+      child;
 
   @override
   bool shouldRebuild(covariant _WeekHeaderDelegate oldDelegate) =>
-      oldDelegate.height != height ||
-      oldDelegate.color != color ||
-      oldDelegate.child != child;
+      oldDelegate.height != height || oldDelegate.child != child;
 }

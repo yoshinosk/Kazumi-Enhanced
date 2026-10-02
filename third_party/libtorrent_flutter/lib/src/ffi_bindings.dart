@@ -63,6 +63,9 @@ typedef LtAlertCallbackDart = void Function(
     int alertType, int id, Pointer<Utf8> message, Pointer<Void> userData);
 
 // ─── Session ──────────────────────────────────────────────────────────────────
+typedef _SetSslCertPathN = Void Function(Pointer<Utf8>);
+typedef LtSetSslCertPath = void Function(Pointer<Utf8>);
+
 typedef _CreateSessionN = Pointer<LtSessionOpaque> Function(
     Pointer<Utf8>, Int32, Int32);
 typedef LtCreateSession = Pointer<LtSessionOpaque> Function(
@@ -272,12 +275,20 @@ class TorrentBridgeBindings {
 
   late final LtCreateSession      createSession;
   late final LtDestroySession     destroySession;
+
+  /// Optional binding: pre-2.0.0 native libs hard-fail session creation unless
+  /// a CA bundle is installed first, and expose `lt_set_ssl_cert_path` for it.
+  /// Absent on newer libs, which resolve the trust store themselves.
+  late final LtSetSslCertPath?   setSslCertPath;
   late final LtPollAlerts         pollAlerts;
   late final LtSetAlertCallback   setAlertCallback;
   late final LtAddMagnet          addMagnet;
   late final LtAddTorrentFile     addTorrentFile;
   late final LtRemoveTorrent      removeTorrent;
-  late final LtAddTrackers        addTrackers;
+  /// Optional binding: absent on prebuilt libs built before
+  /// `lt_add_trackers` existed (e.g. stale Android prebuilts). Runtime
+  /// tracker injection then degrades to magnet-URI injection only.
+  late final LtAddTrackers?       addTrackers;
   late final LtPauseTorrent       pauseTorrent;
   late final LtResumeTorrent      resumeTorrent;
   late final LtRecheckTorrent     recheckTorrent;
@@ -307,13 +318,14 @@ class TorrentBridgeBindings {
 
   TorrentBridgeBindings(this._lib) {
     createSession       = _lib.lookup<NativeFunction<_CreateSessionN>>('lt_create_session').asFunction<LtCreateSession>();
+    setSslCertPath = _tryLookup(() =>
+        _lib.lookup<NativeFunction<_SetSslCertPathN>>('lt_set_ssl_cert_path').asFunction<LtSetSslCertPath>());
     destroySession      = _lib.lookup<NativeFunction<_DestroySessionN>>('lt_destroy_session').asFunction<LtDestroySession>();
     pollAlerts          = _lib.lookup<NativeFunction<_PollAlertsN>>('lt_poll_alerts').asFunction<LtPollAlerts>();
     setAlertCallback    = _lib.lookup<NativeFunction<_SetAlertCallbackN>>('lt_set_alert_callback').asFunction<LtSetAlertCallback>();
     addMagnet           = _lib.lookup<NativeFunction<_AddMagnetN>>('lt_add_magnet').asFunction<LtAddMagnet>();
     addTorrentFile      = _lib.lookup<NativeFunction<_AddTorrentFileN>>('lt_add_torrent_file').asFunction<LtAddTorrentFile>();
     removeTorrent       = _lib.lookup<NativeFunction<_RemoveTorrentN>>('lt_remove_torrent').asFunction<LtRemoveTorrent>();
-    addTrackers         = _lib.lookup<NativeFunction<_AddTrackersN>>('lt_add_trackers').asFunction<LtAddTrackers>();
     pauseTorrent        = _lib.lookup<NativeFunction<_PauseTorrentN>>('lt_pause_torrent').asFunction<LtPauseTorrent>();
     resumeTorrent       = _lib.lookup<NativeFunction<_ResumeTorrentN>>('lt_resume_torrent').asFunction<LtResumeTorrent>();
     recheckTorrent      = _lib.lookup<NativeFunction<_RecheckTorrentN>>('lt_recheck_torrent').asFunction<LtRecheckTorrent>();
@@ -321,6 +333,8 @@ class TorrentBridgeBindings {
     // the whole engine init — metadata caching simply stays disabled.
     exportTorrent = _tryLookup(() =>
         _lib.lookup<NativeFunction<_ExportTorrentN>>('lt_export_torrent').asFunction<LtExportTorrent>());
+    addTrackers = _tryLookup(() =>
+        _lib.lookup<NativeFunction<_AddTrackersN>>('lt_add_trackers').asFunction<LtAddTrackers>());
     getTorrentCount     = _lib.lookup<NativeFunction<_GetTorrentCountN>>('lt_get_torrent_count').asFunction<LtGetTorrentCount>();
     getAllStatuses       = _lib.lookup<NativeFunction<_GetAllStatusesN>>('lt_get_all_statuses').asFunction<LtGetAllStatuses>();
     getStatus           = _lib.lookup<NativeFunction<_GetStatusN>>('lt_get_status').asFunction<LtGetStatus>();

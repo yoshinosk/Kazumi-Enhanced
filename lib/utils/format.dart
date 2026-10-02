@@ -25,3 +25,18 @@ String durationToString(Duration duration) {
   }
   return '$hours:$minutes:$seconds';
 }
+
+/// 相对时间文案（按自然日对齐）：今天 / 昨天 / N 天前 / N 周前 /
+/// N 个月前 / N 年前。未来时间（时钟偏差）按今天处理。
+String formatTimeAgo(DateTime time) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(time.year, time.month, time.day);
+  final days = today.difference(day).inDays;
+  if (days <= 0) return '今天';
+  if (days == 1) return '昨天';
+  if (days < 7) return '$days 天前';
+  if (days < 30) return '${days ~/ 7} 周前';
+  if (days < 365) return '${days ~/ 30} 个月前';
+  return '${days ~/ 365} 年前';
+}

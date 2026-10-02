@@ -198,7 +198,7 @@ class _CollectPosterCard extends StatelessWidget {
 
       return Material(
         color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(compact ? 16 : 20),
+        shape: cardShape(context, compact ? 16 : 20),
         clipBehavior: Clip.antiAlias,
         child: Semantics(
           button: true,
@@ -290,7 +290,7 @@ class _CollectListTile extends StatelessWidget {
 
     return Material(
       color: colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(24),
+      shape: cardShape(context, 24),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [

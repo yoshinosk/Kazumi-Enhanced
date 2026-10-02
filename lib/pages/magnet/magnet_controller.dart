@@ -669,6 +669,30 @@ abstract class _MagnetController with Store {
     KazumiDialog.showToast(message: '已添加到下载队列');
   }
 
+  /// 从本地 .torrent 种子文件添加下载任务。
+  ///
+  /// [filePath] 为用户选择的种子文件路径，[title] 为可选显示名（留空
+  /// 时取种子内建名称）。种子解析成功后以 info-hash 磁力形式走
+  /// [addDownload] 统一链路（去重 / 磁盘检查 / 元数据缓存重挂一致）。
+  @action
+  Future<void> addTorrentFile(
+    String filePath, {
+    String? dir,
+    String? title,
+  }) async {
+    if (!engineEnabled) {
+      KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
+      return;
+    }
+    final item =
+        await _downloads.buildItemFromTorrentFile(filePath, title: title);
+    if (item == null) {
+      KazumiDialog.showToast(message: '无法读取种子文件');
+      return;
+    }
+    await addDownload(item, dir: dir);
+  }
+
   /// 提交下载前的磁盘空间检查：按资源体积估算所需空间，目标分区剩余不足时
   /// 弹出确认（用户可强制继续）。无法获取体积 / 分区信息时跳过检查。
   Future<bool> _checkDiskSpaceBeforeAdd(

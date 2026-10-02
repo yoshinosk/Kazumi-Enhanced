@@ -88,6 +88,7 @@ class _InfoTabViewState extends State<InfoTabView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              LocalEpisodesSection(bangumiItem: widget.bangumiItem),
               Text('简介', style: TextStyle(fontSize: 18)),
               const SizedBox(height: 8),
               LayoutBuilder(builder: (context, constraints) {
@@ -178,8 +179,6 @@ class _InfoTabViewState extends State<InfoTabView> {
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 16),
-              LocalEpisodesSection(bangumiItem: widget.bangumiItem),
             ],
           ),
         ),

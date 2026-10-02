@@ -3,6 +3,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:kazumi/modules/collect/collect_layout.dart';
+import 'package:kazumi/services/platform/auto_start_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
 
@@ -18,6 +19,8 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
   late String defaultPage;
   late CollectLayout _defaultCollectLayout;
   bool _savingCollectLayout = false;
+  bool _launchOnStartup = GStorage.getSetting(SettingsKeys.launchOnStartup);
+  bool _savingLaunchOnStartup = false;
   final _collectLayoutMenuController = MenuController();
   final _exitBehaviorMenuController = MenuController();
   static const _exitBehaviorTitles = ['退出 Kazumi', '最小化至托盘', '每次都询问'];
@@ -61,6 +64,20 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
     } finally {
       if (mounted) setState(() => _savingCollectLayout = false);
     }
+  }
+
+  Future<void> _updateLaunchOnStartup(bool value) async {
+    if (_savingLaunchOnStartup || value == _launchOnStartup) return;
+    setState(() => _savingLaunchOnStartup = true);
+    final ok = await AutoStartService.setEnabled(value);
+    if (!mounted) return;
+    if (ok) {
+      await GStorage.putSetting(SettingsKeys.launchOnStartup, value);
+      setState(() => _launchOnStartup = value);
+    } else {
+      KazumiDialog.showToast(message: '设置开机自启失败，请重试');
+    }
+    setState(() => _savingLaunchOnStartup = false);
   }
 
   Widget _menuItem({
@@ -120,6 +137,17 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
                 ],
               ),
             ),
+            if (AutoStartService.isSupported)
+              SettingsTile.switchTile(
+                leading: Icons.restart_alt_rounded,
+                onToggle: (value) =>
+                    _updateLaunchOnStartup(value ?? !_launchOnStartup),
+                title: const Text('开机自启'),
+                description: const Text(
+                    '随系统启动自动运行 Kazumi，部分设备需在系统设置中允许自启动'),
+                initialValue: _launchOnStartup,
+                enabled: !_savingLaunchOnStartup,
+              ),
           ]),
           SettingsSection(title: Text('展示信息'), tiles: [
             SettingsTile(

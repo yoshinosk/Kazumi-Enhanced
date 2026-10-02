@@ -823,11 +823,18 @@ class _PlayerItemState extends State<PlayerItem>
       }
 
       // 桌面端保存为 PNG 文件（目录可在播放设置中修改），
-      // Android 保持保存到系统相册。
+      // Android 保持保存到系统相册。文件名均为 标题_集数_播放进度。
+      final screenshotName = _screenshotSaveService.buildFileBaseName(
+        title: videoPageController.title,
+        episode: videoPageController.playbackEpisode.episode,
+        position: playerController.playback.playerPosition,
+      );
       if (isDesktop()) {
         final file = await _screenshotSaveService.savePng(
           screenshot,
           title: videoPageController.title,
+          episode: videoPageController.playbackEpisode.episode,
+          position: playerController.playback.playerPosition,
         );
         KazumiDialog.showToast(message: '截图已保存至 ${file.path}');
         return;
@@ -835,7 +842,7 @@ class _PlayerItemState extends State<PlayerItem>
 
       final result = await SaverGallery.saveImage(
         screenshot,
-        fileName: DateTime.timestamp().millisecondsSinceEpoch.toString(),
+        fileName: screenshotName,
         skipIfExists: false,
       );
       if (!result.isSuccess) {

@@ -21,7 +21,8 @@ import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:kazumi/utils/file_system.dart' show revealInFileManager;
-import 'package:kazumi/utils/format.dart' show formatBytes;
+import 'package:kazumi/utils/format.dart' show formatBytes, formatTimeAgo;
+import 'package:kazumi/utils/surface_theme.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
@@ -65,6 +66,112 @@ int _placeholderIdFor(String name) {
     h = (h * 31 + code) & 0x7FFFFFFF;
   }
   return h == 0 ? -1 : -h;
+}
+
+// ============ 续播文案与目标 ============
+
+/// 续播操作是否可用：看完最后一集后没有「下一集」可继续，不展示续播入口。
+bool mediaResumeActionAvailable(MediaResumePoint resume) =>
+    !(resume.finished && resume.nextFile == null);
+
+/// 续播实际要播放的文件：上一集看完时推进到下一个文件，否则原地续播。
+LocalMediaFile mediaResumeTargetFile(MediaResumePoint resume) =>
+    resume.nextFile ?? resume.file;
+
+/// 「上次看到哪里」的完整文案（番剧头部 / 网格详情面板共用），
+/// 附带上次观看的相对时间（如「3 周前」）。
+String mediaResumeText(MediaResumePoint resume) {
+  final recency = resume.updatedAt.millisecondsSinceEpoch > 0
+      ? ' · ${formatTimeAgo(resume.updatedAt)}'
+      : '';
+  final ep = resume.episode;
+  final epPart = ep > 0 ? ' EP$ep' : '';
+  if (resume.finished) {
+    if (resume.nextFile == null) return '已看完$recency';
+    return '上次看完$epPart$recency';
+  }
+  final time = resume.positionLabel;
+  if (ep > 0 && time.isNotEmpty) return '上次看到 EP$ep · $time$recency';
+  if (ep > 0) return '上次看到 EP$ep$recency';
+  return time.isNotEmpty
+      ? '上次看到 $time$recency'
+      : '上次看到 ${resume.file.name}$recency';
+}
+
+/// 番剧头部续播按钮文案：看完时指向下一集。
+String mediaResumeActionLabel(MediaResumePoint resume) {
+  if (resume.finished) {
+    final nextEp =
+        resume.nextFile == null ? 0 : parseLocalEpisodeNumber(resume.nextFile!.name);
+    return nextEp > 0 ? '下一集 EP$nextEp' : '下一集';
+  }
+  final ep = resume.episode;
+  return ep > 0 ? '续播 EP$ep' : '续播';
+}
+
+/// 网格卡片角标文案：精简版续播提示。
+String mediaResumeBadgeLabel(MediaResumePoint resume) {
+  if (resume.finished) {
+    if (resume.nextFile == null) return '已看完';
+    final nextEp = parseLocalEpisodeNumber(resume.nextFile!.name);
+    return nextEp > 0 ? '下一集 EP$nextEp' : '下一集';
+  }
+  final ep = resume.episode;
+  final time = resume.positionLabel;
+  final prefix = ep > 0 ? 'EP$ep' : '续播';
+  return time.isEmpty ? prefix : '$prefix · $time';
+}
+
+/// 分集条目的观看状态标注（「上次看到哪里」落到每一集上）。
+class _FileWatchMark {
+  const _FileWatchMark({
+    this.isResume = false,
+    this.finished = false,
+    required this.label,
+  });
+
+  /// 是否为上次观看的那一集（高亮展示）。
+  final bool isResume;
+
+  /// 该集是否已看完（显示对勾图标）。
+  final bool finished;
+
+  final String label;
+}
+
+/// 计算一个文件的分集观看标注：上次观看文件取续播点（精确），
+/// 其余文件按文件名解析的集数查分集观看状态（无记录则不标注）。
+_FileWatchMark? _fileWatchMarkFor(
+  MediaController controller,
+  LocalMediaFolder folder,
+  LocalMediaFile file,
+  MediaResumePoint? resume,
+) {
+  final isResume =
+      resume != null && localMediaPathsEqual(resume.file.path, file.path);
+  if (isResume) {
+    final ep = parseLocalEpisodeNumber(file.name);
+    final epPart = ep > 0 ? ' EP$ep' : '';
+    return _FileWatchMark(
+      isResume: true,
+      finished: resume.finished,
+      label: resume.finished
+          ? '上次看完$epPart'
+          : resume.positionLabel.isNotEmpty
+              ? '上次看到 ${resume.positionLabel}'
+              : '上次看到$epPart',
+    );
+  }
+  final positions = controller.watchPositionsFor(folder);
+  if (positions == null) return null;
+  final ep = parseLocalEpisodeNumber(file.name);
+  if (ep <= 0) return null;
+  final position = positions[ep];
+  if (position == null) return null;
+  if (position <= Duration.zero) {
+    return const _FileWatchMark(finished: true, label: '已看完');
+  }
+  return _FileWatchMark(label: '看到 ${localMediaPositionLabel(position)}');
 }
 
 class MediaLibraryPage extends StatefulWidget {
@@ -372,13 +479,16 @@ class _ViewModeToggle extends StatelessWidget {
                 value: entry.$1,
                 child: Row(
                   children: [
+                    // 固定宽度的勾选位：选中标记紧贴左侧、各行文字对齐。
+                    SizedBox(
+                      width: 24,
+                      child: current == entry.$1
+                          ? const Icon(Icons.check_rounded, size: 18)
+                          : null,
+                    ),
                     Icon(entry.$3, size: 20),
                     const SizedBox(width: 12),
                     Text(entry.$2),
-                    if (current == entry.$1) ...[
-                      const Spacer(),
-                      const Icon(Icons.check_rounded, size: 18),
-                    ],
                   ],
                 ),
               ),
@@ -399,7 +509,14 @@ class _SortMenu extends StatelessWidget {
 
   final MediaController controller;
 
-  static const _modes = [('date', '按番剧日期'), ('name', '按标题'), ('count', '按文件数')];
+  static const _modes = [
+    ('date', '按番剧日期'),
+    ('played', '按最近播放'),
+    ('updated', '按最近更新'),
+    ('season', '按番剧季度'),
+    ('name', '按标题'),
+    ('count', '按文件数'),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -426,11 +543,14 @@ class _SortMenu extends StatelessWidget {
                 value: entry.$1,
                 child: Row(
                   children: [
+                    // 固定宽度的勾选位：选中标记紧贴左侧、各行文字对齐。
+                    SizedBox(
+                      width: 24,
+                      child: current == entry.$1
+                          ? const Icon(Icons.check_rounded, size: 18)
+                          : null,
+                    ),
                     Text(entry.$2),
-                    if (current == entry.$1) ...[
-                      const Spacer(),
-                      const Icon(Icons.check_rounded, size: 18),
-                    ],
                   ],
                 ),
               ),
@@ -455,6 +575,62 @@ class _SortMenu extends StatelessWidget {
       },
     );
   }
+}
+
+// ============ 排序分组标题 ============
+
+/// 分组型排序（最近播放 / 最近更新 / 番剧季度）的粘性分组标题：
+/// 滚动时固定在列表顶部，随所属分组滚出屏幕。
+class _SortGroupHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _SortGroupHeaderDelegate({required this.title});
+
+  final String title;
+
+  static const double _height = 36;
+
+  @override
+  double get minExtent => _height;
+
+  @override
+  double get maxExtent => _height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final theme = Theme.of(context);
+    // 分组标题是盖在列表之上的浮层：与卡片同款的玻璃底色 + 描边，
+    // 两侧留窄边并加圆角，滚动时下方内容会从玻璃后透出。
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        height: _height - 4,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.fromBorderSide(context.surfaces.cardOutline),
+        ),
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _SortGroupHeaderDelegate oldDelegate) =>
+      oldDelegate.title != title;
 }
 
 // ============ 文件夹视图 ============
@@ -735,6 +911,12 @@ class _FolderSectionState extends State<_FolderSection> {
                 for (final file in folder.files)
                   _FileTile(
                     file: file,
+                    mark: _fileWatchMarkFor(
+                      widget.controller,
+                      folder,
+                      file,
+                      widget.controller.resumePointFor(folder),
+                    ),
                     onTap: () => widget.onFileTap(
                       file,
                       folder.files,
@@ -807,37 +989,60 @@ class _AnimeView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Observer(
       builder: (_) {
-        final groups = controller.animeGroups;
         final q = query.trim().toLowerCase();
-        final filtered = q.isEmpty
-            ? groups
-            : groups
-                  .where(
-                    (g) =>
-                        (g.info?.displayName.toLowerCase().contains(q) ??
-                            false) ||
-                        g.folders.any(
-                          (f) =>
-                              f.name.toLowerCase().contains(q) ||
-                              f.files.any(
-                                (file) => file.name.toLowerCase().contains(q),
-                              ),
-                        ),
-                  )
-                  .toList();
+        // 分组型排序（最近播放 / 最近更新 / 番剧季度）按分组标题分段展示；
+        // 其余排序为单一分组（title 为空，不渲染标题）。搜索过滤后空组剔除。
+        final sections = <MediaSortGroup<AnimeGroup>>[];
+        for (final section in controller.animeSections) {
+          final items = q.isEmpty
+              ? section.items
+              : section.items
+                    .where(
+                      (g) =>
+                          (g.info?.displayName.toLowerCase().contains(q) ??
+                              false) ||
+                          g.folders.any(
+                            (f) =>
+                                f.name.toLowerCase().contains(q) ||
+                                f.files.any(
+                                  (file) =>
+                                      file.name.toLowerCase().contains(q),
+                                ),
+                          ),
+                    )
+                    .toList();
+          if (items.isEmpty) continue;
+          sections.add(
+            MediaSortGroup(
+              key: section.key,
+              title: section.title,
+              items: items,
+            ),
+          );
+        }
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _AnimeGroupSection(
-                  controller: controller,
-                  group: filtered[index],
-                  onFileTap: onFileTap,
-                ),
-                childCount: filtered.length,
+            for (final section in sections)
+              SliverMainAxisGroup(
+                slivers: [
+                  if (section.title.isNotEmpty)
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _SortGroupHeaderDelegate(title: section.title),
+                    ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _AnimeGroupSection(
+                        controller: controller,
+                        group: section.items[index],
+                        onFileTap: onFileTap,
+                      ),
+                      childCount: section.items.length,
+                    ),
+                  ),
+                ],
               ),
-            ),
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         );
@@ -869,126 +1074,169 @@ class _AnimeGroupSection extends StatefulWidget {
 class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
   bool _expanded = false;
 
+  /// 宽于该值时头部操作按钮与标题同行（宽屏布局），否则移到标题下方整行右对齐。
+  static const double _actionsBreakpoint = 600;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final group = widget.group;
     final info = group.info;
     final resume = widget.controller.resumePointForFolders(group.folders);
+    // 头部操作按钮（展开箭头除外）：手机上放在标题信息下方右对齐，
+    // 桌面宽屏仍与标题同行靠右。
+    final actions = <Widget>[
+      if (resume != null && mediaResumeActionAvailable(resume))
+        TextButton.icon(
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+          ),
+          onPressed: () => widget.onFileTap(
+            mediaResumeTargetFile(resume),
+            resume.folder.files,
+            widget.controller.getFileScrapeInfo(
+              mediaResumeTargetFile(resume),
+              resume.folder,
+            ),
+          ),
+          icon: const Icon(Icons.play_arrow_rounded, size: 18),
+          label: Text(mediaResumeActionLabel(resume)),
+        ),
+      if (info != null && info.bangumiId != null)
+        TextButton(
+          onPressed: () => context.pushNamed(
+            '/info/',
+            arguments: info.toBangumiItem(),
+          ),
+          child: const Text('详情'),
+        ),
+      if (info != null && info.bangumiId != null)
+        TextButton(
+          onPressed: () => _showMissingEpisodesSheet(
+            context,
+            widget.controller,
+            group,
+          ),
+          child: const Text('缺集'),
+        ),
+      if (info != null)
+        TextButton(
+          onPressed: () => _showManualMatchDialog(
+            context,
+            widget.controller,
+            folders: group.folders,
+            title: '修改识别结果',
+          ),
+          child: const Text('修改识别结果'),
+        ),
+    ];
+    final expandIcon = Icon(_expanded ? Icons.expand_less : Icons.expand_more);
+    // 封面
+    final cover = ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 56,
+        height: 78,
+        child: info != null && info.coverUrl.isNotEmpty
+            ? NetworkImgLayer(src: info.coverUrl, width: 56, height: 78)
+            : Container(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Icon(Icons.movie_outlined, size: 28),
+              ),
+      ),
+    );
+    // 标题信息
+    final infoColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          info?.displayName ?? '未匹配',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
+          style: theme.textTheme.bodySmall,
+        ),
+        if (info != null && info.airDate.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              info.airDate,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        if (resume != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              mediaResumeText(resume),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
+    );
     final header = InkWell(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 封面
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 56,
-                height: 78,
-                child: info != null && info.coverUrl.isNotEmpty
-                    ? NetworkImgLayer(src: info.coverUrl, width: 56, height: 78)
-                    : Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Icon(Icons.movie_outlined, size: 28),
-                      ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // 标题信息
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final inlineActions = constraints.maxWidth >= _actionsBreakpoint;
+            if (inlineActions) {
+              // 宽屏：操作按钮与标题同行、贴右边。按钮组不参与 flex 分配，
+              // 剩余宽度全部留给标题（≥600px 时按钮必放得下，不会溢出）。
+              return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    info?.displayName ?? '未匹配',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall,
-                  ),
+                  cover,
+                  const SizedBox(width: 12),
+                  Expanded(child: infoColumn),
+                  if (actions.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 2,
+                      children: [expandIcon, ...actions],
+                    ),
+                  ],
+                ],
+              );
+            }
+            // 窄屏：操作按钮整行右对齐铺满，避免 flex 平分导致按钮右侧留白。
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    cover,
+                    const SizedBox(width: 12),
+                    Expanded(child: infoColumn),
+                    const SizedBox(width: 4),
+                    expandIcon,
+                  ],
+                ),
+                if (actions.isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    '${group.fileCount} 个文件 · ${group.folders.length} 个文件夹',
-                    style: theme.textTheme.bodySmall,
+                  SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 2,
+                      children: actions,
+                    ),
                   ),
-                  if (info != null && info.airDate.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        info.airDate,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                  if (resume != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        _resumeSectionLabel(resume),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                 ],
-              ),
-            ),
-            Flexible(
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 2,
-                children: [
-                  Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-                  if (resume != null)
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onPressed: () => widget.onFileTap(
-                        resume.file,
-                        resume.folder.files,
-                        widget.controller.getFileScrapeInfo(
-                          resume.file,
-                          resume.folder,
-                        ),
-                      ),
-                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                      label: Text(_resumeSectionButtonLabel(resume)),
-                    ),
-                  if (info != null && info.bangumiId != null)
-                    TextButton(
-                      onPressed: () => context.pushNamed(
-                        '/info/',
-                        arguments: info.toBangumiItem(),
-                      ),
-                      child: const Text('详情'),
-                    ),
-                  if (info != null && info.bangumiId != null)
-                    TextButton(
-                      onPressed: () => _showMissingEpisodesSheet(
-                        context,
-                        widget.controller,
-                        group,
-                      ),
-                      child: const Text('缺集'),
-                    ),
-                  if (info != null)
-                    TextButton(
-                      onPressed: () => _showManualMatchDialog(
-                        context,
-                        widget.controller,
-                        folders: group.folders,
-                        title: '修改识别结果',
-                      ),
-                      child: const Text('修改识别结果'),
-                    ),
-                ],
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1036,6 +1284,12 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                   for (final file in folder.files)
                     _FileTile(
                       file: file,
+                      mark: _fileWatchMarkFor(
+                        widget.controller,
+                        folder,
+                        file,
+                        widget.controller.resumePointFor(folder),
+                      ),
                       onTap: () => widget.onFileTap(
                         file,
                         folder.files,
@@ -1084,8 +1338,10 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
 
   List<PopupMenuEntry<String>> _groupMenuItems() {
     final info = widget.group.info;
+    final resume =
+        widget.controller.resumePointForFolders(widget.group.folders);
     return [
-      if (widget.controller.resumePointForFolders(widget.group.folders) != null)
+      if (resume != null && mediaResumeActionAvailable(resume))
         const PopupMenuItem(value: 'resume', child: Text('续播')),
       if (info != null && info.bangumiId != null) ...[
         const PopupMenuItem(value: 'detail', child: Text('番剧详情')),
@@ -1128,11 +1384,12 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     switch (value) {
       case 'resume':
         final resume = widget.controller.resumePointForFolders(group.folders);
-        if (resume != null) {
+        if (resume != null && mediaResumeActionAvailable(resume)) {
+          final target = mediaResumeTargetFile(resume);
           widget.onFileTap(
-            resume.file,
+            target,
             resume.folder.files,
-            widget.controller.getFileScrapeInfo(resume.file, resume.folder),
+            widget.controller.getFileScrapeInfo(target, resume.folder),
           );
         }
         break;
@@ -1159,19 +1416,6 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
         break;
     }
   }
-
-  String _resumeSectionLabel(MediaResumePoint resume) {
-    final ep = resume.episode;
-    final time = resume.positionLabel;
-    if (ep > 0 && time.isNotEmpty) return '上次看到 EP$ep · $time';
-    if (ep > 0) return '上次看到 EP$ep';
-    return time.isNotEmpty ? '上次看到 $time' : '上次看到 ${resume.file.name}';
-  }
-
-  String _resumeSectionButtonLabel(MediaResumePoint resume) {
-    final ep = resume.episode;
-    return ep > 0 ? '续播 EP$ep' : '续播';
-  }
 }
 
 // ============ 网格视图 ============
@@ -1196,61 +1440,93 @@ class _GridView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Observer(
       builder: (_) {
-        final items = controller.gridItems;
         final q = query.trim().toLowerCase();
-        final filtered = q.isEmpty
-            ? items
-            : items
-                  .where(
-                    (i) =>
-                        i.title.toLowerCase().contains(q) ||
-                        i.files.any((f) => f.name.toLowerCase().contains(q)),
-                  )
-                  .toList();
+        // 分组型排序按分组标题分段展示；其余排序为单一分组（不渲染标题）。
+        final sections = <MediaSortGroup<MediaGridItem>>[];
+        for (final section in controller.gridSections) {
+          final items = q.isEmpty
+              ? section.items
+              : section.items
+                    .where(
+                      (i) =>
+                          i.title.toLowerCase().contains(q) ||
+                          i.files.any((f) => f.name.toLowerCase().contains(q)),
+                    )
+                    .toList();
+          if (items.isEmpty) continue;
+          sections.add(
+            MediaSortGroup(
+              key: section.key,
+              title: section.title,
+              items: items,
+            ),
+          );
+        }
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _StatsBar(controller: controller)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              sliver: SliverGrid.builder(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  // 桌面宽屏下自动铺满，窄屏至少两列
-                  maxCrossAxisExtent: 168,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 14,
-                  childAspectRatio: 0.56,
-                ),
-                itemCount: filtered.length,
-                itemBuilder: (context, index) {
-                  final item = filtered[index];
-                  final resume = controller.resumePointForFolders(item.folders);
-                  final thumbPath = !item.isMatched && item.folders.isNotEmpty
-                      ? controller.thumbnails[item.folders.first.path]
-                      : null;
-                  return _GridCard(
-                    item: item,
-                    resume: resume,
-                    thumbPath: thumbPath,
-                    onResumeTap: resume == null
-                        ? null
-                        : () => onFileTap(
-                            resume.file,
-                            resume.folder.files,
-                            controller.getFileScrapeInfo(
-                              resume.file,
-                              resume.folder,
-                            ),
-                          ),
-                    onTap: () => _showGridItemSheet(
-                      context,
-                      controller,
-                      item,
-                      onFileTap,
+            for (final section in sections)
+              SliverMainAxisGroup(
+                slivers: [
+                  if (section.title.isNotEmpty)
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _SortGroupHeaderDelegate(title: section.title),
                     ),
-                  );
-                },
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      8,
+                      16,
+                      // 非分组模式（单组）保持原有底部留白。
+                      section.title.isEmpty ? 24 : 16,
+                    ),
+                    sliver: SliverGrid.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            // 桌面宽屏下自动铺满，窄屏至少两列
+                            maxCrossAxisExtent: 168,
+                            mainAxisSpacing: 16,
+                            crossAxisSpacing: 14,
+                            childAspectRatio: 0.56,
+                          ),
+                      itemCount: section.items.length,
+                      itemBuilder: (context, index) {
+                        final item = section.items[index];
+                        final resume = controller.resumePointForFolders(
+                          item.folders,
+                        );
+                        final thumbPath = !item.isMatched &&
+                                item.folders.isNotEmpty
+                            ? controller.thumbnails[item.folders.first.path]
+                            : null;
+                        return _GridCard(
+                          item: item,
+                          resume: resume,
+                          thumbPath: thumbPath,
+                          onResumeTap: resume == null ||
+                                  !mediaResumeActionAvailable(resume)
+                              ? null
+                              : () => onFileTap(
+                                  mediaResumeTargetFile(resume),
+                                  resume.folder.files,
+                                  controller.getFileScrapeInfo(
+                                    mediaResumeTargetFile(resume),
+                                    resume.folder,
+                                  ),
+                                ),
+                          onTap: () => _showGridItemSheet(
+                            context,
+                            controller,
+                            item,
+                            onFileTap,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-            ),
           ],
         );
       },
@@ -1482,12 +1758,8 @@ class _GridCardState extends State<_GridCard> {
     );
   }
 
-  String _resumeLabel(MediaResumePoint resume) {
-    final ep = resume.episode;
-    final time = resume.positionLabel;
-    final prefix = ep > 0 ? 'EP$ep' : '续播';
-    return time.isEmpty ? prefix : '$prefix · $time';
-  }
+  String _resumeLabel(MediaResumePoint resume) =>
+      mediaResumeBadgeLabel(resume);
 }
 
 class _Badge extends StatelessWidget {
@@ -1645,6 +1917,7 @@ void _showGridItemSheet(
       builder: (context, scrollController) {
         final theme = Theme.of(context);
         final multiFolder = item.folders.length > 1;
+        final resume = controller.resumePointForFolders(item.folders);
         return CustomScrollView(
           controller: scrollController,
           slivers: [
@@ -1693,6 +1966,17 @@ void _showGridItemSheet(
                             '${item.airDate.isNotEmpty ? " · ${item.airDate}" : ""}',
                             style: theme.textTheme.bodySmall,
                           ),
+                          if (resume != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                mediaResumeText(resume),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                           if (item.isMatched &&
                               item.info != null &&
                               item.info!.id > 0)
@@ -1840,6 +2124,12 @@ void _showGridItemSheet(
                   final file = folder.files[index];
                   return _FileTile(
                     file: file,
+                    mark: _fileWatchMarkFor(
+                      controller,
+                      folder,
+                      file,
+                      controller.resumePointFor(folder),
+                    ),
                     onTap: () {
                       Navigator.pop(context);
                       onFileTap(
@@ -1875,22 +2165,36 @@ class _FileTile extends StatelessWidget {
     required this.file,
     required this.onTap,
     required this.onMenu,
+    this.mark,
   });
 
   final LocalMediaFile file;
   final VoidCallback onTap;
   final VoidCallback onMenu;
 
+  /// 该集的观看状态标注（无记录为 null，不标注）。
+  final _FileWatchMark? mark;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final kindLabel = localEpisodeKindLabel(classifyLocalEpisode(file.name));
+    final watchMark = mark;
+    // 看完的对勾（弱化）、上次观看的实心播放（强调）、默认的描边播放。
+    final (leadingIcon, leadingColor) = watchMark == null
+        ? (Icons.play_circle_outline_rounded, null)
+        : watchMark.finished
+            ? (Icons.check_circle_outline_rounded, colorScheme.outline)
+            : watchMark.isResume
+                ? (Icons.play_circle_rounded, colorScheme.primary)
+                : (Icons.play_circle_outline_rounded, null);
     return GestureDetector(
       // 桌面端右键文件条目直接弹出操作菜单（与「⋯」按钮一致）。
       onSecondaryTapUp: (_) => onMenu(),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.play_circle_outline_rounded, size: 28),
+        leading: Icon(leadingIcon, size: 28, color: leadingColor),
         title: Row(
           children: [
             if (kindLabel.isNotEmpty) ...[
@@ -1904,6 +2208,27 @@ class _FileTile extends StatelessWidget {
                   kindLabel,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.tertiary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            if (watchMark != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: watchMark.isResume
+                      ? colorScheme.primary.withValues(alpha: 0.14)
+                      : colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  watchMark.label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: watchMark.isResume
+                        ? colorScheme.primary
+                        : colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
                   ),
                 ),

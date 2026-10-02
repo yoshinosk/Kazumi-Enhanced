@@ -141,7 +141,7 @@ class LocalEpisodesSection extends StatelessWidget {
         ));
 
         return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.only(bottom: 16),
           child: Container(
             decoration: BoxDecoration(
               color: colorScheme.surfaceContainerLow,

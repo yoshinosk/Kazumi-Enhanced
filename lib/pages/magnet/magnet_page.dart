@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart'
     show GeneralEmptyState;
+import 'package:kazumi/bean/widget/tab_pill_bar.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/history/history_module.dart'
     show kLocalMediaAdapterName;
@@ -21,6 +23,7 @@ import 'package:kazumi/services/magnet/animes_garden_service.dart';
 import 'package:kazumi/services/magnet/magnet_models.dart';
 import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/magnet/magnet_search_sources.dart';
+import 'package:kazumi/services/magnet/torrent_file_meta.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -29,6 +32,7 @@ import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/directory_picker.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+import 'package:path/path.dart' as p;
 
 /// 番剧详情页发起的磁力搜索路由参数：搜索关键词 + 关联的番剧信息。
 ///
@@ -132,12 +136,42 @@ class _MagnetPageState extends State<MagnetPage>
 
   @override
   Widget build(BuildContext context) {
-    // 桌面宽屏：顶部 TabBar 会把标签横向拉得很长，改用左侧 NavigationRail；
-    // 安卓 / 窄窗口保持顶部 TabBar 切换。
-    final useRail =
-        isDesktop() && MediaQuery.sizeOf(context).width >= _railBreakpoint;
+    // 桌面宽屏：默认 TabBar 会把标签等分拉伸得很宽，改为在标题栏内
+    // 放置按内容自适应的分类胶囊栏；安卓 / 窄窗口保持顶部 TabBar 切换。
+    final usePillBar =
+        isDesktop() && MediaQuery.sizeOf(context).width >= _pillBarBreakpoint;
     final appBar = SysAppBar(
-      title: const Text('磁力搜索'),
+      title: usePillBar
+          ? Row(
+              children: [
+                const Text('磁力搜索'),
+                Expanded(
+                  child: Center(
+                    child: TabPillBar(
+                      controller: _tabController,
+                      items: const [
+                        TabPillItem(
+                          icon: Icons.search_outlined,
+                          selectedIcon: Icons.search_rounded,
+                          label: '搜索',
+                        ),
+                        TabPillItem(
+                          icon: Icons.rss_feed_outlined,
+                          selectedIcon: Icons.rss_feed_rounded,
+                          label: '订阅',
+                        ),
+                        TabPillItem(
+                          icon: Icons.download_outlined,
+                          selectedIcon: Icons.download_rounded,
+                          label: '下载',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : const Text('磁力搜索'),
       leading: IconButton(
         onPressed: () => context.maybePop(),
         icon: const Icon(Icons.arrow_back),
@@ -171,7 +205,7 @@ class _MagnetPageState extends State<MagnetPage>
           },
         ),
       ],
-      bottom: useRail
+      bottom: usePillBar
           ? null
           : TabBar(
               controller: _tabController,
@@ -197,52 +231,13 @@ class _MagnetPageState extends State<MagnetPage>
         MagnetDownloadsTab(controller: controller),
       ],
     );
-    // 两种布局共用同一棵树：TabBarView 固定在 Row 的 index 1 槽位，
-    // 宽窄切换时仅 index 0（侧栏/占位）变化，各 tab 的滚动位置、
-    // 展开状态等 State 不会因子树重建而丢失。
-    return Scaffold(
-      appBar: appBar,
-      body: Row(
-        children: [
-          if (useRail)
-            AnimatedBuilder(
-              animation: _tabController,
-              builder: (context, _) => NavigationRail(
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
-                groupAlignment: -1,
-                labelType: NavigationRailLabelType.all,
-                selectedIndex: _tabController.index,
-                onDestinationSelected: (index) =>
-                    _tabController.animateTo(index),
-                destinations: const [
-                  NavigationRailDestination(
-                    icon: Icon(Icons.search_outlined),
-                    selectedIcon: Icon(Icons.search_rounded),
-                    label: Text('搜索'),
-                  ),
-                  NavigationRailDestination(
-                    icon: Icon(Icons.rss_feed_outlined),
-                    selectedIcon: Icon(Icons.rss_feed_rounded),
-                    label: Text('订阅'),
-                  ),
-                  NavigationRailDestination(
-                    icon: Icon(Icons.download_outlined),
-                    selectedIcon: Icon(Icons.download_rounded),
-                    label: Text('下载'),
-                  ),
-                ],
-              ),
-            )
-          else
-            const SizedBox.shrink(),
-          Expanded(child: tabBarView),
-        ],
-      ),
-    );
+    // 宽窄切换只影响标题栏内的组件，body 始终是同一个 TabBarView，
+    // 各 tab 的滚动位置、展开状态等 State 不会因子树重建而丢失。
+    return Scaffold(appBar: appBar, body: tabBarView);
   }
 
-  /// 宽屏（≥ 700px）时切换到 NavigationRail 的断点。
-  static const double _railBreakpoint = 700;
+  /// 宽屏（≥ 700px）时切换到顶部胶囊标签栏的断点。
+  static const double _pillBarBreakpoint = 700;
 }
 
 class MagnetSearchTab extends StatefulWidget {
@@ -310,6 +305,13 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
     await controller.setSearchFansub(picked.isEmpty ? null : picked);
   }
 
+  /// 非 Animes Garden 源点击字幕组筛选：功能不支持，提示切换搜索源。
+  void _hintFansubSource() {
+    KazumiDialog.showToast(
+      message: '字幕组筛选仅 Animes Garden 源支持，请先通过右上角按钮切换搜索源',
+    );
+  }
+
   void _createSubscriptionFromSearch() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -366,58 +368,59 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
             ),
             onSubmitted: (value) => controller.search(value),
           ),
-          // 搜索条件工具栏：字幕组筛选（仅 AG 源）+ 按当前条件创建订阅
+          // 搜索条件工具栏：字幕组筛选 + 按当前条件创建订阅。
+          // 字幕组筛选始终展示：仅 Animes Garden 源支持，其它源置灰、
+          // 点击提示切换源，避免默认 Mikan 源时整个入口凭空消失。
           Observer(
             builder: (_) {
               final isAg =
                   controller.defaultSource.kind == MagnetSourceKind.json;
               final hasQuery = controller.query.trim().isNotEmpty;
-              if (!isAg && !hasQuery) {
-                return const SizedBox(height: 4);
-              }
               return Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(
                   children: [
-                    if (isAg)
-                      Expanded(
-                        child: InkWell(
-                          onTap: _pickSearchFansub,
-                          borderRadius: BorderRadius.circular(8),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              prefixIcon: const Icon(
-                                Icons.groups_rounded,
-                                size: 18,
-                              ),
-                              prefixIconConstraints: const BoxConstraints(
-                                minWidth: 32,
-                              ),
+                    Expanded(
+                      child: InkWell(
+                        onTap: isAg ? _pickSearchFansub : _hintFansubSource,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
                             ),
-                            child: Text(
-                              controller.searchFansub ?? '字幕组：不限',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: controller.searchFansub == null
-                                    ? Theme.of(context).hintColor
-                                    : null,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            prefixIcon: Icon(
+                              Icons.groups_rounded,
+                              size: 18,
+                              color: isAg
+                                  ? null
+                                  : Theme.of(context).disabledColor,
+                            ),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 32,
                             ),
                           ),
+                          child: Text(
+                            isAg
+                                ? (controller.searchFansub ?? '字幕组：不限')
+                                : '字幕组：不限',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isAg && controller.searchFansub != null
+                                  ? null
+                                  : Theme.of(context).hintColor,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      )
-                    else
-                      const Spacer(),
+                      ),
+                    ),
                     if (hasQuery) ...[
                       const SizedBox(width: 8),
                       TextButton.icon(
@@ -1594,19 +1597,20 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                 children: [
                   Expanded(
                     child: SegmentedButton<_DownloadsFilter>(
-                      segments: const [
-                        ButtonSegment(
-                          value: _DownloadsFilter.all,
-                          label: Text('全部'),
-                        ),
-                        ButtonSegment(
-                          value: _DownloadsFilter.active,
-                          label: Text('进行中'),
-                        ),
-                        ButtonSegment(
-                          value: _DownloadsFilter.completed,
-                          label: Text('已完成'),
-                        ),
+                      // 单行 + 放不下时自动缩小，避免窄屏 / 大字号下段内文字换行。
+                      segments: [
+                        for (final (value, label) in const [
+                          (_DownloadsFilter.all, '全部'),
+                          (_DownloadsFilter.active, '进行中'),
+                          (_DownloadsFilter.completed, '已完成'),
+                        ])
+                          ButtonSegment(
+                            value: value,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(label, maxLines: 1),
+                            ),
+                          ),
                       ],
                       selected: {_filter},
                       onSelectionChanged: (selection) =>
@@ -1618,6 +1622,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                     IconButton(
                       tooltip: '清除已完成记录（保留文件）',
                       icon: const Icon(Icons.delete_sweep_outlined),
+                      visualDensity: VisualDensity.compact,
                       onPressed: () => _confirmClearCompleted(context),
                     ),
                   IconButton(
@@ -1627,6 +1632,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                           ? Icons.library_books_rounded
                           : Icons.library_books_outlined,
                     ),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () => _setGrouped(!_grouped),
                   ),
                   IconButton(
@@ -1636,12 +1642,14 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
                           ? Icons.close_rounded
                           : Icons.checklist_rounded,
                     ),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () =>
                         _selectMode ? _exitSelectMode() : _enterSelectMode(),
                   ),
                   IconButton(
-                    tooltip: '手动添加磁力链接',
+                    tooltip: '手动添加下载任务',
                     icon: const Icon(Icons.add_link_rounded),
+                    visualDensity: VisualDensity.compact,
                     onPressed: () => _showAddMagnetDialog(context),
                   ),
                 ],
@@ -2538,7 +2546,7 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
   }
 }
 
-/// 手动添加磁力链接 / 种子地址的对话框。
+/// 手动添加磁力链接 / 种子地址 / 本地 .torrent 种子文件的对话框。
 ///
 /// 自持有 [TextEditingController]，关闭时释放，避免泄漏。
 class _AddMagnetLinkDialog extends StatefulWidget {
@@ -2558,11 +2566,46 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
   String? _saveDir = MagnetSessionDownloadDir.lastPicked;
   bool _picking = false;
 
+  /// 已选择的本地 .torrent 种子文件路径；非空时提交优先走种子文件。
+  String? _torrentPath;
+  bool _pickingTorrent = false;
+
   @override
   void dispose() {
     _linkCtrl.dispose();
     _titleCtrl.dispose();
     super.dispose();
+  }
+
+  /// 选择本地 .torrent 种子文件，并预解析填充任务名。
+  Future<void> _pickTorrentFile() async {
+    if (_pickingTorrent) return;
+    setState(() => _pickingTorrent = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: '选择种子文件',
+        type: FileType.custom,
+        allowedExtensions: ['torrent'],
+      );
+      final path = result?.files.single.path;
+      if (path == null || !mounted) return;
+      TorrentFileMeta? meta;
+      try {
+        meta = TorrentFileMeta.parse(await File(path).readAsBytes());
+      } catch (_) {}
+      final name = (meta?.name.isNotEmpty ?? false)
+          ? meta!.name
+          : p.basename(path).trim();
+      if (!mounted) return;
+      setState(() {
+        _torrentPath = path;
+        if (_titleCtrl.text.trim().isEmpty && name.isNotEmpty) {
+          _titleCtrl.text = name;
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _pickingTorrent = false);
+    }
   }
 
   Future<void> _pickDir() async {
@@ -2582,12 +2625,22 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
   }
 
   void _submit() {
-    final link = _linkCtrl.text.trim();
-    if (link.isEmpty) {
-      KazumiDialog.showToast(message: '请输入磁力链接或种子地址');
+    final torrentPath = _torrentPath;
+    final title = _titleCtrl.text.trim();
+    if (torrentPath != null) {
+      Navigator.pop(context);
+      widget.controller.addTorrentFile(
+        torrentPath,
+        dir: _saveDir,
+        title: title.isEmpty ? null : title,
+      );
       return;
     }
-    final title = _titleCtrl.text.trim();
+    final link = _linkCtrl.text.trim();
+    if (link.isEmpty) {
+      KazumiDialog.showToast(message: '请输入磁力链接或种子地址，或选择种子文件');
+      return;
+    }
     Navigator.pop(context);
     final item = MagnetSearchItem(
       title: title.isEmpty ? '手动添加的任务' : title,
@@ -2617,6 +2670,46 @@ class _AddMagnetLinkDialogState extends State<_AddMagnetLinkDialog> {
               border: OutlineInputBorder(),
             ),
           ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: _pickingTorrent ? null : _pickTorrentFile,
+                icon: _pickingTorrent
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.file_open_rounded, size: 18),
+                label: const Text('选择种子文件'),
+              ),
+            ],
+          ),
+          if (_torrentPath != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.insert_drive_file_rounded,
+                      size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      p.basename(_torrentPath!),
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '移除种子文件',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => setState(() => _torrentPath = null),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 12),
           TextField(
             controller: _titleCtrl,
@@ -3141,6 +3234,9 @@ class _DownloadTaskTile extends StatelessWidget {
     final theme = Theme.of(context);
     final progress = task.progress;
     final info = task.scrapeInfo;
+    // 窄屏（手机竖屏 / 窄窗口，与媒体库 600px 断点一致）紧凑模式：
+    // 标题单行、元信息裁剪次要字段，避免 Wrap 折成多行把单条任务撑得很高。
+    final compact = MediaQuery.sizeOf(context).width < 600;
     // 分组子条目：番剧名在组头已展示，这里用文件名（含集数，最能区分
     // 各条目）/ 任务名作为标题；未分组时维持「番剧名 → 任务名 → 文件名」。
     final displayTitle = grouped
@@ -3185,7 +3281,7 @@ class _DownloadTaskTile extends StatelessWidget {
             Expanded(
               child: Text(
                 displayTitle.isEmpty ? task.fileName : displayTitle,
-                maxLines: 2,
+                maxLines: compact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium,
               ),
@@ -3207,8 +3303,9 @@ class _DownloadTaskTile extends StatelessWidget {
               ),
             ],
             // 分组子条目的组头已表明番剧归属，不再显示「已搜刮」标记；
+            // 窄屏下该标记信息量最低也一并隐藏，把宽度留给标题；
             // 「待确认」「已入库」仍保留（有独立信息量）。
-            if (!grouped && task.isScraped) ...[
+            if (!grouped && !compact && task.isScraped) ...[
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -3273,7 +3370,10 @@ class _DownloadTaskTile extends StatelessWidget {
               children: [
                 Expanded(
                   child: Wrap(
-                    spacing: 14,
+                    // 窄屏下收紧间距并裁掉次要元信息（做种 / 连接数、下载中
+                    // 的上传速度与做种率、与状态芯片重复的校验 / 元数据提示），
+                    // 保证进度条下方的元信息最多折成两行。
+                    spacing: compact ? 10 : 14,
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
@@ -3289,20 +3389,26 @@ class _DownloadTaskTile extends StatelessWidget {
                           color: theme.colorScheme.primary,
                           text: '${_formatBytes(task.downloadSpeed)}/s',
                         ),
-                      if (task.uploadSpeed > 0 && !task.isCompleted)
+                      // 上传速度：窄屏仅在未下载（做种中）时显示，避免与下载
+                      // 速度同屏挤成多行。
+                      if (task.uploadSpeed > 0 &&
+                          !task.isCompleted &&
+                          (!compact || task.downloadSpeed <= 0))
                         _TaskMeta(
                           icon: Icons.north_rounded,
                           color: theme.colorScheme.secondary,
                           text: '${_formatBytes(task.uploadSpeed)}/s',
                         ),
                       if (task.numSeeds + task.numPeers > 0 &&
-                          !task.isCompleted)
+                          !task.isCompleted &&
+                          !compact)
                         _TaskMeta(
                           icon: Icons.groups_2_outlined,
                           color: theme.colorScheme.onSurfaceVariant,
                           text: '做种 ${task.numSeeds} · 连接 ${task.numPeers}',
                         ),
-                      if (task.seedRatio > 0)
+                      // 做种率：窄屏仅做种中显示（决定自动停止时机）。
+                      if (task.seedRatio > 0 && (!compact || task.isSeeding))
                         _TaskMeta(
                           icon: Icons.sync_rounded,
                           color: theme.colorScheme.onSurfaceVariant,
@@ -3314,18 +3420,20 @@ class _DownloadTaskTile extends StatelessWidget {
                           color: theme.colorScheme.onSurfaceVariant,
                           text: '剩余 ${_formatEta(task.etaSeconds)}',
                         ),
-                      if (task.status == 'checking')
-                        _TaskMeta(
-                          icon: Icons.verified_outlined,
-                          color: theme.colorScheme.tertiary,
-                          text: '正在校验已下载文件',
-                        ),
-                      if (task.status == 'metadata')
-                        _TaskMeta(
-                          icon: Icons.hub_outlined,
-                          color: theme.colorScheme.tertiary,
-                          text: '正在获取种子元数据',
-                        ),
+                      if (!compact) ...[
+                        if (task.status == 'checking')
+                          _TaskMeta(
+                            icon: Icons.verified_outlined,
+                            color: theme.colorScheme.tertiary,
+                            text: '正在校验已下载文件',
+                          ),
+                        if (task.status == 'metadata')
+                          _TaskMeta(
+                            icon: Icons.hub_outlined,
+                            color: theme.colorScheme.tertiary,
+                            text: '正在获取种子元数据',
+                          ),
+                      ],
                     ],
                   ),
                 ),

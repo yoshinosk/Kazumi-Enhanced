@@ -13,9 +13,9 @@ import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/exit_confirmation_dialog.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/esc_back_scope.dart';
 import 'package:kazumi/navigation.dart';
-import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/theme.dart';
 
@@ -105,13 +105,13 @@ class _AppWidgetState extends State<AppWidget>
 
     final color = _storedThemeColor();
     final oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
-    final defaultDarkTheme = _buildAppTheme(
+    final defaultDarkTheme = buildAppTheme(
       brightness: Brightness.dark,
       color: color,
       fontFamily: themeProvider.currentFontFamily,
     );
     themeProvider.setTheme(
-      _buildAppTheme(
+      buildAppTheme(
         brightness: Brightness.light,
         color: color,
         fontFamily: themeProvider.currentFontFamily,
@@ -135,24 +135,6 @@ class _AppWidgetState extends State<AppWidget>
       return Colors.green;
     }
     return Color(int.parse(defaultThemeColor, radix: 16));
-  }
-
-  ThemeData _buildAppTheme({
-    required Brightness brightness,
-    required String? fontFamily,
-    Color? color,
-    ColorScheme? colorScheme,
-  }) {
-    return ThemeData(
-      useMaterial3: true,
-      fontFamily: fontFamily,
-      brightness: brightness,
-      colorSchemeSeed: color,
-      colorScheme: colorScheme,
-      progressIndicatorTheme: progressIndicatorTheme2024,
-      sliderTheme: sliderTheme2024,
-      pageTransitionsTheme: pageTransitionsTheme2024,
-    );
   }
 
   void _syncWindowsTitleBarBrightness(ThemeProvider themeProvider) {
@@ -297,14 +279,14 @@ class _AppWidgetState extends State<AppWidget>
         final useDynamicColor =
             themeProvider.useDynamicColor && theme != null && darkTheme != null;
         final lightTheme = useDynamicColor
-            ? _buildAppTheme(
+            ? buildAppTheme(
                 brightness: Brightness.light,
                 colorScheme: theme,
                 fontFamily: themeProvider.currentFontFamily,
               )
             : themeProvider.light;
         final dynamicDarkTheme = useDynamicColor
-            ? _buildAppTheme(
+            ? buildAppTheme(
                 brightness: Brightness.dark,
                 colorScheme: darkTheme,
                 fontFamily: themeProvider.currentFontFamily,
@@ -328,7 +310,11 @@ class _AppWidgetState extends State<AppWidget>
           themeMode: themeProvider.themeMode,
           scaffoldMessengerKey: rootScaffoldMessengerKey,
           // 全局 ESC 返回：覆盖所有左上角带返回按钮的推入页面。
-          builder: (context, child) => EscBackScope(child: child),
+          // AppSurfaceLayer 位于根 Navigator 之上，自定义背景图与半透明
+          // 表面因此对所有页面生效（播放器等全屏页面自行退出玻璃态）。
+          builder: (context, child) => AppSurfaceLayer(
+            child: EscBackScope(child: child ?? const SizedBox.shrink()),
+          ),
           routerConfig: ModularApp.routerConfigOf(context),
         );
       },

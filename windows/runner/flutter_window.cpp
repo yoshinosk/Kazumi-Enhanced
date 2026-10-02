@@ -2,6 +2,7 @@
 #include "fullscreen_utils.h"
 #include "external_player_utils.h"
 #include "shortcut_utils.h"
+#include "auto_start_utils.h"
 
 #include <optional>
 #include <flutter/method_channel.h>
@@ -53,6 +54,9 @@ bool FlutterWindow::OnCreate() {
 
   // Register Shortcut MethodChannel
   RegisterShortcutChannel();
+
+  // Register AutoStart MethodChannel
+  RegisterAutoStartChannel();
 
   return true;
 }
@@ -173,6 +177,36 @@ void FlutterWindow::RegisterShortcutChannel() {
       result->Success(flutter::EncodableValue(true));
     } else {
       result->Error("Failed", "Failed to create desktop shortcut");
+    }
+  });
+}
+
+// AutoStart MethodChannel setup
+void FlutterWindow::RegisterAutoStartChannel() {
+  auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "com.predidit.kazumi/auto_start",
+      &flutter::StandardMethodCodec::GetInstance());
+
+  channel->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name().compare("isEnabled") == 0) {
+      result->Success(
+          flutter::EncodableValue(AutoStartUtils::IsLaunchOnStartupEnabled()));
+    } else if (call.method_name().compare("setEnabled") == 0) {
+      bool enabled = false;
+      const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+      if (arguments) {
+        auto it = arguments->find(flutter::EncodableValue("enabled"));
+        if (it != arguments->end()) {
+          enabled = std::get<bool>(it->second);
+        }
+      }
+      if (AutoStartUtils::SetLaunchOnStartup(enabled)) {
+        result->Success(flutter::EncodableValue(true));
+      } else {
+        result->Error("Failed", "Failed to update launch-on-startup registry");
+      }
+    } else {
+      result->NotImplemented();
     }
   });
 }

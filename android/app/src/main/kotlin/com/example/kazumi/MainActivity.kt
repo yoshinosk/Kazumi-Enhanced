@@ -1,6 +1,7 @@
 package com.example.kazumi
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
@@ -32,9 +33,15 @@ import com.ryanheise.audioservice.AudioService
 import com.ryanheise.audioservice.AudioServiceActivity
 
 class MainActivity: AudioServiceActivity() {
+    companion object {
+        const val AUTO_START_PREFS_NAME = "kazumi_native_prefs"
+        const val AUTO_START_PREF_KEY = "launchOnStartup"
+    }
+
     private val CHANNEL = "com.predidit.kazumi/intent"
     private val STORAGE_CHANNEL = "com.predidit.kazumi/storage"
     private val PIP_CHANNEL = "com.predidit.kazumi/pip"
+    private val AUTO_START_CHANNEL = "com.predidit.kazumi/auto_start"
     private var intentChannel: MethodChannel? = null
     private var pipChannel: MethodChannel? = null
 
@@ -172,6 +179,17 @@ class MainActivity: AudioServiceActivity() {
                 }
                 refreshWindowBackground()
                 refreshPictureInPictureParamsIfNeeded()
+                result.success(true)
+            } else {
+                result.notImplemented()
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUTO_START_CHANNEL).setMethodCallHandler { call, result ->
+            if (call.method == "isEnabled") {
+                result.success(isLaunchOnStartupEnabled())
+            } else if (call.method == "setEnabled") {
+                setLaunchOnStartupEnabled(call.argument<Boolean>("enabled") ?: false)
                 result.success(true)
             } else {
                 result.notImplemented()
@@ -439,6 +457,20 @@ class MainActivity: AudioServiceActivity() {
         } catch (e: Exception) {
             -1L
         }
+    }
+
+    // 开机自启开关持久化在原生 SharedPreferences,供 BootCompletedReceiver
+    // 在应用进程未运行时读取。
+    private fun isLaunchOnStartupEnabled(): Boolean {
+        return getSharedPreferences(AUTO_START_PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(AUTO_START_PREF_KEY, false)
+    }
+
+    private fun setLaunchOnStartupEnabled(enabled: Boolean) {
+        getSharedPreferences(AUTO_START_PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(AUTO_START_PREF_KEY, enabled)
+                .apply()
     }
 
     private fun mediaReadPermission(): String {

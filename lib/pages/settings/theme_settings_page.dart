@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/card/palette_card.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:kazumi/bean/settings/background_provider.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
@@ -12,6 +14,7 @@ import 'package:kazumi/bean/settings/settings_list.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/theme.dart';
+import 'package:path/path.dart' as p;
 
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({super.key});
@@ -28,6 +31,8 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   late bool showWindowButton;
   late bool useSystemFont;
   late final ThemeProvider themeProvider;
+  late final BackgroundProvider backgroundProvider;
+  bool _pickingBackground = false;
   final MenuController menuController = MenuController();
 
   @override
@@ -40,27 +45,20 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
     showWindowButton = GStorage.getSetting(SettingsKeys.showWindowButton);
     useSystemFont = GStorage.getSetting(SettingsKeys.useSystemFont);
     themeProvider = context.read<ThemeProvider>();
+    backgroundProvider = context.read<BackgroundProvider>();
   }
 
   void setTheme(Color? color) {
-    var defaultDarkTheme = ThemeData(
-        useMaterial3: true,
-        fontFamily: themeProvider.currentFontFamily,
+    final defaultDarkTheme = buildAppTheme(
         brightness: Brightness.dark,
-        colorSchemeSeed: color,
-        progressIndicatorTheme: progressIndicatorTheme2024,
-        sliderTheme: sliderTheme2024,
-        pageTransitionsTheme: pageTransitionsTheme2024);
-    var oledTheme = oledDarkTheme(defaultDarkTheme);
+        fontFamily: themeProvider.currentFontFamily,
+        color: color);
+    final oledTheme = oledDarkTheme(defaultDarkTheme);
     themeProvider.setTheme(
-      ThemeData(
-          useMaterial3: true,
-          fontFamily: themeProvider.currentFontFamily,
+      buildAppTheme(
           brightness: Brightness.light,
-          colorSchemeSeed: color,
-          progressIndicatorTheme: progressIndicatorTheme2024,
-          sliderTheme: sliderTheme2024,
-          pageTransitionsTheme: pageTransitionsTheme2024),
+          fontFamily: themeProvider.currentFontFamily,
+          color: color),
       oledEnhance ? oledTheme : defaultDarkTheme,
     );
     defaultThemeColor = color?.toARGB32().toRadixString(16) ?? 'default';
@@ -68,24 +66,16 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   void resetTheme() {
-    var defaultDarkTheme = ThemeData(
-        useMaterial3: true,
-        fontFamily: themeProvider.currentFontFamily,
+    final defaultDarkTheme = buildAppTheme(
         brightness: Brightness.dark,
-        colorSchemeSeed: Colors.green,
-        progressIndicatorTheme: progressIndicatorTheme2024,
-        sliderTheme: sliderTheme2024,
-        pageTransitionsTheme: pageTransitionsTheme2024);
-    var oledTheme = oledDarkTheme(defaultDarkTheme);
+        fontFamily: themeProvider.currentFontFamily,
+        color: Colors.green);
+    final oledTheme = oledDarkTheme(defaultDarkTheme);
     themeProvider.setTheme(
-      ThemeData(
-          useMaterial3: true,
-          fontFamily: themeProvider.currentFontFamily,
+      buildAppTheme(
           brightness: Brightness.light,
-          colorSchemeSeed: Colors.green,
-          progressIndicatorTheme: progressIndicatorTheme2024,
-          sliderTheme: sliderTheme2024,
-          pageTransitionsTheme: pageTransitionsTheme2024),
+          fontFamily: themeProvider.currentFontFamily,
+          color: Colors.green),
       oledEnhance ? oledTheme : defaultDarkTheme,
     );
     defaultThemeColor = 'default';
@@ -123,6 +113,56 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
       color = Color(int.parse(defaultThemeColor, radix: 16));
     }
     setTheme(color);
+  }
+
+  Future<void> pickBackgroundImage() async {
+    if (_pickingBackground) return;
+    _pickingBackground = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: '选择背景图片',
+        type: FileType.image,
+      );
+      final path = result?.files.single.path;
+      if (path == null) return;
+      await backgroundProvider.installImage(path);
+      if (mounted) setState(() {});
+    } catch (e) {
+      KazumiDialog.showToast(message: '背景图设置失败：$e');
+    } finally {
+      _pickingBackground = false;
+    }
+  }
+
+  void manageBackgroundImage() {
+    final name = p.basename(backgroundProvider.imagePath ?? '');
+    KazumiDialog.show(builder: (context) {
+      return AlertDialog(
+        title: const Text('背景图片'),
+        content: Text(name.isEmpty ? '已设置' : name),
+        actions: [
+          TextButton(
+            onPressed: () {
+              KazumiDialog.dismiss();
+              pickBackgroundImage();
+            },
+            child: const Text('更换图片'),
+          ),
+          TextButton(
+            onPressed: () {
+              KazumiDialog.dismiss();
+              clearBackgroundImage();
+            },
+            child: const Text('清除背景图'),
+          ),
+        ],
+      );
+    });
+  }
+
+  Future<void> clearBackgroundImage() async {
+    await backgroundProvider.clearImage();
+    if (mounted) setState(() {});
   }
 
   @override
@@ -333,6 +373,86 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
               ),
             ],
             bottomInfo: Text('动态配色仅支持安卓12及以上和桌面平台'),
+          ),
+          SettingsSection(
+            title: Text('自定义背景'),
+            tiles: [
+              if (backgroundProvider.hasImage)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      height: 120,
+                      width: double.infinity,
+                      // 预览与实际一致的叠加效果：背景图 + 半透明表面色。
+                      // 表面色直接取环境主题的值：AppSurfaceLayer 已经把整棵树
+                      // 换成玻璃态，这里再乘一次遮罩会比实际更透。
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          const AppBackgroundLayer(),
+                          ColoredBox(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              SettingsTile(
+                leading: Icons.wallpaper_rounded,
+                title: Text('背景图片'),
+                value: Text(backgroundProvider.hasImage ? '已设置' : '未设置'),
+                onPressed: (_) => backgroundProvider.hasImage
+                    ? manageBackgroundImage()
+                    : pickBackgroundImage(),
+              ),
+              SettingsTile.switchTile(
+                leading: Icons.blur_on_rounded,
+                enabled: backgroundProvider.hasImage,
+                onToggle: (value) async {
+                  await backgroundProvider.setBlurEnabled(
+                      value ?? !backgroundProvider.blurEnabled);
+                  setState(() {});
+                },
+                title: Text('毛玻璃效果'),
+                description: Text('对背景图应用高斯模糊'),
+                initialValue: backgroundProvider.blurEnabled,
+              ),
+              if (backgroundProvider.hasImage &&
+                  backgroundProvider.blurEnabled)
+                SettingsSliderTile(
+                  leading: Icons.tune_rounded,
+                  title: Text('模糊强度'),
+                  value: backgroundProvider.blurSigma,
+                  valueLabel: backgroundProvider.blurSigma.round().toString(),
+                  min: 4,
+                  max: 50,
+                  divisions: 23,
+                  onChanged: (value) async {
+                    await backgroundProvider.setBlurSigma(value);
+                    setState(() {});
+                  },
+                ),
+              if (backgroundProvider.hasImage)
+                SettingsSliderTile(
+                  leading: Icons.opacity_rounded,
+                  title: Text('背景不透明度'),
+                  description: Text('背景图透出的强度，过高可能影响可读性'),
+                  value: backgroundProvider.opacity,
+                  valueLabel:
+                      '${(backgroundProvider.opacity * 100).round()}%',
+                  min: 0.05,
+                  max: 1.0,
+                  divisions: 19,
+                  onChanged: (value) async {
+                    await backgroundProvider.setOpacity(value);
+                    setState(() {});
+                  },
+                ),
+            ],
+            bottomInfo: Text('背景图显示于所有页面，播放器与图片预览不受影响'),
           ),
           SettingsSection(
             title: Text('显示'),

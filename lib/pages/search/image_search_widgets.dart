@@ -267,7 +267,7 @@ class _BestMatch extends StatelessWidget {
       ),
     );
     return Material(
-      color: colors.surface,
+      color: colors.surfaceContainerLow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
         side: BorderSide(color: colors.outlineVariant),
@@ -336,7 +336,7 @@ class _OtherMatch extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final type = Theme.of(context).textTheme;
     return Material(
-      color: colors.surface,
+      color: colors.surfaceContainerLow,
       borderRadius: BorderRadius.vertical(
           top: Radius.circular(first ? 20 : 8),
           bottom: Radius.circular(last ? 20 : 8)),

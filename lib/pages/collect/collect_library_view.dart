@@ -12,6 +12,7 @@ import 'package:kazumi/modules/download/download_module.dart'
 import 'package:kazumi/pages/collect/collect_library_query.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 
 part 'collect_library_card.dart';
 part 'collect_library_controls.dart';

@@ -3,11 +3,14 @@
 // status polling, and a built-in HTTP streaming server.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'ffi_bindings.dart';
 import 'models.dart';
@@ -54,6 +57,165 @@ class TrackerManager {
 }
 
 // ─── Status converters ──────────────────────────────────────────────────────
+
+// ─── Trust store (OpenSSL) ───────────────────────────────────────────────────
+
+/// Installs a CA bundle for libtorrent's statically linked OpenSSL.
+///
+/// Native libs from the 2.x Android line read `SSL_CERT_FILE` during
+/// `lt_create_session` and abort with "SSL_CERT_FILE was not set" when it is
+/// missing. Android ships no PEM bundle an app can point at, so its system
+/// trust store is concatenated into one.
+class TrustStore {
+  TrustStore._();
+
+  /// Candidate CA bundles, in preference order. First existing one wins.
+  static const _candidates = <String>[
+    '/etc/ssl/certs/ca-certificates.crt', // Debian/Ubuntu
+    '/etc/pki/tls/certs/ca-bundle.crt', // Fedora/RHEL
+    '/etc/ssl/ca-bundle.pem', // SUSE
+    '/etc/ssl/cert.pem', // Alpine
+  ];
+
+  /// Android system trust-store locations, in preference order. Android 14+
+  /// relocated the store into the Conscrypt APEX; earlier releases use the
+  /// legacy `/system` path, and some OEM images keep both.
+  static const _androidStoreDirs = <String>[
+    '/apex/com.android.conscrypt/cacerts',
+    '/system/etc/security/cacerts',
+  ];
+
+  static const _bundleName = 'cacert-bundle.pem';
+
+  /// Resolves a usable CA bundle path, writing one out if necessary.
+  ///
+  /// Always yields a path when [setPath] is non-null: a partial bundle still
+  /// lets the session start (DHT/uTP/plain peers keep working) and only costs
+  /// HTTPS tracker announces, which beats failing to start at all.
+  static Future<String> resolve(
+    void Function(Pointer<Utf8>)? setPath, {
+    void Function(String message)? onWarn,
+  }) async {
+    if (setPath == null) return '';
+
+    for (final path in _candidates) {
+      if (await File(path).exists()) return path;
+    }
+
+    // Build from the platform trust store before reusing any cached file, so a
+    // truncated bundle left behind by an earlier run cannot pin a broken CA
+    // set for the rest of the install's life.
+    final out = await _buildFromAndroidStore();
+    if (out != null && await out.length() > 1024) return out.path;
+
+    final cached = File('${Directory.systemTemp.path}/$_bundleName');
+    if (await cached.exists() && await cached.length() > 1024) {
+      return cached.path;
+    }
+
+    // Nothing usable: still hand back a path so the native side gets a
+    // (non-empty) SSL_CERT_FILE and the session can start with plaintext
+    // peers, rather than aborting on an unset env var.
+    onWarn?.call(
+      'no CA bundle found; HTTPS announces will fail but the session can start',
+    );
+    return cached.path;
+  }
+
+  /// Concatenates Android's system trust store into a single PEM file.
+  ///
+  /// The store's on-disk format is not stable across Android versions: older
+  /// releases keep raw DER under `<subject-hash>.0` names, while Android 14+
+  /// moved to `/apex/com.android.conscrypt/cacerts` and ships PEM text. So the
+  /// format is sniffed per file -- base64-wrapping an already-PEM file yields
+  /// bytes that OpenSSL rejects with "asn1 encoding routines::wrong tag".
+  static Future<File?> _buildFromAndroidStore() async {
+    for (final dir in _androidStoreDirs) {
+      final built = await _buildFromDir(dir);
+      if (built != null) return built;
+    }
+    return null;
+  }
+
+  static Future<File?> _buildFromDir(String path) async {
+    try {
+      final dir = Directory(path);
+      if (!dir.existsSync()) return null;
+
+      // Build into a side file, then swap it in, so a process killed
+      // mid-write cannot leave a partial bundle that later runs would reuse.
+      final out = File('${Directory.systemTemp.path}/$_bundleName');
+      final pending = File('${out.path}.pending');
+      final sink = pending.openWrite();
+      var count = 0;
+      try {
+        for (final entity in dir.listSync()) {
+          if (entity is! File) continue;
+          Uint8List raw;
+          try {
+            raw = await entity.readAsBytes();
+          } catch (_) {
+            continue;
+          }
+          if (raw.isEmpty) continue;
+          final pem = _toPem(raw);
+          if (pem == null) continue;
+          sink.write(pem);
+          count++;
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+      if (count == 0) {
+        await pending.delete().catchError((_) => pending);
+        return null;
+      }
+      await pending.rename(out.path);
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Wraps one trust-store file as a PEM block, or returns null if it is not a
+  /// certificate we can use.
+  static String? _toPem(Uint8List raw) {
+    const header = '-----BEGIN CERTIFICATE-----';
+    const footer = '-----END CERTIFICATE-----';
+
+    // Already PEM: pass the certificate through unchanged. The header is
+    // searched for rather than tested at offset 0, because trust stores
+    // (and Android's Conscrypt APEX in particular) prefix each file with a
+    // "# <subject>" comment line.
+    final head = ascii.decode(
+      raw.length <= 1024 ? raw : raw.sublist(0, 1024),
+      allowInvalid: true,
+    );
+    final begin = head.indexOf(header);
+    if (begin >= 0) {
+      final text = ascii.decode(raw, allowInvalid: true);
+      final from = begin + header.length;
+      final end = text.indexOf(footer, from);
+      if (end < 0) return null;
+      final body = text.substring(from, end).replaceAll(RegExp(r'\s'), '');
+      if (body.isEmpty) return null;
+      return '$header\n$body\n$footer\n';
+    }
+
+    // Raw DER: an X.509 Certificate is a SEQUENCE, so the first tag must be
+    // 0x30. Anything else means this file is not a bare certificate.
+    if (raw[0] != 0x30) return null;
+
+    final b64 = base64.encode(raw);
+    final buf = StringBuffer('$header\n');
+    for (var i = 0; i < b64.length; i += 64) {
+      buf.writeln(b64.substring(i, min(i + 64, b64.length)));
+    }
+    buf.writeln(footer);
+    return buf.toString();
+  }
+}
 
 TorrentInfo _toTorrentInfo(LtTorrentStatus s) => TorrentInfo(
   id:            s.id,
@@ -175,6 +337,24 @@ class LibtorrentFlutter {
     final lib = TorrentBridgeBindings.open();
     engine._b = lib;
 
+    // Some native builds abort session creation when OpenSSL has no CA bundle
+    // configured, so install the trust store first when they expose the hook.
+    final setSslCertPath = lib.setSslCertPath;
+    if (setSslCertPath != null) {
+      final certPath = await TrustStore.resolve(
+        (p) => setSslCertPath(p),
+        onWarn: (m) => debugPrint('LibtorrentFlutter: $m'),
+      );
+      if (certPath.isNotEmpty) {
+        final cp = certPath.toNativeUtf8();
+        try {
+          setSslCertPath(cp);
+        } finally {
+          malloc.free(cp);
+        }
+      }
+    }
+
     final iface = listenInterface.toNativeUtf8();
     try {
       final session = engine._b.createSession(iface, downloadLimit, uploadLimit);
@@ -274,9 +454,18 @@ class LibtorrentFlutter {
     }
   }
 
+  /// Whether the native lib exposes `lt_add_trackers`, i.e. trackers can be
+  /// pushed into already-mounted torrents at runtime. False on prebuilt libs
+  /// predating that symbol (stale Android prebuilts) — new tasks then only
+  /// get trackers through magnet-URI injection.
+  bool get supportsRuntimeTrackers => _b.addTrackers != null;
+
   /// Add announce trackers to a torrent (deduplicated by URL natively).
+  ///
+  /// No-op when the native lib predates `lt_add_trackers`.
   void addTrackers(int torrentId, List<String> trackers) {
-    if (trackers.isEmpty) return;
+    final addTrackers = _b.addTrackers;
+    if (addTrackers == null || trackers.isEmpty) return;
     final ptrs = <Pointer<Utf8>>[];
     try {
       for (final t in trackers) {
@@ -287,7 +476,7 @@ class LibtorrentFlutter {
         for (var i = 0; i < ptrs.length; i++) {
           buf[i] = ptrs[i];
         }
-        _b.addTrackers(_session, torrentId, buf, ptrs.length);
+        addTrackers(_session, torrentId, buf, ptrs.length);
       } finally {
         calloc.free(buf);
       }
@@ -552,16 +741,25 @@ class LibtorrentFlutter {
     } finally { calloc.free(buf); }
   }
 
+  // totalUploaded MUST participate in the comparison: for a seeding torrent
+  // (progress pinned at 1.0, no download activity) it is the only field that
+  // keeps moving, and the app derives the seed-ratio stop condition from it.
+  // Without it a stable-seed snapshot (steady upload rate, constant peer
+  // count) never refreshes, so the app's `totalUploaded` — and with it the
+  // ratio threshold check — freezes at a stale value and the torrent keeps
+  // seeding forever even after the configured stop condition is met.
   bool _changed(TorrentInfo a, TorrentInfo b) =>
-      a.state       != b.state       ||
-      a.progress    != b.progress    ||
-      a.downloadRate!= b.downloadRate||
-      a.uploadRate  != b.uploadRate  ||
-      a.totalDone   != b.totalDone   ||
-      a.numPeers    != b.numPeers    ||
-      a.isPaused    != b.isPaused    ||
-      a.hasMetadata != b.hasMetadata ||
-      a.name        != b.name;
+      a.state         != b.state         ||
+      a.progress      != b.progress      ||
+      a.downloadRate  != b.downloadRate  ||
+      a.uploadRate    != b.uploadRate    ||
+      a.totalDone     != b.totalDone     ||
+      a.totalUploaded != b.totalUploaded ||
+      a.numPeers      != b.numPeers      ||
+      a.numSeeds      != b.numSeeds      ||
+      a.isPaused      != b.isPaused      ||
+      a.hasMetadata   != b.hasMetadata   ||
+      a.name          != b.name;
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 

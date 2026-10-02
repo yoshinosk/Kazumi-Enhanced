@@ -370,6 +370,10 @@ class _InfoPageState extends State<InfoPage>
             SliverOverlapAbsorber(
               handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
               sliver: SliverAppBar.medium(
+                // SliverOverlapAbsorber 会把下方列表裁到标题栏边界，内容不会
+                // 滚到标题栏底下，因此标题栏底色透明即可：页面遮罩已经铺好，
+                // 再叠一层会在半透明页面上多出一条深色带。
+                backgroundColor: Colors.transparent,
                 title: EmbeddedNativeControlArea(
                   child: dtb.DragToMoveArea(
                     child: Container(

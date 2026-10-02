@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
   "utils.cpp"
+  "auto_start_utils.cpp"
   "external_player_utils.cpp"
   "fullscreen_utils.cpp"
   "shortcut_utils.cpp"

@@ -70,6 +70,18 @@ class MediaGridItem {
       ];
 }
 
+/// 播放位置的可读展示（如 `12:34` / `1:02:03`），无效位置返回空串。
+String localMediaPositionLabel(Duration position) {
+  final total = position.inSeconds;
+  if (total <= 0) return '';
+  final h = total ~/ 3600;
+  final m = (total % 3600) ~/ 60;
+  final s = total % 60;
+  final mm = m.toString().padLeft(2, '0');
+  final ss = s.toString().padLeft(2, '0');
+  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+}
+
 /// 媒体库中一个文件的续播点：来自本地播放历史（adapterName='local'，
 /// episodePageUrl 精确匹配文件路径）。
 class MediaResumePoint {
@@ -78,6 +90,8 @@ class MediaResumePoint {
     required this.file,
     required this.position,
     required this.updatedAt,
+    this.finished = false,
+    this.nextFile,
   });
 
   /// 文件所在的媒体库文件夹（用于取选集列表）。
@@ -92,6 +106,14 @@ class MediaResumePoint {
   /// 最近一次进度更新时间。
   final DateTime updatedAt;
 
+  /// 上次播放的一集是否已看完：距结尾过近的进度落库时被归零，
+  /// 位置为 0 即视为看完。
+  final bool finished;
+
+  /// 看完后的下一个文件（同一文件夹内 [file] 的后一个）。
+  /// 未看完、或 [file] 已是最后一个文件时为 null。
+  final LocalMediaFile? nextFile;
+
   /// 从文件名解析的集数（失败为 0）。
   int get episode => parseLocalEpisodeNumber(file.name);
 
@@ -105,7 +127,9 @@ class MediaResumePoint {
               localMediaPathKey(folder.path) &&
           localMediaPathKey(other.file.path) == localMediaPathKey(file.path) &&
           other.position == position &&
-          other.updatedAt == updatedAt;
+          other.updatedAt == updatedAt &&
+          other.finished == finished &&
+          (other.nextFile?.path ?? '') == (nextFile?.path ?? '');
 
   @override
   int get hashCode => Object.hash(
@@ -113,19 +137,36 @@ class MediaResumePoint {
         localMediaPathKey(file.path),
         position,
         updatedAt,
+        finished,
+        nextFile?.path ?? '',
       );
 
   /// 播放位置的可读展示（如 `12:34` / `1:02:03`）。
-  String get positionLabel {
-    final total = position.inSeconds;
-    if (total <= 0) return '';
-    final h = total ~/ 3600;
-    final m = (total % 3600) ~/ 60;
-    final s = total % 60;
-    final mm = m.toString().padLeft(2, '0');
-    final ss = s.toString().padLeft(2, '0');
-    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-  }
+  String get positionLabel => localMediaPositionLabel(position);
+}
+
+/// 一个文件夹的分集观看状态快照：文件名解析的集数 → 最后观看位置
+/// （看完的集为 0，与落库时「距结尾过近归零」的口径一致）。
+///
+/// 本地历史按番剧存一条（progresses 以文件名解析的集数为 key），
+/// 同番剧多目录共用一条历史时跨目录同集数的进度会互相覆盖；因此快照
+/// 只为「最后观看文件所在目录」生成，保证展示的进度是精确的。解析不出
+/// 集数的文件播放时以列表序号落库，无法反查，不参与分集标注。
+class MediaFolderWatchProgress {
+  const MediaFolderWatchProgress({required this.positions});
+
+  final Map<int, Duration> positions;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MediaFolderWatchProgress &&
+          mapEquals(other.positions, positions);
+
+  @override
+  int get hashCode => Object.hashAllUnordered(
+        positions.keys.map((key) => Object.hash(key, positions[key])),
+      );
 }
 
 /// 从 `YYYY-MM-DD` / `YYYY-MM` / `YYYY` 形式的首播日期解析出可比较的整数键。
@@ -144,9 +185,105 @@ int? _airDateSortKey(String airDate) {
   return year * 10000 + month * 100 + day;
 }
 
+/// 番剧季度分桶：从首播日期取「年·月」作为分组键（`year * 100 + month`，
+/// 仅有年份时月份记 0），标题如「2024年4月（春季）」「2024年」。
+///
+/// 季节名沿用月番惯例：1-3 月冬、4-6 月春、7-9 月夏、10-12 月秋。
+/// 解析失败返回 null（未知季度，恒定垫底）。
+(int, String)? _seasonBucketOf(String airDate) {
+  final key = _airDateSortKey(airDate);
+  if (key == null) return null;
+  final year = key ~/ 10000;
+  final month = (key ~/ 100) % 100;
+  if (month == 0) return (year * 100, '$year年');
+  const seasons = ['冬', '春', '夏', '秋'];
+  return (year * 100 + month, '$year年$month月（${seasons[(month - 1) ~/ 3]}季）');
+}
+
+/// 「最近播放 / 最近更新」的相对时间分桶（边界按自然日对齐）：
+/// 0=今天、1=昨天、2=最近 7 天、3=最近 30 天、4=更早。
+///
+/// 时间为 null（从未播放 / 无文件）返回 null，恒定垫底。
+(int, String)? _recencyBucketOf(DateTime? time) {
+  if (time == null) return null;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  int index;
+  if (!time.isBefore(today)) {
+    index = 0;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 1)))) {
+    index = 1;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 7)))) {
+    index = 2;
+  } else if (!time.isBefore(today.subtract(const Duration(days: 30)))) {
+    index = 3;
+  } else {
+    index = 4;
+  }
+  const titles = ['今天', '昨天', '最近 7 天', '最近 30 天', '更早'];
+  return (index, titles[index]);
+}
+
+/// 分组型排序（最近播放 / 最近更新 / 番剧季度）下的一个展示分组。
+///
+/// 非分组型排序返回单一分组，[title] 为空串（不渲染分组标题）。
+class MediaSortGroup<T> {
+  const MediaSortGroup({
+    required this.key,
+    required this.title,
+    required this.items,
+  });
+
+  /// 分组键：相对时间桶序 / 「年 * 100 + 月」季度键；未知桶为 null。
+  final Object? key;
+
+  /// 分组标题（空串表示不渲染标题）。
+  final String title;
+
+  final List<T> items;
+}
+
+/// 把已排序的条目按分桶切分成展示组。
+///
+/// 比较器保证同桶条目在排序结果中相邻，因此按桶聚合即可恢复分组顺序；
+/// 桶为 null 的条目（未知季度 / 未播放）聚为最后一组。
+List<MediaSortGroup<T>> _splitSortGroups<T>(
+  List<T> entries,
+  (Object?, String)? Function(T entry) bucketOf,
+) {
+  final order = <Object?>[];
+  final titles = <Object?, String>{};
+  final grouped = <Object?, List<T>>{};
+  for (final entry in entries) {
+    final bucket = bucketOf(entry);
+    final key = bucket?.$1;
+    final items = grouped[key];
+    if (items == null) {
+      order.add(key);
+      titles[key] = bucket?.$2 ?? '';
+      grouped[key] = [entry];
+    } else {
+      items.add(entry);
+    }
+  }
+  return [
+    for (final key in order)
+      MediaSortGroup(
+        key: key,
+        title: titles[key] ?? '',
+        items: grouped[key]!,
+      ),
+  ];
+}
+
 abstract class _MediaController with Store {
   _MediaController()
-      : _scanner = LocalMediaScanner(),
+      : viewMode = GStorage.getSetting(SettingsKeys.localMediaViewMode),
+        sortMode = GStorage.getSetting(SettingsKeys.localMediaSortMode),
+        sortDescending = GStorage.getSetting(
+          SettingsKeys.localMediaSortDescending,
+        ),
+        _scanner = LocalMediaScanner(),
         _scraper = MediaScraper();
 
   final LocalMediaScanner _scanner;
@@ -213,41 +350,65 @@ abstract class _MediaController with Store {
   @observable
   ObservableMap<String, MediaResumePoint> resumePoints = ObservableMap();
 
+  /// 分集观看状态缓存：文件夹路径键 → 各集最后观看位置。
+  /// 与续播点同源重建，驱动分集列表的「已看完 / 看到 h:mm:ss」标注。
+  @observable
+  ObservableMap<String, MediaFolderWatchProgress> watchProgresses =
+      ObservableMap();
+
   /// 是否请求取消当前搜刮。
   bool _scrapeCancelRequested = false;
 
   bool get groupByFolder =>
       GStorage.getSetting(SettingsKeys.localMediaGroupByFolder);
 
-  String get viewMode => GStorage.getSetting(SettingsKeys.localMediaViewMode);
+  /// 视图模式：`folder` / `anime` / `grid`。
+  ///
+  /// 持久化在设置盒子里，这里以 observable 字段镜像当前值：
+  /// AppBar 的视图切换 / 排序菜单只读取这些字段，若直接读设置盒
+  /// （非 MobX 数据源）将无法响应变化，菜单勾选与按钮图标会停留在旧状态。
+  @observable
+  String viewMode;
 
   bool get isAnimeMode => viewMode == 'anime';
 
   bool get isGridMode => viewMode == 'grid';
 
-  /// 排序依据：`date` / `name` / `count`，仅对番剧视图与网格视图生效。
-  String get sortMode => GStorage.getSetting(SettingsKeys.localMediaSortMode);
+  /// 排序依据：`date`（番剧日期）/ `played`（最近播放）/ `updated`（最近更新）/
+  /// `season`（番剧季度）/ `name`（标题）/ `count`（文件数），
+  /// 仅对番剧视图与网格视图生效。
+  ///
+  /// 其中 `played` / `updated` / `season` 为分组型排序：列表按分组标题
+  /// 分段展示（见 [isGroupedSortMode] 与 [animeSections] / [gridSections]）。
+  @observable
+  String sortMode;
 
-  /// 是否降序（日期越新、文件越多越靠前）。
-  bool get sortDescending =>
-      GStorage.getSetting(SettingsKeys.localMediaSortDescending);
+  /// 是否降序（日期越新、播放越近、文件越多越靠前）。
+  @observable
+  bool sortDescending;
+
+  /// 当前排序是否为分组型（番剧 / 网格视图按分组标题分段展示）。
+  bool get isGroupedSortMode =>
+      sortMode == 'played' || sortMode == 'updated' || sortMode == 'season';
 
   @action
   Future<void> setSortMode(String mode) async {
+    sortMode = mode;
     await GStorage.putSetting(SettingsKeys.localMediaSortMode, mode);
     _refreshLibraryView();
   }
 
   @action
   Future<void> setSortDescending(bool value) async {
+    sortDescending = value;
     await GStorage.putSetting(SettingsKeys.localMediaSortDescending, value);
     _refreshLibraryView();
   }
 
-  /// 触发依赖 [library] 的 Observer 重建。
+  /// 重建 [library] 触发依赖它的 Observer 刷新。
   ///
-  /// 排序/视图模式存在设置盒子里而非 observable，改动后必须手动打一下
-  /// observable 引用，否则界面不会刷新。
+  /// 视图 / 排序模式本身已是 observable，此处为兜底：覆盖列表视图等
+  /// 未直接读取排序字段的展示路径。
   void _refreshLibraryView() {
     library = ObservableList.of(library.toList());
   }
@@ -317,8 +478,8 @@ abstract class _MediaController with Store {
     }
   }
 
-  /// 从本地播放历史重建续播点缓存（按 episodePageUrl 精确匹配文件路径，
-  /// 同一文件夹只保留最近更新的那一条）。
+  /// 从本地播放历史重建续播点与分集观看状态缓存（按 episodePageUrl 精确
+  /// 匹配文件路径，同一文件夹只保留最近更新的那一条）。
   @action
   void _refreshResumePoints() {
     final byFile = <String, ({LocalMediaFolder folder, LocalMediaFile file})>{};
@@ -327,7 +488,16 @@ abstract class _MediaController with Store {
         byFile[localMediaPathKey(file.path)] = (folder: folder, file: file);
       }
     }
+    // 同一文件夹内某文件的后一个文件（看完时续播目标推进到这里）。
+    LocalMediaFile? nextInFolder(LocalMediaFolder folder, LocalMediaFile file) {
+      final index =
+          folder.files.indexWhere((f) => localMediaPathsEqual(f.path, file.path));
+      if (index < 0 || index + 1 >= folder.files.length) return null;
+      return folder.files[index + 1];
+    }
+
     final latest = <String, MediaResumePoint>{};
+    final latestWatch = <String, MediaFolderWatchProgress>{};
     try {
       for (final history in _historyRepository.getAllHistories()) {
         if (!isLocalMediaHistory(history)) continue;
@@ -341,11 +511,22 @@ abstract class _MediaController with Store {
         final folderKey = localMediaPathKey(target.folder.path);
         final existing = latest[folderKey];
         if (existing == null || updatedAt.isAfter(existing.updatedAt)) {
+          // 距结尾过近的进度落库时被归零：位置为 0 即上次一集已看完。
+          final position = progress?.progress ?? Duration.zero;
+          final finished = position <= Duration.zero;
           latest[folderKey] = MediaResumePoint(
             folder: target.folder,
             file: target.file,
-            position: progress?.progress ?? Duration.zero,
+            position: position,
             updatedAt: updatedAt,
+            finished: finished,
+            nextFile: finished ? nextInFolder(target.folder, target.file) : null,
+          );
+          latestWatch[folderKey] = MediaFolderWatchProgress(
+            positions: {
+              for (final entry in history.progresses.values)
+                entry.episode: entry.progress,
+            },
           );
         }
       }
@@ -355,6 +536,9 @@ abstract class _MediaController with Store {
     }
     if (!mapEquals(latest, Map.from(resumePoints))) {
       resumePoints = ObservableMap.of(latest);
+    }
+    if (!mapEquals(latestWatch, Map.from(watchProgresses))) {
+      watchProgresses = ObservableMap.of(latestWatch);
     }
   }
 
@@ -457,6 +641,10 @@ abstract class _MediaController with Store {
     }
     return best;
   }
+
+  /// 文件夹的分集观看位置（解析集数 → 最后观看位置，无历史则 null）。
+  Map<int, Duration>? watchPositionsFor(LocalMediaFolder folder) =>
+      watchProgresses[localMediaPathKey(folder.path)]?.positions;
 
   /// Android：确保已授予媒体视频读取权限（无权限时请求一次）。
   Future<void> _ensureAndroidReadAccess() async {
@@ -642,6 +830,7 @@ abstract class _MediaController with Store {
 
   @action
   Future<void> setViewMode(String mode) async {
+    viewMode = mode;
     await GStorage.putSetting(SettingsKeys.localMediaViewMode, mode);
     _refreshLibraryView();
   }
@@ -844,6 +1033,10 @@ abstract class _MediaController with Store {
   }
 
   /// 按番剧分组返回，排序遵循 [sortMode] / [sortDescending]，未匹配组恒定排在末尾。
+  ///
+  /// 分组型排序（最近播放 / 最近更新 / 番剧季度）下，未匹配聚合组按组内
+  /// 最近播放 / 文件时间参与排序（番剧季度因无日期仍沉底）；其余模式维持
+  /// 原行为：未匹配组不参与排序，恒定垫底。
   List<AnimeGroup> get animeGroups {
     final matched = <String, AnimeGroup>{};
     final unmatched = <LocalMediaFolder>[];
@@ -863,28 +1056,46 @@ abstract class _MediaController with Store {
         unmatched.add(folder);
       }
     }
-    final groups = matched.values.toList()
-      ..sort((a, b) => _compareEntries(
-            aDate: a.info!.airDate,
-            bDate: b.info!.airDate,
-            aName: a.info!.displayName,
-            bName: b.info!.displayName,
-            aCount: a.fileCount,
-            bCount: b.fileCount,
-          ));
-    if (unmatched.isNotEmpty) {
-      groups.add(AnimeGroup(info: null, folders: unmatched));
+    final unmatchedGroup =
+        unmatched.isEmpty ? null : AnimeGroup(info: null, folders: unmatched);
+    final groups = matched.values.toList();
+    if (unmatchedGroup != null && isGroupedSortMode) {
+      groups.add(unmatchedGroup);
+    }
+    final timed = [
+      for (final group in groups)
+        (
+          group: group,
+          played: resumePointForFolders(group.folders)?.updatedAt,
+          updated: latestModifiedAt(group.folders),
+        ),
+    ]..sort((a, b) => _compareEntries(
+          aDate: a.group.info!.airDate,
+          bDate: b.group.info!.airDate,
+          aName: a.group.info!.displayName,
+          bName: b.group.info!.displayName,
+          aCount: a.group.fileCount,
+          bCount: b.group.fileCount,
+          aPlayed: a.played,
+          bPlayed: b.played,
+          aUpdated: a.updated,
+          bUpdated: b.updated,
+        ));
+    final sorted = [for (final entry in timed) entry.group];
+    if (unmatchedGroup != null && !isGroupedSortMode) {
+      sorted.add(unmatchedGroup);
     }
     // 同番剧多季目录按季数排序（第 2 季排在「无季数标记」的第 1 季之后）。
-    for (final group in groups) {
+    for (final group in sorted) {
       group.folders.sort(_compareFoldersBySeason);
     }
-    return groups;
+    return sorted;
   }
 
   /// 网格视图数据源：已匹配番剧聚合成一张卡片，未匹配文件夹各自成卡。
   ///
   /// 默认按番剧首播日期降序（最新番在前），无日期的条目恒定沉底。
+  /// 分组型排序下未匹配条目按播放 / 文件时间参与排序；其余模式按名称垫底。
   List<MediaGridItem> get gridItems {
     final matched = <String, MediaGridItem>{};
     final unmatched = <MediaGridItem>[];
@@ -904,26 +1115,108 @@ abstract class _MediaController with Store {
         folders: [...?existing?.folders, folder],
       );
     }
-    final items = matched.values.toList()
-      ..sort((a, b) => _compareEntries(
-            aDate: a.airDate,
-            bDate: b.airDate,
-            aName: a.title,
-            bName: b.title,
-            aCount: a.fileCount,
-            bCount: b.fileCount,
-          ));
+    final items = matched.values.toList();
+    // 分组型排序（最近播放 / 最近更新 / 番剧季度）下未匹配条目有播放记录 /
+    // 文件时间可依，与已匹配条目一同参与排序；其余模式维持原行为：统一按
+    // 名称升序垫在最后。
+    final sortable = isGroupedSortMode ? [...items, ...unmatched] : items;
+    final timed = [
+      for (final item in sortable)
+        (
+          item: item,
+          played: resumePointForFolders(item.folders)?.updatedAt,
+          updated: latestModifiedAt(item.folders),
+        ),
+    ]..sort((a, b) => _compareEntries(
+          aDate: a.item.airDate,
+          bDate: b.item.airDate,
+          aName: a.item.title,
+          bName: b.item.title,
+          aCount: a.item.fileCount,
+          bCount: b.item.fileCount,
+          aPlayed: a.played,
+          bPlayed: b.played,
+          aUpdated: a.updated,
+          bUpdated: b.updated,
+        ));
+    final sorted = [for (final entry in timed) entry.item];
     // 同番剧多季目录按季数排序。
-    for (final item in items) {
+    for (final item in sorted) {
       item.folders.sort(_compareFoldersBySeason);
     }
-    // 未匹配条目没有元数据可排，统一按名称升序垫在最后。
+    if (isGroupedSortMode) {
+      return sorted;
+    }
     unmatched
         .sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    return [...items, ...unmatched];
+    return [...sorted, ...unmatched];
+  }
+
+  /// 一组文件夹内视频文件的最新修改时间（无文件为 null）。
+  ///
+  /// 「最近更新」排序以此为依据：下载新集落盘、外部改动都会推后该时间。
+  DateTime? latestModifiedAt(List<LocalMediaFolder> folders) {
+    DateTime? latest;
+    for (final folder in folders) {
+      for (final file in folder.files) {
+        if (latest == null || file.modifiedAt.isAfter(latest)) {
+          latest = file.modifiedAt;
+        }
+      }
+    }
+    return latest;
+  }
+
+  /// 条目在分组型排序下的分桶（分组键 + 分组标题）；非分组型排序返回 null。
+  (Object?, String)? _sortBucketOf({
+    required String airDate,
+    required DateTime? playedAt,
+    required DateTime? updatedAt,
+  }) {
+    return switch (sortMode) {
+      'played' => _recencyBucketOf(playedAt) ?? (null, '未播放'),
+      'updated' => _recencyBucketOf(updatedAt) ?? (null, '未知时间'),
+      'season' => _seasonBucketOf(airDate) ?? (null, '季度未知'),
+      _ => null,
+    };
+  }
+
+  /// 番剧视图数据源：分组型排序下按分组标题切分，其余模式为单一组（不显示标题）。
+  List<MediaSortGroup<AnimeGroup>> get animeSections {
+    final groups = animeGroups;
+    if (!isGroupedSortMode) {
+      return [MediaSortGroup(key: '', title: '', items: groups)];
+    }
+    return _splitSortGroups(
+      groups,
+      (g) => _sortBucketOf(
+        airDate: g.info?.airDate ?? '',
+        playedAt: resumePointForFolders(g.folders)?.updatedAt,
+        updatedAt: latestModifiedAt(g.folders),
+      ),
+    );
+  }
+
+  /// 网格视图数据源：分组切分逻辑同 [animeSections]。
+  List<MediaSortGroup<MediaGridItem>> get gridSections {
+    final items = gridItems;
+    if (!isGroupedSortMode) {
+      return [MediaSortGroup(key: '', title: '', items: items)];
+    }
+    return _splitSortGroups(
+      items,
+      (i) => _sortBucketOf(
+        airDate: i.airDate,
+        playedAt: resumePointForFolders(i.folders)?.updatedAt,
+        updatedAt: latestModifiedAt(i.folders),
+      ),
+    );
   }
 
   /// 番剧视图 / 网格视图共用的比较器。
+  ///
+  /// 分组型排序（最近播放 / 最近更新）以时间为第一键；番剧季度沿用日期键
+  /// 排序（季度桶序与日期序一致），分组由 [_splitSortGroups] 按桶切分恢复。
   int _compareEntries({
     required String aDate,
     required String bDate,
@@ -931,11 +1224,26 @@ abstract class _MediaController with Store {
     required String bName,
     required int aCount,
     required int bCount,
+    DateTime? aPlayed,
+    DateTime? bPlayed,
+    DateTime? aUpdated,
+    DateTime? bUpdated,
   }) {
     final desc = sortDescending;
     int byName() {
       final r = aName.toLowerCase().compareTo(bName.toLowerCase());
       return desc ? -r : r;
+    }
+
+    // 时间键比较：无时间的条目不参与方向反转，恒定沉底（同 date 的未知日期）。
+    int byTime(DateTime? a, DateTime? b) {
+      if (a == null && b == null) {
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      }
+      if (a == null) return 1;
+      if (b == null) return -1;
+      if (a != b) return desc ? b.compareTo(a) : a.compareTo(b);
+      return aName.toLowerCase().compareTo(bName.toLowerCase());
     }
 
     switch (sortMode) {
@@ -946,6 +1254,10 @@ abstract class _MediaController with Store {
           return desc ? bCount.compareTo(aCount) : aCount.compareTo(bCount);
         }
         return aName.toLowerCase().compareTo(bName.toLowerCase());
+      case 'played':
+        return byTime(aPlayed, bPlayed);
+      case 'updated':
+        return byTime(aUpdated, bUpdated);
       case 'date':
       default:
         final ka = _airDateSortKey(aDate);
