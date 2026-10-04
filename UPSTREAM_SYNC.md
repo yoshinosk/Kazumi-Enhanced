@@ -1,14 +1,15 @@
 # 上游功能同步进度
 
 - 基线:上游 `2.2.8`(640dfdcb)
-- 目标:同步上游 `2.2.9` ~ `2.3.4` 的全部功能(批次 1~4 共 72 个提交 + 批次 5 共 28 个提交)
+- 目标:同步上游 `2.2.9` ~ `2.3.4` 的全部功能(批次 1~4 共 72 个提交 + 批次 5 共 28 个提交);批次 6 起为滚动同步
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.9.27)**:批次 1~5 已全部完成并合入 `dev`,上游功能同步至 **2.3.4**(目标 commit `88a8ec59`,批次 5 完成于 2026.9.23);上游已发布 2.3.5 / 2.3.6,待后续批次跟进。
-> - 工程构建于 Flutter 3.47.2(跳过上游 3.47.3 / 3.47.5 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning,`flutter test` 与 Windows 构建在本机终端跑通。
+> **当前状态(2026.10.5)**:批次 1~6 已全部完成并合入 `dev`,上游功能同步至 **2.3.7**(目标 commit `02afdabf`,批次 6 完成于 2026.10.5);上游暂无更新的提交。
+> - 工程构建于 Flutter 3.47.2(批次 5/6 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(41 条既有 info),`flutter test` 436 项全部通过。
 > - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
-> - 注意:本机代理会话内无法运行 flutter 工具(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开,`flutter.bat` 会静默挂死),test/build 需在本机终端执行,详见备注。
+> - 批次 6 起 GitHub 直连恢复,辅助同步用 blobless clone(见批次 6 备注);fetch_upstream.py(api.github.com contents 接口)仍可用于单文件场景。
+> - 注意:本机代理会话内 flutter 工具时通时不通(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开);2026.10.5 批次 6 期间 flutter pub get / test / analyze 已可在会话内直跑,若再次挂死请退回 `dart analyze lib test` + 本机终端验证。
 
 ## 批次 1:低冲突功能
 
@@ -152,6 +153,51 @@
 - `danmaku_settings_sheet.dart`:保留 `playerDanmakuController` 参数与弹幕轴偏移面板对接
 - `pubspec.yaml`:保留 fork 依赖(libtorrent_flutter vendor、awesome_notifications、local_notifier、watcher、xml、material_new_shapes)与版本 0.0.1,接收上游 media-kit ref 更新
 - `fastlane/.flutter`:保持删除;`test/webdav_service_test.dart`:接收上游更新版本
+
+## 批次 6:上游 2.3.5 ~ 2.3.7(基线 88a8ec59 → 目标 02afdabf,共 28 个提交,完成于 2026.10.5)
+
+- 策略:GitHub 直连恢复,新增 blobless clone(`.upstream_tmp/upstream-git`,git-ignored);以 `git merge-file` 做「fork 当前版 vs 基线 88a8ec59 vs 上游 main」三方合并,冲突逐个回植 fork 功能。
+- ech_http 由 pub 依赖改为本地 vendor(`third_party/ech_http`,dependency_overrides):上游 hook 把 ~186KB CA 证书嵌成单个 C++ 原始字符串,MSVC(VS 2022)C2026 上限 65,535 字节无法编译;vendor 版在 CMake 层按 ~14KB 分块拼接(仅分块修复,逻辑与 0.2.1 一致),`licenses/ech_http/` 资产与上游一致。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ✅ | 1a5f408 | feat(network): 可配置 ECH 图片加速(ech_http/http 依赖、licenses/ech_http 资产、代理感知图片缓存) | 2026.10.5 |
+| ✅ | 1bb6159 | fix(search): 重复搜索时保留并刷新历史条目 | 2026.10.5 |
+| ✅ | 2ba6131 | fix(network): Bangumi API 图片请求启用 ECH(含测试) | 2026.10.5 |
+| ✅ | 9aceca1 | fix(collect): 收藏分类标签文字居中 | 2026.10.5 |
+| ✅ | 685ddce / cc8f67a / 98d486b | deps: bump ech_http(合并接收,最终 ^0.2.1,落地为 vendor) | 2026.10.5 |
+| ✅ | b6e1da2 | deps: bump media kit(6fd002aa → 最终 803c4a27) | 2026.10.5 |
+| ✅ | d163d2a | fix(settings): 嵌套页窗口控件去重(SysAppBar 精简;保留 fork 双击最大化/拖拽阈值/最大化按钮,恢复 fork 使用的 bottom 参数) | 2026.10.5 |
+| ✅ | 0dfe1dc | feat(player): 进度手势拖回边缘可取消(新 PlayerGestureDetector;替换 fork 旧内联手势层) | 2026.10.5 |
+| ✅ | b484025 | feat(info): 封面保存/标题复制紧凑菜单(新 InfoActionsMenu;保留 fork 磁力搜索按钮) | 2026.10.5 |
+| ✅ | c4ac0e2 | fix(window): 标题栏控件变更延迟到重启(新 DesktopWindowConfig;fork 页面同步切换) | 2026.10.5 |
+| ✅ | b41f98d / 0066f6c / 34e5ebd / 767bdb3 | feat(player): 截图挑选与跨平台导出(净效果接收:新截图控制器/候选面板/导出服务;保留 fork 桌面快捷保存目录链路与 Android 相册流程,SaverGallery 文件名用 fork 的标题_集数_进度命名) | 2026.10.5 |
+| ✅ | a132c95 | feat(danmaku): 可配置简繁转换(设置瓦片并入 fork 重排后的单页弹幕设置) | 2026.10.5 |
+| ✅ | c576d1d | feat(network): Bangumi API 可配置加速(direct/ech/mirror + bangumi_transport/dio_factory 重构) | 2026.10.5 |
+| ✅ | e7e7d3f | fix(network): ECH 客户端复用与请求清理 | 2026.10.5 |
+| ✅ | 36d5363 | fix(danmaku): 弹幕搜索历史按番剧持久化(danmaku_source_sheet 增加 bangumiId) | 2026.10.5 |
+| ✅ | 241ec54 | fix(plugin): 非 2xx 反爬挑战检测(含测试) | 2026.10.5 |
+| ✅ | 0ea0bbd | refactor(ui): 统一下拉菜单(新 KazumiMenu/KazumiMenuItem/SettingsDropdownTile;删除 custom_dropdown_menu) | 2026.10.5 |
+| ✅ | eb53fcb | fix(settings): 分类重复点击不再重复导航 | 2026.10.5 |
+| ✅ | 02afdab | fix(player): 集评论头部空字幕占位置空 | 2026.10.5 |
+| ✅ | .github/workflows/pr.yaml | CI:ech_http 需要 cmake/ninja(pr.yaml 为 fork 未改动的干净接收;release.yaml 为 fork 自维护,不接收) | 2026.10.5 |
+
+### 批次 6 决定跳过
+
+| 状态 | 上游提交 | 原因 |
+|---|---|---|
+| ❌ | b1826fe / d830231 / 65da249 | version 提交(2.3.5/2.3.6/2.3.7)——本分支版本号独立(1.0.1),不接收 |
+| ❌ | 35ae2f6 | deps: bump flutter 3.47.6——本机保持 3.47.2(沿用批次 5 决定) |
+| ❌ | (fastlane/.flutter 部分) | fork 保持删除,不接收 |
+
+### 批次 6 冲突文件与 fork 回植点
+
+- `player_item.dart`:保留 fork 截图快捷保存(`ScreenshotSaveService`,桌面分支)+ fork 相册命名;接收上游候选截图流/新手势层;补回 `DanmakuScreen` 挂载与 `onPrevEpisode`;`showDanmakuSwitch` 传 `bangumiId`;删除 fork 旧内联手势 Positioned.fill(被 PlayerGestureDetector 取代,`_commitInteractiveSeek` 由上游 `finishInteractiveSeek(cancelled:)` 取代)。
+- `player_item_panel.dart`:更多菜单保留 fork `_buildMoreMenuChildren`(音轨/字幕/字幕延迟/AB 循环/播完动作/画面旋转/在线模式守卫投屏),按钮与菜单项迁移到 KazumiMenu 体系;画面右键菜单经 `PlayerPanelHoldMenuAnchor.controller`(新增可选参数)保留 `open(position:)` 能力。
+- `sys_app_bar.dart`:保留 fork StatefulWidget(双击最大化/拖拽阈值/WindowMaximizeButton),接收 DesktopWindowConfig;`bottom` 参数为 fork 下载页/磁力页 TabBar 所需,予保留。
+- `bangumi_client.dart`:镜像签名合并——fork 私有镜像(bgmapi.anibt.net)沿旧 `enableBangumiProxy` 开关签名;上游公共 API 域名仅在 mirror 加速模式签名;两者都以「存在 KAZUMI_APPID/KEY 凭据」为前提。
+- `dio_factory.dart` / `api_endpoints.dart` / `settings_keys.dart` / `interface_settings.dart` / `theme_settings_page.dart` / `popular_page.dart` / `info_page.dart` / `danmaku_api.dart` 等:零冲突或 1-2 处冲突,均按「fork 功能 + 上游重构」拼接(磁力设置入口、开机自启、媒体库默认页、背景图设置、HeaderScrim、弹幕匹配/标题检索等均保留)。
+- `test/player_panel_hold_menu_anchor_test.dart`:适配新 `(context, toggle)` builder 签名,并经新增 `controller` 参数保留「已打开时再 open()」的 SDK 语义用例。
 
 ## 决定跳过(按项目平台约束)
 

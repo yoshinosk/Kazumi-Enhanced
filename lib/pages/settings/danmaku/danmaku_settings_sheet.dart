@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
 import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
+import 'package:kazumi/pages/settings/danmaku/danmaku_ch_convert_tile.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_shield_settings_sheet.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_time_offset_sheet.dart';
 import 'package:kazumi/bean/settings/settings_list.dart';
@@ -149,6 +150,7 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                   SettingsSection(
                     title: Text('弹幕显示'),
                     tiles: [
+                      const DanmakuChConvertTile(),
                       SettingsTile(
                         leading: Icons.schedule_rounded,
                         onPressed: (context) {

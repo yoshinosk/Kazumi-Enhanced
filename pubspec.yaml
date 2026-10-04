@@ -50,6 +50,8 @@ dependencies:
   hive_ce_flutter: ^2.3.3
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1
+  ech_http: ^0.2.1
+  http: ^1.6.0
   image: ^4.8.0
   # cached_network_image_ce: ^4.6.4
   file_picker: ^10.3.7
@@ -122,12 +124,12 @@ dependencies:
   media_kit:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6fd002aabce0c22009bfbf564c1b7f16f0b120d8
+      ref: 803c4a27912091db6f839d48d1b984a0d9f588c7
       path: ./media_kit
   media_kit_video:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 6fd002aabce0c22009bfbf564c1b7f16f0b120d8
+      ref: 803c4a27912091db6f839d48d1b984a0d9f588c7
       path: ./media_kit_video
   macos_secure_bookmarks: ^0.2.1
   libtorrent_flutter: ^1.9.2
@@ -140,6 +142,10 @@ dependency_overrides:
   # 使用 prebuilt DLL 时行为与上游一致；重建原生库后翻转 resumeAware。
   libtorrent_flutter:
     path: third_party/libtorrent_flutter
+  # Kazumi 本地 vendor：MSVC 无法编译上游整段嵌入的 CA 原始字符串（C2026），
+  # 本地分块修复，见 third_party/ech_http/README.md。
+  ech_http:
+    path: third_party/ech_http
 
 dev_dependencies:
   path_provider_platform_interface: ^2.1.2
@@ -215,6 +221,7 @@ flutter:
     - assets/shaders/
     - assets/images/logo/
     - assets/statements/
+    - licenses/ech_http/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware
