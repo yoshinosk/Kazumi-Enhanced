@@ -267,8 +267,10 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
   }
 
   Widget _grid(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final contentWidth = constraints.maxWidth;
+    // 必须用 SliverLayoutBuilder：本方法返回 Sliver，普通 LayoutBuilder
+    // 出现在 sliver 位置会在构建时抛异常（表现为整页白屏）。
+    return SliverLayoutBuilder(builder: (context, constraints) {
+      final contentWidth = constraints.crossAxisExtent;
       final portrait =
           MediaQuery.orientationOf(context) == Orientation.portrait;
       final spacing = portrait ? (contentWidth < 600 ? 8.0 : 12.0) : 16.0;
