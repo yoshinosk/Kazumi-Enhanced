@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:kazumi/bean/widget/kazumi_menu.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/bangumi/sync_priority.dart';
@@ -15,7 +19,9 @@ import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/collect/collect_library_view.dart';
 import 'package:kazumi/pages/collect/collect_sync_dialog.dart';
+import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/utils/bangumi_note_json.dart';
 
 class CollectPage extends StatefulWidget {
   const CollectPage({
@@ -105,6 +111,66 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
     }, errorMessage: '同步未完成，请稍后重试');
   }
 
+  /// 导出收藏为 bangumi-note 兼容 JSON（可再导回 bangumi-note 或导入 Kazumi）。
+  Future<void> _exportJson() async {
+    try {
+      final entries = collectController.collectibles.toList();
+      if (entries.isEmpty) {
+        KazumiDialog.showToast(message: '暂无收藏可导出');
+        return;
+      }
+      final bytes = utf8.encode(BangumiNoteJson.encode(entries));
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: '导出追番记录',
+        fileName: '追番记录.json',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: bytes,
+        lockParentWindow: true,
+      );
+      if (saved == null) return;
+      KazumiDialog.showToast(message: '已导出 ${entries.length} 条收藏');
+    } catch (e, stackTrace) {
+      KazumiLogger()
+          .e('Collect: failed to export collectibles', error: e, stackTrace: stackTrace);
+      KazumiDialog.showToast(message: '导出失败：$e');
+    }
+  }
+
+  /// 从 bangumi-note 兼容 JSON 导入收藏（仅新增，不覆盖已有状态）。
+  Future<void> _importJson() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        withData: true,
+        lockParentWindow: true,
+      );
+      if (result == null) return;
+      final file = result.files.single;
+      final bytes = file.bytes ??
+          (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null) throw const FileSystemException('无法读取所选文件');
+      final parsed = BangumiNoteJson.parse(utf8.decode(bytes));
+      if (parsed.collectibles.isEmpty) {
+        KazumiDialog.showToast(
+            message: parsed.failureCount > 0
+                ? '没有可导入的收藏（${parsed.failureCount} 条解析失败）'
+                : '文件中没有可导入的收藏');
+        return;
+      }
+      final summary =
+          await collectController.importCollectibles(parsed.collectibles);
+      KazumiDialog.showToast(
+          message: '已导入 ${summary.imported} 条，跳过已有 ${summary.skipped} 条'
+              '${parsed.failureCount > 0 ? '，解析失败 ${parsed.failureCount} 条' : ''}');
+    } catch (e, stackTrace) {
+      KazumiLogger()
+          .e('Collect: failed to import collectibles', error: e, stackTrace: stackTrace);
+      KazumiDialog.showToast(message: '导入失败：$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -121,14 +187,47 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: Tooltip(
-              message: '同步收藏',
-              child: StateActionButton.tonal(
-                text: '同步',
-                onPressed:
-                    _syncDialogOpen || _pendingIds.isNotEmpty ? null : _sync,
-                icon: Icons.sync_rounded,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Tooltip(
+                  message: '追番统计',
+                  child: StateActionButton.tonal(
+                    text: '统计',
+                    onPressed: () => context.pushNamed('/stats/'),
+                    icon: Icons.query_stats_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: '同步收藏',
+                  child: StateActionButton.tonal(
+                    text: '同步',
+                    onPressed:
+                        _syncDialogOpen || _pendingIds.isNotEmpty ? null : _sync,
+                    icon: Icons.sync_rounded,
+                  ),
+                ),
+                KazumiMenuButton(
+                  builder: (context, toggle) => IconButton(
+                    tooltip: '更多',
+                    onPressed: toggle,
+                    icon: const Icon(Icons.more_vert_rounded),
+                  ),
+                  menuChildren: [
+                    KazumiMenuItem(
+                      label: '导出追番记录 JSON',
+                      leadingIcon: const Icon(Icons.ios_share_rounded),
+                      onPressed: _exportJson,
+                    ),
+                    KazumiMenuItem(
+                      label: '导入追番记录 JSON',
+                      leadingIcon: const Icon(Icons.file_open_rounded),
+                      onPressed: _importJson,
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

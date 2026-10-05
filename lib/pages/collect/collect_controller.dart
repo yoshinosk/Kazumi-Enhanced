@@ -24,6 +24,9 @@ enum _BangumiDeleteSyncAction {
 
 class CollectController = _CollectController with _$CollectController;
 
+/// 批量导入结果：成功导入数 / 跳过已有数 / 解析或写入失败数
+typedef CollectImportSummary = ({int imported, int skipped, int failed});
+
 abstract class _CollectController with Store {
   _CollectController(
     this._collectCrudRepository,
@@ -322,6 +325,44 @@ abstract class _CollectController with Store {
       KazumiLogger().d(
           'GStorage: detected $count uncategorized favorites, migrated to collectibles');
     }
+  }
+
+  /// 批量导入收藏。
+  ///
+  /// 仅本地写入，不逐条触发 Bangumi 账号同步（条量大时会打爆接口），
+  /// 变更记录照常写入，后续全量同步会把新增条目上传到远端。
+  /// 已收藏过的条目（含已抛弃）跳过，不覆盖现有状态。
+  @action
+  Future<CollectImportSummary> importCollectibles(
+      List<CollectedBangumi> collectibles) async {
+    var imported = 0;
+    var skipped = 0;
+    var failed = 0;
+    for (final collect in collectibles) {
+      try {
+        final bangumiItem = collect.bangumiItem;
+        if (getCollectType(bangumiItem) != 0) {
+          skipped++;
+          continue;
+        }
+        await _collectCrudRepository.addCollectible(bangumiItem, collect.type);
+        await GStorage.appendCollectChange(
+          bangumiId: bangumiItem.id,
+          action: 1,
+          type: collect.type,
+        );
+        imported++;
+      } catch (e, stackTrace) {
+        failed++;
+        KazumiLogger().e(
+          'Collect: failed to import collectible. id=${collect.bangumiItem.id}',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    loadCollectibles();
+    return (imported: imported, skipped: skipped, failed: failed);
   }
 
   /// 根据收藏类型获取番剧ID集合
