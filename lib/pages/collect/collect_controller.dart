@@ -24,8 +24,13 @@ enum _BangumiDeleteSyncAction {
 
 class CollectController = _CollectController with _$CollectController;
 
-/// 批量导入结果：成功导入数 / 跳过已有数 / 解析或写入失败数
-typedef CollectImportSummary = ({int imported, int skipped, int failed});
+/// 批量写入结果：新增数 / 更新数 / 跳过数 / 失败数
+typedef CollectImportSummary = ({
+  int imported,
+  int updated,
+  int skipped,
+  int failed,
+});
 
 abstract class _CollectController with Store {
   _CollectController(
@@ -362,7 +367,54 @@ abstract class _CollectController with Store {
       }
     }
     loadCollectibles();
-    return (imported: imported, skipped: skipped, failed: failed);
+    return (imported: imported, updated: 0, skipped: skipped, failed: failed);
+  }
+
+  /// 批量打标：未收藏的新增，已收藏但状态不同的覆盖更新，状态相同跳过。
+  ///
+  /// 与 [importCollectibles] 一样仅本地写入并记录变更日志，
+  /// 不逐条触发 Bangumi 即时同步，由后续全量同步上传远端。
+  @action
+  Future<CollectImportSummary> bulkSetCollect(
+      List<BangumiItem> bangumiItems, int type) async {
+    var imported = 0;
+    var updated = 0;
+    var skipped = 0;
+    var failed = 0;
+    for (final bangumiItem in bangumiItems) {
+      try {
+        final currentType = getCollectType(bangumiItem);
+        if (currentType == type) {
+          skipped++;
+          continue;
+        }
+        await _collectCrudRepository.addCollectible(bangumiItem, type);
+        await GStorage.appendCollectChange(
+          bangumiId: bangumiItem.id,
+          action: currentType == 0 ? 1 : 2,
+          type: type,
+        );
+        if (currentType == 0) {
+          imported++;
+        } else {
+          updated++;
+        }
+      } catch (e, stackTrace) {
+        failed++;
+        KazumiLogger().e(
+          'Collect: failed to bulk mark collectible. id=${bangumiItem.id}, type=$type',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    loadCollectibles();
+    return (
+      imported: imported,
+      updated: updated,
+      skipped: skipped,
+      failed: failed,
+    );
   }
 
   /// 根据收藏类型获取番剧ID集合

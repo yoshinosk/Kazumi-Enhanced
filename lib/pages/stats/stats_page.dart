@@ -100,6 +100,8 @@ class _StatsPageState extends State<StatsPage>
                   entries: entries,
                   undatedCount: widget.controller.undatedCount,
                   onOpen: (item) => context.pushNamed('/info/', arguments: item),
+                  onMarkSeason: (year, month) => context
+                      .pushNamed('/mark/', arguments: {'year': year, 'month': month}),
                 ),
                 StatsCharts(entries: entries),
               ],

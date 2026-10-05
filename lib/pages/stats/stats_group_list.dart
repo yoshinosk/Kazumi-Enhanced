@@ -7,11 +7,15 @@ class StatsGroupList extends StatelessWidget {
     required this.entries,
     required this.undatedCount,
     required this.onOpen,
+    required this.onMarkSeason,
   });
 
   final List<CollectedBangumi> entries;
   final int undatedCount;
   final ValueChanged<BangumiItem> onOpen;
+
+  /// 跳转到对应年份 / 季度的补标页
+  final void Function(int year, int month) onMarkSeason;
 
   @override
   Widget build(BuildContext context) {
@@ -50,6 +54,14 @@ class StatsGroupList extends StatelessWidget {
                       child: _SectionHeader(
                         title: '${quarter.month} 月新番',
                         count: quarter.entries.length,
+                        trailing: IconButton(
+                          tooltip: '补标 ${quarter.year} 年 ${quarter.month} 月新番',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.playlist_add_check_rounded,
+                              size: 20),
+                          onPressed: () => onMarkSeason(
+                              quarter.year, quarter.month),
+                        ),
                       ),
                     ),
                     SliverPadding(
@@ -137,11 +149,13 @@ class _SectionHeader extends StatelessWidget {
     required this.title,
     required this.count,
     this.isYear = false,
+    this.trailing,
   });
 
   final String title;
   final int count;
   final bool isYear;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -167,6 +181,8 @@ class _SectionHeader extends StatelessWidget {
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: colors.onSurfaceVariant),
           ),
+          const Spacer(),
+          ?trailing,
         ],
       ),
     );

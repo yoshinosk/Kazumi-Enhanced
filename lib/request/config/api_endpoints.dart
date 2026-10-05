@@ -47,6 +47,9 @@ class ApiEndpoints {
   /// Bangumi 鉴权 API
   static const String bangumiAuthAPIMirrorDomain = 'https://api.bgmapi.com';
 
+  /// Bangumi 公开 API 域名（镜像不可达时的公开只读回退）
+  static const String bangumiPublicAPIDomain = 'https://api.bgm.tv';
+
   /// Telegram 群组
   static const String telegramGroup = 'https://t.me/kazumi_app';
 
@@ -59,6 +62,9 @@ class ApiEndpoints {
   /// 条目搜索
   static const String bangumiRankSearch =
       '/v0/search/subjects?limit={0}&offset={1}';
+
+  /// 条目浏览（按年份 / 季度筛选，公开只读接口）
+  static const String bangumiSubjectBrowser = '/v0/subjects';
 
   /// 从条目ID获取角色信息
   static const String bangumiCharacterByID = '/v0/subjects/{0}/characters';

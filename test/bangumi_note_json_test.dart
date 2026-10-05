@@ -175,6 +175,37 @@ void main() {
     });
   });
 
+  group('normalizeSubjectJson', () {
+    test('强制条目 type=2 并兜底缺失的 rating / images', () {
+      final normalized = BangumiNoteJson.normalizeSubjectJson({
+        'id': 1,
+        'type': 4, // bangumi-note 的收藏状态残留
+        'name': 'x',
+        'name_cn': 'y',
+      });
+      expect(normalized['type'], 2);
+      expect((normalized['rating'] as Map)['rank'], 0);
+      expect(normalized['images'], isEmpty);
+
+      final item = BangumiItem.fromJson(normalized);
+      expect(item.type, 2);
+      expect(item.ratingScore, 0.0);
+    });
+
+    test('稀疏 rating.count 补齐 1~10 键位，votesCount 不丢失', () {
+      final normalized = BangumiNoteJson.normalizeSubjectJson({
+        'id': 2,
+        'type': 2,
+        'name': 'n',
+        'name_cn': 'nc',
+        'rating': {'rank': 5, 'score': 7.0, 'total': 3, 'count': {'10': 3}},
+        'images': {'large': 'https://example.com/a.jpg'},
+      });
+      final item = BangumiItem.fromJson(normalized);
+      expect(item.votesCount, [0, 0, 0, 0, 0, 0, 0, 0, 0, 3]);
+    });
+  });
+
   group('导出导入往返', () {
     test('字段保持一致', () {
       final item = _bangumiItem(alias: ['怪兽八号']);

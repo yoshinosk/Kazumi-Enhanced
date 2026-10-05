@@ -216,6 +216,11 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
                   ),
                   menuChildren: [
                     KazumiMenuItem(
+                      label: '季度补标',
+                      leadingIcon: const Icon(Icons.playlist_add_check_rounded),
+                      onPressed: () => context.pushNamed('/mark/'),
+                    ),
+                    KazumiMenuItem(
                       label: '导出追番记录 JSON',
                       leadingIcon: const Icon(Icons.ios_share_rounded),
                       onPressed: _exportJson,

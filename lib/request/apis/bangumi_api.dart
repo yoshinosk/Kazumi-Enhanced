@@ -16,6 +16,7 @@ import 'package:kazumi/modules/bangumi/bangumi_collection_type.dart';
 import 'package:kazumi/modules/comments/comment_item.dart';
 import 'package:kazumi/utils/search_parser.dart';
 import 'package:kazumi/utils/async_rate_limiter.dart';
+import 'package:kazumi/utils/bangumi_note_json.dart';
 
 class BangumiSearchPage {
   const BangumiSearchPage({
@@ -25,6 +26,19 @@ class BangumiSearchPage {
 
   final List<BangumiItem> items;
   final int rawCount;
+}
+
+/// 按年份 / 季度浏览得到的一页条目
+class BangumiSeasonPage {
+  const BangumiSeasonPage({
+    required this.items,
+    required this.total,
+  });
+
+  final List<BangumiItem> items;
+
+  /// 该季度符合条件的条目总数（用于判断是否还有下一页）
+  final int total;
 }
 
 class BangumiApi {
@@ -125,6 +139,56 @@ class BangumiApi {
           .e('Network: fetch bangumi item to calendar failed', error: e);
     }
     return bangumiCalendar;
+  }
+
+  /// 按年份与季度浏览动画条目（公开只读接口，无需鉴权）。
+  /// 主走私有镜像，失败时回退到官方公开 API。
+  static Future<BangumiSeasonPage> getSubjectsBySeason({
+    required int year,
+    required int month,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final query = <String, dynamic>{
+      'type': 2,
+      'cat': 1,
+      'year': year,
+      'month': month,
+      'sort': 'date',
+      'limit': limit,
+      'offset': offset,
+    };
+    dynamic jsonData;
+    try {
+      jsonData = await _client.get(
+        ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiSubjectBrowser,
+        queryParameters: query,
+      );
+    } catch (e) {
+      KazumiLogger().w(
+        'BangumiApi: season browse via mirror failed, trying public API',
+        error: e,
+      );
+      jsonData = await _client.get(
+        ApiEndpoints.bangumiPublicAPIDomain +
+            ApiEndpoints.bangumiSubjectBrowser,
+        queryParameters: query,
+      );
+    }
+    final items = <BangumiItem>[];
+    for (final jsonItem in (jsonData['data'] as List? ?? const [])) {
+      if (jsonItem is Map<String, dynamic>) {
+        try {
+          items.add(
+            BangumiItem.fromJson(BangumiNoteJson.normalizeSubjectJson(jsonItem)),
+          );
+        } catch (_) {}
+      }
+    }
+    return BangumiSeasonPage(
+      items: items,
+      total: (jsonData['total'] as num?)?.toInt() ?? items.length,
+    );
   }
 
   static String buildBangumiMirrorSeasonCalendarPath(List<String> dateRange) {

@@ -57,11 +57,25 @@ mixin _$CollectController on _CollectController, Store {
   );
 
   @override
-  Future<({int failed, int imported, int skipped})> importCollectibles(
-    List<CollectedBangumi> collectibles,
-  ) {
+  Future<({int failed, int imported, int skipped, int updated})>
+  importCollectibles(List<CollectedBangumi> collectibles) {
     return _$importCollectiblesAsyncAction.run(
       () => super.importCollectibles(collectibles),
+    );
+  }
+
+  late final _$bulkSetCollectAsyncAction = AsyncAction(
+    '_CollectController.bulkSetCollect',
+    context: context,
+  );
+
+  @override
+  Future<({int failed, int imported, int skipped, int updated})> bulkSetCollect(
+    List<BangumiItem> bangumiItems,
+    int type,
+  ) {
+    return _$bulkSetCollectAsyncAction.run(
+      () => super.bulkSetCollect(bangumiItems, type),
     );
   }
 

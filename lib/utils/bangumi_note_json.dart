@@ -48,10 +48,19 @@ class BangumiNoteParseResult {
 class BangumiNoteJson {
   BangumiNoteJson._();
 
+  /// 把 bgm.tv /v0 条目 JSON 标准化为 [BangumiItem.fromJson] 可安全解析的
+  /// 形态：条目 type 统一按动画（2）处理（避免收藏状态等非条目类型写进
+  /// [BangumiItem.type]），rating/images 缺失或畸形时兜底。
+  static Map<String, dynamic> normalizeSubjectJson(Map<String, dynamic> json) {
+    return Map<String, dynamic>.of(json)
+      ..['type'] = 2
+      ..['rating'] = _normalizeRating(json['rating'])
+      ..['images'] = json['images'] is Map<String, dynamic>
+          ? json['images']
+          : <String, String>{};
+  }
+
   /// 解析 bangumi-note 导出的 JSON 文本。
-  ///
-  /// 条目 subject type 统一按动画（2）处理：该格式里 `type` 已被收藏状态
-  /// 覆盖，不还原会把收藏状态写进 [BangumiItem.type]。
   static BangumiNoteParseResult parse(String raw) {
     final decoded = jsonDecode(raw);
     if (decoded is! List) {
@@ -72,16 +81,9 @@ class BangumiNoteJson {
           failures++;
           continue;
         }
-        final subject = Map<String, dynamic>.of(entry)
-          ..['type'] = 2
-          // BangumiItem.fromJson 假定 rating/images 必存在，做一次兜底
-          ..['rating'] = _normalizeRating(entry['rating'])
-          ..['images'] = entry['images'] is Map<String, dynamic>
-              ? entry['images']
-              : <String, String>{};
         collectibles.add(
           CollectedBangumi(
-            BangumiItem.fromJson(subject),
+            BangumiItem.fromJson(normalizeSubjectJson(entry)),
             DateTime.now(),
             collectValue,
           ),
@@ -125,7 +127,9 @@ class BangumiNoteJson {
     return {...rating, 'count': _fullVoteCount(count is Map ? count : null)};
   }
 
-  static Map<String, int> _fullVoteCount(Map? count) {
+  /// 注意返回 `Map<String, dynamic>`：fromJson 以 `is Map<String, dynamic>`
+  /// 识别评分分布映射，泛型不变得用具体类型会识别失败。
+  static Map<String, dynamic> _fullVoteCount(Map? count) {
     return {
       for (var i = 1; i <= 10; i++)
         '$i': count == null ? 0 : ((count['$i'] as num?)?.toInt() ?? 0),
