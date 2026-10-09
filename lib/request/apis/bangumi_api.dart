@@ -164,6 +164,10 @@ class BangumiApi {
         ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiSubjectBrowser,
         queryParameters: query,
       );
+      // 镜像可能以 200 返回错误体（无 data 列表），同样视为失败回退。
+      if (jsonData is! Map || jsonData['data'] is! List) {
+        throw const FormatException('season browse response has no data list');
+      }
     } catch (e) {
       KazumiLogger().w(
         'BangumiApi: season browse via mirror failed, trying public API',
@@ -174,9 +178,12 @@ class BangumiApi {
             ApiEndpoints.bangumiSubjectBrowser,
         queryParameters: query,
       );
+      if (jsonData is! Map || jsonData['data'] is! List) {
+        throw const FormatException('season browse response has no data list');
+      }
     }
     final items = <BangumiItem>[];
-    for (final jsonItem in (jsonData['data'] as List? ?? const [])) {
+    for (final jsonItem in (jsonData['data'] as List)) {
       if (jsonItem is Map<String, dynamic>) {
         try {
           items.add(

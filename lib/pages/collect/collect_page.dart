@@ -163,6 +163,7 @@ class _CollectPageState extends State<CollectPage> with KazumiDialogOwner {
           await collectController.importCollectibles(parsed.collectibles);
       KazumiDialog.showToast(
           message: '已导入 ${summary.imported} 条，跳过已有 ${summary.skipped} 条'
+              '${summary.failed > 0 ? '，写入失败 ${summary.failed} 条' : ''}'
               '${parsed.failureCount > 0 ? '，解析失败 ${parsed.failureCount} 条' : ''}');
     } catch (e, stackTrace) {
       KazumiLogger()

@@ -43,6 +43,10 @@ abstract class _SeasonMarkController with Store {
 
   int _offset = 0;
 
+  /// 请求代际：刷新 / 切季时自增。迟到的旧请求响应会因代际不匹配被丢弃，
+  /// 避免上一季数据混入当前列表、_offset 与分页状态被旧响应覆盖。
+  int _requestEpoch = 0;
+
   /// 进入页面时应用初始年份 / 季度并加载。
   /// 参数为 null 时保持默认（当前季度）。
   @action
@@ -62,42 +66,55 @@ abstract class _SeasonMarkController with Store {
 
   @action
   Future<void> refresh() async {
+    final epoch = ++_requestEpoch;
+    final requestYear = year;
+    final requestMonth = quarterMonth;
     _offset = 0;
     isError = false;
     hasReachedEnd = false;
+    isLoadingMore = false;
     subjects.clear();
     isLoading = true;
     try {
       final page = await BangumiApi.getSubjectsBySeason(
-        year: year,
-        month: quarterMonth,
+        year: requestYear,
+        month: requestMonth,
         limit: _pageSize,
         offset: 0,
       );
+      if (epoch != _requestEpoch) return;
       subjects.addAll(page.items);
       _offset = page.items.length;
       if (page.items.isEmpty || _offset >= page.total) {
         hasReachedEnd = true;
       }
     } catch (e) {
+      if (epoch != _requestEpoch) return;
       isError = true;
     } finally {
-      isLoading = false;
+      if (epoch == _requestEpoch) {
+        isLoading = false;
+        refreshCollectTypes();
+      }
     }
-    refreshCollectTypes();
   }
 
   @action
   Future<void> loadMore() async {
     if (isLoading || isLoadingMore || hasReachedEnd || isError) return;
+    final epoch = _requestEpoch;
+    final requestYear = year;
+    final requestMonth = quarterMonth;
+    final requestOffset = _offset;
     isLoadingMore = true;
     try {
       final page = await BangumiApi.getSubjectsBySeason(
-        year: year,
-        month: quarterMonth,
+        year: requestYear,
+        month: requestMonth,
         limit: _pageSize,
-        offset: _offset,
+        offset: requestOffset,
       );
+      if (epoch != _requestEpoch) return;
       final knownIds = subjects.map((item) => item.id).toSet();
       for (final item in page.items) {
         if (knownIds.add(item.id)) {
@@ -109,13 +126,16 @@ abstract class _SeasonMarkController with Store {
         hasReachedEnd = true;
       }
     } catch (e) {
+      if (epoch != _requestEpoch) return;
       KazumiDialog.showToast(message: '加载更多失败，请稍后重试');
       // 停止继续触发，避免滚动时反复失败
       hasReachedEnd = true;
     } finally {
-      isLoadingMore = false;
+      if (epoch == _requestEpoch) {
+        isLoadingMore = false;
+        refreshCollectTypes();
+      }
     }
-    refreshCollectTypes();
   }
 
   int collectTypeOf(int bangumiId) => collectTypes[bangumiId] ?? 0;

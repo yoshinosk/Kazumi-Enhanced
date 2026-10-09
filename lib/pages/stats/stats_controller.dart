@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:kazumi/repositories/collect_crud_repository.dart';
 import 'package:mobx/mobx.dart';
@@ -11,6 +13,9 @@ abstract class _StatsController with Store {
 
   final ICollectCrudRepository _collectCrudRepository;
 
+  StreamSubscription<void>? _changesSubscription;
+  Timer? _reloadDebounce;
+
   @observable
   ObservableList<CollectedBangumi> collectibles =
       ObservableList<CollectedBangumi>();
@@ -18,6 +23,22 @@ abstract class _StatsController with Store {
   /// 没有放送日期、无法归档到季度的条目数
   @observable
   int undatedCount = 0;
+
+  /// 页面存活期间订阅收藏写入（含导入 / 补标 / 同步回写），保持统计实时。
+  /// 批量写入会连续触发变更，做 200ms 防抖只重载一次。
+  void startListening() {
+    _changesSubscription ??= _collectCrudRepository.changes.listen((_) {
+      _reloadDebounce?.cancel();
+      _reloadDebounce = Timer(const Duration(milliseconds: 200), load);
+    });
+  }
+
+  void stopListening() {
+    _changesSubscription?.cancel();
+    _changesSubscription = null;
+    _reloadDebounce?.cancel();
+    _reloadDebounce = null;
+  }
 
   @action
   void load() {
@@ -29,9 +50,9 @@ abstract class _StatsController with Store {
   }
 }
 
-/// 某季度的四种计数（总数/看过/想看/抛弃）。
+/// 某季度的计数（总数/看过/想看/抛弃）。
 ///
-/// 「搁置」不在图表线里，只计入总数。
+/// 总数包含全部收藏状态；「在看」「搁置」不在图表线里，只计入总数。
 class StatsStatusCounts {
   const StatsStatusCounts({
     required this.total,
@@ -46,10 +67,12 @@ class StatsStatusCounts {
   final int abandoned;
 
   static StatsStatusCounts of(Iterable<CollectedBangumi> entries) {
+    var total = 0;
     var watched = 0;
     var planToWatch = 0;
     var abandoned = 0;
     for (final entry in entries) {
+      total++;
       switch (entry.type) {
         case 4:
           watched++;
@@ -60,7 +83,7 @@ class StatsStatusCounts {
       }
     }
     return StatsStatusCounts(
-      total: watched + planToWatch + abandoned,
+      total: total,
       watched: watched,
       planToWatch: planToWatch,
       abandoned: abandoned,

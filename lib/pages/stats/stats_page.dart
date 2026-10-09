@@ -37,10 +37,12 @@ class _StatsPageState extends State<StatsPage>
   void initState() {
     super.initState();
     widget.controller.load();
+    widget.controller.startListening();
   }
 
   @override
   void dispose() {
+    widget.controller.stopListening();
     _tabController.dispose();
     super.dispose();
   }

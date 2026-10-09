@@ -107,6 +107,14 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
     unawaited(controller.markSubjects(items, type.value));
   }
 
+  /// 切季：多选中的条目已不属于新列表，先清空勾选再加载。
+  void _setSeason(int year, int quarterMonth) {
+    if (_selecting) {
+      setState(() => _selectedIds.clear());
+    }
+    unawaited(controller.setSeason(year, quarterMonth));
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -148,12 +156,11 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
             ),
           ),
           menuChildren: [
-            for (final year in _yearOptions())
+            for (final year in _yearOptions(controller.year))
               KazumiMenuItem(
                 label: '$year 年',
                 selected: year == controller.year,
-                onPressed: () =>
-                    unawaited(controller.setSeason(year, controller.quarterMonth)),
+                onPressed: () => _setSeason(year, controller.quarterMonth),
               ),
           ],
         ),
@@ -200,8 +207,8 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
         child: SegmentedButton<int>(
           showSelectedIcon: false,
           selected: {controller.quarterMonth},
-          onSelectionChanged: (selection) => unawaited(
-              controller.setSeason(controller.year, selection.first)),
+          onSelectionChanged: (selection) =>
+              _setSeason(controller.year, selection.first),
           segments: [
             for (final month in const [1, 4, 7, 10])
               ButtonSegment(
@@ -230,12 +237,18 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
         title: '该季度没有找到动画条目',
       );
     }
+    // 收藏状态必须在 build 阶段读取（Observer 才能跟踪）；SliverLayoutBuilder
+    // 的 builder 在 layout 阶段执行，在那里读 Observable 不会触发重建。
+    final entries = [
+      for (final item in controller.subjects)
+        (item, controller.collectTypeOf(item.id)),
+    ];
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-          sliver: _grid(context),
+          sliver: _grid(context, entries),
         ),
         if (controller.isLoadingMore)
           const SliverToBoxAdapter(
@@ -266,7 +279,7 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
     );
   }
 
-  Widget _grid(BuildContext context) {
+  Widget _grid(BuildContext context, List<(BangumiItem, int)> entries) {
     // 必须用 SliverLayoutBuilder：本方法返回 Sliver，普通 LayoutBuilder
     // 出现在 sliver 位置会在构建时抛异常（表现为整页白屏）。
     return SliverLayoutBuilder(builder: (context, constraints) {
@@ -289,13 +302,13 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
           mainAxisSpacing: portrait ? 12 : spacing,
           mainAxisExtent: _MarkCard.extent(width, scaler),
         ),
-        itemCount: controller.subjects.length,
+        itemCount: entries.length,
         itemBuilder: (context, index) {
-          final item = controller.subjects[index];
+          final (item, collectType) = entries[index];
           return _MarkCard(
             key: ValueKey('mark-${item.id}'),
             item: item,
-            collectType: controller.collectTypeOf(item.id),
+            collectType: collectType,
             selecting: _selecting,
             selected: _selectedIds.contains(item.id),
             onTap: () => _toggleSelect(item.id),
@@ -343,9 +356,16 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
     );
   }
 
-  static List<int> _yearOptions() {
+  static List<int> _yearOptions(int selectedYear) {
     final currentYear = DateTime.now().year;
-    return [for (var year = currentYear + 1; year >= 2002; year--) year];
+    final years = [for (var year = currentYear + 1; year >= 2002; year--) year];
+    // 从统计页可能带入超出常规范围的年份，兜底保证当前年份在菜单中。
+    if (!years.contains(selectedYear)) {
+      years
+        ..add(selectedYear)
+        ..sort((a, b) => b.compareTo(a));
+    }
+    return years;
   }
 
   static bool _isFutureSeason(int year, int quarterMonth) =>
