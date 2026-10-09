@@ -5,8 +5,8 @@
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.10.5)**:批次 1~6 已全部完成并合入 `dev`,上游功能同步至 **2.3.7**(目标 commit `02afdabf`,批次 6 完成于 2026.10.5);上游暂无更新的提交。
-> - 工程构建于 Flutter 3.47.2(批次 5/6 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(41 条既有 info),`flutter test` 436 项全部通过。
+> **当前状态(2026.10.9)**:批次 1~7 已全部完成并合入 `dev`,上游功能同步至 **2.3.8**(目标 commit `7b19c307`,批次 7 完成于 2026.10.9);上游暂无更新的提交。
+> - 工程构建于 Flutter 3.47.2(批次 5/6/7 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(41 条既有 info),`flutter test` 452 项全部通过。
 > - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
 > - 批次 6 起 GitHub 直连恢复,辅助同步用 blobless clone(见批次 6 备注);fetch_upstream.py(api.github.com contents 接口)仍可用于单文件场景。
 > - 注意:本机代理会话内 flutter 工具时通时不通(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开);2026.10.5 批次 6 期间 flutter pub get / test / analyze 已可在会话内直跑,若再次挂死请退回 `dart analyze lib test` + 本机终端验证。
@@ -198,6 +198,18 @@
 - `bangumi_client.dart`:镜像签名合并——fork 私有镜像(bgmapi.anibt.net)沿旧 `enableBangumiProxy` 开关签名;上游公共 API 域名仅在 mirror 加速模式签名;两者都以「存在 KAZUMI_APPID/KEY 凭据」为前提。
 - `dio_factory.dart` / `api_endpoints.dart` / `settings_keys.dart` / `interface_settings.dart` / `theme_settings_page.dart` / `popular_page.dart` / `info_page.dart` / `danmaku_api.dart` 等:零冲突或 1-2 处冲突,均按「fork 功能 + 上游重构」拼接(磁力设置入口、开机自启、媒体库默认页、背景图设置、HeaderScrim、弹幕匹配/标题检索等均保留)。
 - `test/player_panel_hold_menu_anchor_test.dart`:适配新 `(context, toggle)` builder 签名,并经新增 `controller` 参数保留「已打开时再 open()」的 SDK 语义用例。
+
+## 批次 7:上游 2.3.7 → 2.3.8(基线 02afdabf → 目标 7b19c307,共 5 个提交,完成于 2026.10.9)
+
+- 策略:沿用批次 6 的逐提交内容移植;四个功能提交均零冲突(`bangumi_info_card.dart` 与上游改动前逐字节一致,整文件接收)。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ✅ | c852f618 | fix(info): 大字体下收藏按钮保持可达(信息区 Flexible + FittedBox 缩放) | 2026.10.9 |
+| ✅ | de6ab4f6 | fix(player): 悬停不再重播控制栏显示动画(动画进行中不重复 forward) | 2026.10.9 |
+| ✅ | 87cd48a7 | fix(timeline): 分页加载季时移除每列顶部线性进度条 | 2026.10.9 |
+| ❌ | 11671bc0 | version 2.3.8——本分支版本号独立(1.0.1),不接收 | - |
+| ✅ | 7b19c307 | fix(video_side_panel): 移除侧边面板左侧安全区内边距 | 2026.10.9 |
 
 ## 决定跳过(按项目平台约束)
 
