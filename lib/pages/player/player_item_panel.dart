@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:mobx/mobx.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:kazumi/bean/widget/kazumi_menu.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:kazumi/bean/widget/play_pause_icon.dart';
 import 'package:kazumi/pages/player/player_adjustment_hud.dart';
@@ -29,6 +30,7 @@ import 'package:kazumi/services/player/timed_shutdown_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/format.dart';
 import 'package:kazumi/pages/player/player_transport_bar.dart';
+import 'package:kazumi/pages/player/player_screenshot_controls.dart';
 
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
@@ -42,6 +44,7 @@ class PlayerItemPanel extends StatefulWidget {
     required this.handleFullscreen,
     required this.enterAndroidPictureInPicture,
     required this.handleScreenShot,
+    required this.showScreenshotCandidates,
     required this.onNextEpisode,
     required this.onPrevEpisode,
     required this.handleProgressBarDragStart,
@@ -70,6 +73,7 @@ class PlayerItemPanel extends StatefulWidget {
   final VoidCallback handleFullscreen;
   final Future<void> Function() enterAndroidPictureInPicture;
   final VoidCallback handleScreenShot;
+  final VoidCallback showScreenshotCandidates;
   final VoidCallback handleProgressBarDragStart;
   final Future<void> Function(Duration duration) handleProgressBarSeek;
   final Future<void> Function(SuperResolutionMode mode)
@@ -118,6 +122,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   // 画面右键菜单开合的本地镜像，驱动命中层在菜单打开期间接管左键点击。
   bool _surfaceContextMenuOpen = false;
+
+  // 画面右键菜单的控制器：右键时需要在光标位置弹出（open(position:)），
+  // 因此不能依赖 KazumiMenuButton 内部创建的匿名 controller。
+  final MenuController _surfaceContextMenuController = MenuController();
 
   // 菜单关闭可能由锚点在 Observer 重建中被卸载（如锁定面板）触发，
   // setState 延迟到帧末执行，避免在 build 期间标记重建。
@@ -576,26 +584,24 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         ),
         Positioned(
           top: 25,
-          child: Observer(
-            builder: (context) {
-              // Hidden HUDs must not observe playback ticks.
-              final visible = playerController.panel.showSeekTime;
-              return PlayerSeekHud(
-                visible: visible,
-                currentPosition: visible
-                    ? playerController.playback.currentPosition
-                    : Duration.zero,
-                playerPosition: visible
-                    ? playerController.playback.playerPosition
-                    : Duration.zero,
-                duration: visible
-                    ? playerController.playback.duration
-                    : Duration.zero,
-                direction: playerController.panel.seekDirection,
-                disableAnimations: widget.disableAnimations,
-              );
-            },
-          ),
+          child: Observer(builder: (context) {
+            // Hidden HUDs must not observe playback ticks.
+            final visible = playerController.panel.showSeekTime;
+            return PlayerSeekHud(
+              visible: visible,
+              currentPosition: visible
+                  ? playerController.playback.currentPosition
+                  : Duration.zero,
+              playerPosition: visible
+                  ? playerController.playback.playerPosition
+                  : Duration.zero,
+              duration:
+                  visible ? playerController.playback.duration : Duration.zero,
+              direction: playerController.panel.seekDirection,
+              cancelPending: playerController.panel.seekCancelPending,
+              disableAnimations: widget.disableAnimations,
+            );
+          }),
         ),
         Positioned(
           top: 25,
@@ -634,25 +640,22 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             right: 0,
             top: 0,
             bottom: 0,
-            child: Observer(
-              builder: (context) {
-                if ((compact || !widget.fillsWindow) &&
-                    !playerController.panel.lockPanel) {
-                  return const SizedBox.shrink();
-                }
-                return Visibility(
-                  visible: widget.disableAnimations
-                      ? playerController.panel.showVideoController
-                      : true,
-                  child: widget.disableAnimations
-                      ? _rightControls
-                      : SlideTransition(
-                          position: _rightOffsetAnimation,
-                          child: _rightControls,
-                        ),
-                );
-              },
-            ),
+            child: Observer(builder: (context) {
+              if ((compact || !widget.fillsWindow) &&
+                  !playerController.panel.lockPanel) {
+                return const SizedBox.shrink();
+              }
+              return Visibility(
+                visible: widget.disableAnimations
+                    ? playerController.panel.showVideoController
+                    : true,
+                child: widget.disableAnimations
+                    ? _rightControls
+                    : SlideTransition(
+                        position: _rightOffsetAnimation,
+                        child: _rightControls),
+              );
+            }),
           ),
         Positioned(
           top: 0,
@@ -713,22 +716,25 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               return PlayerPanelHoldMenuAnchor(
                 acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
                 onVisibilityChanged: widget.onMenuVisibilityChanged,
+                controller: _surfaceContextMenuController,
                 onOpen: () => _handleSurfaceContextMenuOpenChanged(true),
                 onClose: () => _handleSurfaceContextMenuOpenChanged(false),
-                builder: (context, controller, child) {
+                builder: (context, toggle) {
                   return GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     // 菜单打开期间接管左键：点击画面仅关闭菜单，
                     // 不触发下层手势层的播放/暂停切换。
                     onTap: _surfaceContextMenuOpen
-                        ? () => controller.close()
+                        ? () => _surfaceContextMenuController.close()
                         : null,
                     onSecondaryTapUp: (details) {
-                      if (controller.isOpen) {
-                        controller.close();
+                      if (_surfaceContextMenuController.isOpen) {
+                        _surfaceContextMenuController.close();
                         return;
                       }
-                      controller.open(position: details.localPosition);
+                      _surfaceContextMenuController.open(
+                        position: details.localPosition,
+                      );
                     },
                     child: const SizedBox.shrink(),
                   );
@@ -786,13 +792,15 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     required String Function(T) label,
     required bool Function(T) selected,
     required void Function(T) onSelected,
-  }) => [
-    for (final value in values)
-      MenuItemButton(
-        onPressed: () => onSelected(value),
-        child: _menuLabel(label(value), selected: selected(value)),
-      ),
-  ];
+  }) =>
+      [
+        for (final value in values)
+          KazumiMenuItem(
+            onPressed: () => onSelected(value),
+            label: label(value),
+            selected: selected(value),
+          ),
+      ];
 
   List<Widget> get _aspectRatioItems => _choiceItems(
     PlayerAspectRatio.values,
@@ -866,23 +874,18 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     onSelected: widget.handleSuperResolutionChange,
   );
 
-  Widget _menuButton({
-    required Widget child,
-    required List<Widget> items,
-    String? tooltip,
-  }) => PlayerPanelHoldMenuAnchor(
-    acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
-    onVisibilityChanged: widget.onMenuVisibilityChanged,
-    consumeOutsideTap: true,
-    builder: (context, controller, menuChild) {
-      void toggle() =>
-          controller.isOpen ? controller.close() : controller.open();
-      return tooltip == null
-          ? TextButton(onPressed: toggle, child: child)
-          : IconButton(onPressed: toggle, icon: child, tooltip: tooltip);
-    },
-    menuChildren: items,
-  );
+  Widget _menuButton(
+          {required Widget child,
+          required List<Widget> items,
+          String? tooltip}) =>
+      PlayerPanelHoldMenuAnchor(
+        acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
+        onVisibilityChanged: widget.onMenuVisibilityChanged,
+        builder: (context, toggle) => tooltip == null
+            ? TextButton(onPressed: toggle, child: child)
+            : IconButton(onPressed: toggle, icon: child, tooltip: tooltip),
+        menuChildren: items,
+      );
 
   Widget get _danmakuSettingsButton => IconButton(
     onPressed: _showDanmakuSettings,
@@ -1345,6 +1348,12 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 ),
               ),
               _forwardButton(),
+              if (_desktop)
+                PlayerScreenshotControls(
+                  controller: playerController.screenshots,
+                  onCapture: widget.handleScreenShot,
+                  onReview: widget.showScreenshotCandidates,
+                ),
               if ((_desktop &&
                       (compact || !videoPageController.isFullscreen)) ||
                   (defaultTargetPlatform == TargetPlatform.android))
@@ -1378,25 +1387,16 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               PlayerPanelHoldMenuAnchor(
                 acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
                 onVisibilityChanged: widget.onMenuVisibilityChanged,
-                consumeOutsideTap: true,
-                builder:
-                    (
-                      BuildContext context,
-                      MenuController controller,
-                      Widget? child,
-                    ) {
-                      return IconButton(
-                        onPressed: () {
-                          if (controller.isOpen) {
-                            controller.close();
-                          } else {
-                            controller.open();
-                          }
-                        },
-                        tooltip: '更多选项',
-                        icon: const Icon(Icons.more_vert, color: Colors.white),
-                      );
-                    },
+                builder: (context, toggle) {
+                  return IconButton(
+                    onPressed: toggle,
+                    tooltip: '更多选项',
+                    icon: const Icon(
+                      Icons.more_vert,
+                      color: Colors.white,
+                    ),
+                  );
+                },
                 menuChildren: _buildMoreMenuChildren(compact: compact),
               ),
             ],
@@ -1527,33 +1527,37 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       bottom: false,
       left: widget.fillsWindow,
       right: widget.fillsWindow,
-      child: Column(
-        children: [
-          const Spacer(),
-          if (!playerController.panel.lockPanel)
+      child: PlayerPanelHoldMouseRegion(
+        acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
+        cursor: SystemMouseCursors.basic,
+        child: Column(
+          children: [
+            const Spacer(),
+            if (!playerController.panel.lockPanel)
+              IconButton(
+                icon: const Icon(
+                  Icons.photo_camera_outlined,
+                  color: Colors.white,
+                ),
+                tooltip: '截图',
+                onPressed: widget.handleScreenShot,
+              ),
             IconButton(
-              icon: const Icon(
-                Icons.photo_camera_outlined,
+              icon: Icon(
+                playerController.panel.lockPanel
+                    ? Icons.lock_outline
+                    : Icons.lock_open,
                 color: Colors.white,
               ),
-              tooltip: '截图',
-              onPressed: widget.handleScreenShot,
+              tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',
+              onPressed: () {
+                playerController.panel.lockPanel =
+                    !playerController.panel.lockPanel;
+              },
             ),
-          IconButton(
-            icon: Icon(
-              playerController.panel.lockPanel
-                  ? Icons.lock_outline
-                  : Icons.lock_open,
-              color: Colors.white,
-            ),
-            tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',
-            onPressed: () {
-              playerController.panel.lockPanel =
-                  !playerController.panel.lockPanel;
-            },
-          ),
-          const Spacer(),
-        ],
+            const Spacer(),
+          ],
+        ),
       ),
     );
   }

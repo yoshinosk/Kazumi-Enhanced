@@ -15,7 +15,9 @@ import 'package:kazumi/pages/popular/popular_controller.dart';
 import 'package:kazumi/pages/popular/popular_module.dart';
 import 'package:kazumi/pages/route_error_page.dart';
 import 'package:kazumi/pages/search/search_module.dart';
+import 'package:kazumi/pages/season_mark/season_mark_module.dart';
 import 'package:kazumi/pages/settings/settings_module.dart';
+import 'package:kazumi/pages/stats/stats_module.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/pages/timeline/timeline_module.dart';
 import 'package:kazumi/pages/video/video_module.dart';
@@ -129,6 +131,8 @@ final indexModule = createModule(
       ..module(infoModule)
       ..module(settingsModule)
       ..module(searchModule)
+      ..module(statsModule)
+      ..module(seasonMarkModule)
       ..module(magnetModule);
   },
 );

@@ -17,8 +17,8 @@
 # when verified (build_android/ is git-ignored).
 #
 # Host requirements (all local, nothing installed system-wide):
-#   - NDK 28.2.13676358 at D:/DevCache/Android/Sdk/ndk (toolchain clang + sysroot)
-#   - SDK cmake/ninja at D:/DevCache/Android/Sdk/cmake/3.22.1
+#   - NDK 28.2.13676358 at D:/Android/Sdk/ndk (toolchain clang + sysroot)
+#   - SDK cmake/ninja at D:/Android/Sdk/cmake/3.22.1
 #   - MSYS2 GNU make (hostprep downloads it; Git Bash ships no make and the
 #     NDK's native win32 make cannot read the POSIX paths OpenSSL's Makefile uses)
 #   - MSYS perl + PERL5LIB modules (hostprep collects them: Locale::Maketext{,-Simple},
@@ -28,15 +28,15 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$REPO_ROOT/third_party/libtorrent_flutter/build_android"
-NDK=/d/DevCache/Android/Sdk/ndk/28.2.13676358
+NDK=/d/Android/Sdk/ndk/28.2.13676358
 TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/windows-x86_64
 export ANDROID_NDK_ROOT=$NDK
 export PATH="$TOOLCHAIN/bin:$ROOT/bin:/usr/bin:/bin"
 export PERL5LIB=$ROOT/perl5lib
 MAKE=$ROOT/bin/make.exe
-CMAKE=/d/DevCache/Android/Sdk/cmake/3.22.1/bin/cmake.exe
-NINJA=/d/DevCache/Android/Sdk/cmake/3.22.1/bin/ninja.exe
-BOOST_INC="D:/Program Files/vcpkg/installed/x64-windows/include" # boost 1.91 headers, same as Windows DLL
+CMAKE=/d/Android/Sdk/cmake/3.22.1/bin/cmake.exe
+NINJA=/d/Android/Sdk/cmake/3.22.1/bin/ninja.exe
+BOOST_INC="D:/Android/vcpkg/installed/x64-windows/include" # boost 1.91 headers, same as Windows DLL
 LT_VERSION=2.0.11
 OSSL_VERSION=3.2.1
 ABIS="arm64-v8a armeabi-v7a x86_64"

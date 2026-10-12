@@ -46,7 +46,10 @@ class _CollectCategories extends StatelessWidget {
                 constraints: const BoxConstraints(minWidth: 64),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(type?.label ?? '全部'),
+                  child: Text(
+                    type?.label ?? '全部',
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               ),
             ),
@@ -128,20 +131,16 @@ class _CollectSortMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MenuAnchor(
-      consumeOutsideTap: true,
+    return KazumiMenuButton(
       menuChildren: [
         for (final sort in CollectSort.values)
-          MenuItemButton(
-            trailingIcon:
-                value == sort ? const Icon(Icons.check_rounded) : null,
+          KazumiMenuItem(
+            selected: value == sort,
             onPressed: () => onChanged(sort),
-            child: Text(sort.label),
+            label: sort.label,
           ),
       ],
-      builder: (context, controller, child) {
-        void toggle() =>
-            controller.isOpen ? controller.close() : controller.open();
+      builder: (context, toggle) {
         return Tooltip(
           message: '排序：${value.label}',
           child: showLabel

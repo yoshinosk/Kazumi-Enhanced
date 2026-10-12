@@ -19,6 +19,8 @@ void main() {
     required PlayerPanelHold Function() acquireHold,
     bool alwaysOpen = false,
   }) {
+    // 外部持有 controller 才能还原「菜单已打开时再次 open()」的 SDK 语义。
+    final menuController = MenuController();
     return tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -28,15 +30,16 @@ void main() {
               onVisibilityChanged: onVisibilityChanged,
               onOpen: onOpen,
               onClose: onClose,
+              controller: menuController,
               menuChildren: const [
                 MenuItemButton(onPressed: null, child: Text('菜单项')),
               ],
-              builder: (context, controller, child) => IconButton(
+              builder: (context, toggle) => IconButton(
                 onPressed: () {
-                  if (alwaysOpen || !controller.isOpen) {
-                    controller.open();
+                  if (alwaysOpen || !menuController.isOpen) {
+                    menuController.open();
                   } else {
-                    controller.close();
+                    menuController.close();
                   }
                 },
                 icon: const Icon(Icons.more_vert),

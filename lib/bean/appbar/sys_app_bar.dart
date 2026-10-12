@@ -5,29 +5,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/window_maximize_button.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/services/platform/desktop_window_config.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/utils/device.dart';
 
 class SysAppBar extends StatefulWidget implements PreferredSizeWidget {
   final double? toolbarHeight;
-
   final Widget? title;
-
   final Color? backgroundColor;
-
-  final double? elevation;
-
-  final ShapeBorder? shape;
-
   final List<Widget>? actions;
-
   final Widget? leading;
-
-  final double? leadingWidth;
-
   final PreferredSizeWidget? bottom;
-
   final bool needTopOffset;
 
   const SysAppBar({
@@ -35,18 +23,12 @@ class SysAppBar extends StatefulWidget implements PreferredSizeWidget {
     this.toolbarHeight,
     this.title,
     this.backgroundColor,
-    this.elevation,
-    this.shape,
     this.actions,
     this.leading,
-    this.leadingWidth,
     this.bottom,
     this.needTopOffset = true,
   });
 
-  bool showWindowButton() {
-    return GStorage.getSetting(SettingsKeys.showWindowButton);
-  }
 
   @override
   State<SysAppBar> createState() => _SysAppBarState();
@@ -56,7 +38,7 @@ class SysAppBar extends StatefulWidget implements PreferredSizeWidget {
     // macOS needs to add 22(macOS title bar height)
     // to default toolbar height to build appbar like normal
     double baseHeight;
-    if (Platform.isMacOS && needTopOffset && showWindowButton()) {
+    if (Platform.isMacOS && needTopOffset && DesktopWindowConfig.showWindowButton) {
       baseHeight = (toolbarHeight ?? kToolbarHeight) + 22;
     } else {
       baseHeight = toolbarHeight ?? kToolbarHeight;
@@ -89,7 +71,9 @@ class _SysAppBarState extends State<SysAppBar> {
 
   double get _toolbarHeight {
     // 与 preferredSize 的口径一致（macOS 隐藏标题栏布局需要 +22 偏移）。
-    if (Platform.isMacOS && widget.needTopOffset && widget.showWindowButton()) {
+    if (Platform.isMacOS &&
+        widget.needTopOffset &&
+        DesktopWindowConfig.showWindowButton) {
       return (widget.toolbarHeight ?? kToolbarHeight) + 22;
     }
     return widget.toolbarHeight ?? kToolbarHeight;
@@ -148,7 +132,7 @@ class _SysAppBarState extends State<SysAppBar> {
     }
     if (_isDesktop) {
       // acs.add(IconButton(onPressed: () => windowManager.minimize(), icon: const Icon(Icons.minimize)));
-      if (!widget.showWindowButton()) {
+      if (!DesktopWindowConfig.showWindowButton) {
         acs.add(const WindowMaximizeButton());
         acs.add(CloseButton(onPressed: () => windowManager.close()));
       }
@@ -186,10 +170,7 @@ class _SysAppBarState extends State<SysAppBar> {
               ),
             )
           : null,
-      leadingWidth: widget.leadingWidth,
       backgroundColor: widget.backgroundColor,
-      elevation: widget.elevation,
-      shape: widget.shape,
       bottom: widget.bottom,
       automaticallyImplyLeading: false,
       systemOverlayStyle: SystemUiOverlayStyle(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
+import 'package:kazumi/bean/widget/kazumi_menu.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 
 /// A one-shot lease that keeps the player panel visible until released.
@@ -125,20 +126,19 @@ class PlayerPanelHoldMenuAnchor extends StatefulWidget {
     required this.onVisibilityChanged,
     required this.builder,
     required this.menuChildren,
-    this.consumeOutsideTap = false,
+    this.controller,
     this.onOpen,
     this.onClose,
   });
 
   final PlayerPanelHold Function() acquirePlayerPanelHold;
   final ValueChanged<bool> onVisibilityChanged;
-  final Widget Function(
-    BuildContext context,
-    MenuController controller,
-    Widget? child,
-  ) builder;
+  final KazumiMenuBuilder builder;
   final List<Widget> menuChildren;
-  final bool consumeOutsideTap;
+
+  /// 外部持有的 MenuController：需要 open(position:) 等高级控制
+  /// （如画面右键菜单在光标处弹出）时传入。
+  final MenuController? controller;
 
   /// 菜单开合的额外观测点（onVisibilityChanged 之外的本地状态联动），
   /// 首次开启/关闭各回调一次。
@@ -167,9 +167,6 @@ class _PlayerPanelHoldMenuAnchorState extends State<PlayerPanelHoldMenuAnchor> {
     _isOpen = true;
     widget.onVisibilityChanged(true);
     widget.onOpen?.call();
-    if (_hold?.isReleased == false) {
-      return;
-    }
     _hold = widget.acquirePlayerPanelHold();
   }
 
@@ -185,8 +182,9 @@ class _PlayerPanelHoldMenuAnchorState extends State<PlayerPanelHoldMenuAnchor> {
 
   @override
   Widget build(BuildContext context) {
-    return MenuAnchor(
-      consumeOutsideTap: widget.consumeOutsideTap,
+    return KazumiMenuButton(
+      animated: false,
+      controller: widget.controller,
       onOpen: _handleOpen,
       onClose: _handleClose,
       builder: widget.builder,

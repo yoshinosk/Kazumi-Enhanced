@@ -1,12 +1,14 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:kazumi/request/config/api_endpoints.dart';
 import 'package:kazumi/request/core/dio_factory.dart';
 import 'package:kazumi/request/core/network_config.dart';
 import 'package:kazumi/request/core/network_error_mapper.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:kazumi/services/network/bangumi_acceleration.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/bangumi_mirror_credentials.dart';
+import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/crypto.dart';
 import 'package:kazumi/utils/http_headers.dart';
 
@@ -23,7 +25,7 @@ class BangumiClient {
     CancelToken? cancelToken,
   }) async {
     try {
-      final response = await DioFactory.apiDio.get(
+      final response = await DioFactory.bangumiDio.get(
         url,
         queryParameters: queryParameters,
         options: Options(
@@ -50,7 +52,7 @@ class BangumiClient {
     CancelToken? cancelToken,
   }) async {
     try {
-      final response = await DioFactory.apiDio.post(
+      final response = await DioFactory.bangumiDio.post(
         url,
         data: data,
         queryParameters: queryParameters,
@@ -125,11 +127,13 @@ class BangumiClient {
     Object? data,
   }) {
     final headers = <String, dynamic>{...bangumiHTTPHeader};
-    final bangumiSyncEnable =
-        GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
-    final token = (accessToken ??
-            GStorage.getSetting<String>(SettingsKeys.bangumiAccessToken))
-        .trim();
+    final bangumiSyncEnable = GStorage.getSetting(
+      SettingsKeys.bangumiSyncEnable,
+    );
+    final token =
+        (accessToken ??
+                GStorage.getSetting<String>(SettingsKeys.bangumiAccessToken))
+            .trim();
     if ((requiresAuth || bangumiSyncEnable) && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
     }
@@ -149,20 +153,27 @@ class BangumiClient {
   }
 
   bool _shouldSignProtectedMirrorRequest(String url, String method) {
-    // Without the private mirror app credentials (only injected via CI
-    // --dart-define=KAZUMI_APPID/KAZUMI_KEY) we cannot produce a valid
-    // signature, so never sign — sending an empty/invalid signature only
-    // makes the mirror reject the request.
+    // 本分支私有镜像凭据仅经 --dart-define=KAZUMI_APPID/KAZUMI_KEY 注入；
+    // 缺失时无法产生有效签名，空签名只会被镜像拒收，故直接跳过。
     final mirrorId = bangumiMirrorCredentials['id'];
     if (mirrorId == null || mirrorId.isEmpty) {
       return false;
     }
-    final enableBangumiProxy =
+    final uri = Uri.parse(url);
+    // 私有镜像直连（bangumiAPIDomain）：沿用旧「Bangumi 镜像」开关；
+    // 上游公共 API 域名：仅在镜像加速模式下签名。
+    final isPrivateMirror =
+        uri.host == Uri.parse(ApiEndpoints.bangumiAPIDomain).host;
+    final signPrivateMirror =
+        isPrivateMirror &&
         GStorage.getSetting(SettingsKeys.enableBangumiProxy);
-    if (!enableBangumiProxy) {
+    final signPublicMirror =
+        BangumiAcceleration.current == BangumiAcceleration.mirror &&
+        ApiEndpoints.bangumiPublicApiHosts.contains(uri.host);
+    if (!signPrivateMirror && !signPublicMirror) {
       return false;
     }
-    final path = Uri.parse(url).path;
+    final path = uri.path;
     if (method == 'POST' && path == '/v0/search/subjects') {
       return true;
     }

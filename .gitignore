@@ -78,3 +78,6 @@ build_runner.log
 
 # libtorrent_flutter 安卓原生库本地构建工作区（源码下载与中间产物）
 third_party/libtorrent_flutter/build_android/
+
+# 上游同步辅助：blobless clone 与合并工作目录
+/.upstream_tmp/
