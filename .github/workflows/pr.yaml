@@ -139,7 +139,7 @@
             shell: bash
           - name: Build Flutter for Android
             run: >-
-              flutter build apk --split-per-abi
+              flutter build apk --split-per-abi --target-platform android-arm64
               --dart-define=DANDANAPI_APPID=$DANDANAPI_APPID
               --dart-define=DANDANAPI_KEY=$DANDANAPI_KEY
               --dart-define=KAZUMI_APPID=$KAZUMI_APPID
