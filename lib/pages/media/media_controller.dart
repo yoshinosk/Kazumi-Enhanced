@@ -1070,10 +1070,12 @@ abstract class _MediaController with Store {
           updated: latestModifiedAt(group.folders),
         ),
     ]..sort((a, b) => _compareEntries(
-          aDate: a.group.info!.airDate,
-          bDate: b.group.info!.airDate,
-          aName: a.group.info!.displayName,
-          bName: b.group.info!.displayName,
+          // 未匹配组 info 为 null：名称退化为空串，仅用于同时间键的平局
+          // 比较排序；时间键本身来自组内播放 / 文件时间，不依赖 info。
+          aDate: a.group.info?.airDate ?? '',
+          bDate: b.group.info?.airDate ?? '',
+          aName: a.group.info?.displayName ?? '',
+          bName: b.group.info?.displayName ?? '',
           aCount: a.group.fileCount,
           bCount: b.group.fileCount,
           aPlayed: a.played,
