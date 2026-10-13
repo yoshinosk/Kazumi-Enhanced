@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/settings/background_provider.dart';
 import 'package:kazumi/utils/surface_theme.dart';
@@ -148,29 +149,29 @@ extension on Color {
   Color solidAlpha() => withValues(alpha: 1);
 }
 
-/// 悬浮头部（吸顶标签栏、固定分组标题）的遮罩。
+/// 悬浮头部（吸顶标题栏、固定标签条）的遮罩。
 ///
-/// 头部下方有内容滚动经过，不能完全透明；但整块铺实色会在半透明页面上留下一条
-/// 深色硬边，而页面遮罩之上再叠一层遮罩会更深。玻璃态下改成「顶部实色 → 底部
-/// 渐隐」：内容从底部淡出，硬边消失，下半部分仍透出背景图。未启用背景图时行为
-/// 与之前一致（铺实色）。
+/// 头部下方有内容滚动经过，需要把内容遮住；但玻璃态下页面是半透明的，
+/// 整块铺「页面实底色」会形成一条比页面深一档、且在侧边栏边界处戛然
+/// 截止的深色带（吸顶推荐页标题栏曾因此看起来像渲染异常）。这里改为在
+/// 头部边界内重画一份与整窗背景**逐像素对齐**的「背景图 + 页面遮罩」
+/// 副本：滚到头下面的卡片被副本整块盖住，副本四周又与全局背景无缝衔接，
+/// 头部看起来就是「没有内容时的页面」，而不是一块深色板。
 ///
-/// [fade] 是底部渐隐占头部高度的比例，其余部分为实色。
+/// [fade] 是底部渐隐占头部高度的比例：副本在下缘 alpha 渐隐到 0，滚动
+/// 内容从这条缝里柔和淡出，不在头部底边突然消失。未启用背景图（非玻璃
+/// 态）时保持原有行为，铺不透明的页面底色。
 class HeaderScrim extends StatelessWidget {
   const HeaderScrim({
     super.key,
     required this.child,
     this.fade = 0.6,
-    this.strength = 1,
   });
 
   final Widget child;
 
-  /// 底部渐隐所占比例（0 表示全部实色，1 表示整条渐隐）。
+  /// 底部渐隐所占比例（0 表示全部实底，1 表示整条渐隐）。
   final double fade;
-
-  /// 遮罩浓度：可随标题栏收起进度淡入淡出（展开时无需遮罩）。
-  final double strength;
 
   @override
   Widget build(BuildContext context) {
@@ -179,23 +180,113 @@ class HeaderScrim extends StatelessWidget {
     if (!glass || fade >= 1) {
       return ColoredBox(color: theme.scaffoldBackgroundColor, child: child);
     }
-    // 玻璃态下 scaffoldBackgroundColor 是透明的，遮罩实底色从扩展里取。
-    final solid = pageVeilBaseColor(theme);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            solid.withValues(alpha: strength.clamp(0.0, 1.0)),
-            solid.withValues(alpha: 0),
-          ],
-          stops: [1 - fade.clamp(0.0, 1.0), 1],
-        ),
+    // 玻璃态下 scaffoldBackgroundColor 已透明，遮罩实底色从扩展里取；
+    // 副本结构必须与 AppSurfaceLayer 的全局「图 + 遮罩」完全同款、
+    // 按整窗尺寸布局，才能与全局背景逐像素对齐、四周无接缝。
+    final background = context.watch<BackgroundProvider>();
+    final veilAlpha = backgroundVeilAlpha(background);
+    final windowSize = MediaQuery.sizeOf(context);
+    return ClipRect(
+      child: Stack(
+        children: [
+          // 背景副本：与整窗背景逐像素对齐，整块盖住从下面滚过的内容。
+          Positioned.fill(
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              // 底部 fade 比例的 alpha 渐隐只作用于副本自身（dstIn 落在
+              // 独立图层里），滚过的卡片从头部下缘柔和淡出，不会被遮暗。
+              shaderCallback: (bounds) {
+                final stop = (1 - fade.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+                return LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: const [Colors.white, Colors.white, Colors.transparent],
+                  stops: [0, stop, 1],
+                ).createShader(bounds);
+              },
+              child: _WindowAlignedCopy(
+                windowSize: windowSize,
+                child: SizedBox(
+                  width: windowSize.width,
+                  height: windowSize.height,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      const AppBackgroundLayer(),
+                      ColoredBox(
+                        color:
+                            pageVeilBaseColor(theme).withValues(alpha: veilAlpha),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 头部真实内容叠在副本之上，不受底部渐隐影响。
+          Positioned.fill(child: child),
+        ],
       ),
-      child: child,
     );
   }
+}
+
+/// 把 [child]（强制按 [windowSize] 布局）平移绘制，使其 (0,0) 对齐窗口 (0,0)。
+///
+/// 吸顶遮罩的背景副本用：每次绘制都用 [RenderBox.localToGlobal] 求出自身
+/// 在窗口（根渲染树）坐标系中的位置，把子树反向平移，子树内容即与铺满
+/// 整窗的全局背景逐像素重合。平移量在绘制期实时计算，路由切换、窗口缩放
+/// 等任何祖先布局变化都会即时对齐；祖先链为纯平移（路由过渡的滑动、
+/// [Transform.translate] 均是）时严格成立。命中测试视为不透明，保持旧
+/// 实色遮罩「点击头部空白区域也可拖动窗口」的行为。
+class _WindowAlignedCopy extends SingleChildRenderObjectWidget {
+  const _WindowAlignedCopy({required this.windowSize, required super.child});
+
+  /// 窗口逻辑尺寸：副本按整窗布局，才能与全局背景对齐。
+  final Size windowSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderWindowAlignedCopy(windowSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _RenderWindowAlignedCopy renderObject,
+  ) {
+    renderObject.windowSize = windowSize;
+  }
+}
+
+class _RenderWindowAlignedCopy extends RenderBox
+    with RenderObjectWithChildMixin<RenderBox> {
+  _RenderWindowAlignedCopy(this._windowSize);
+
+  Size _windowSize;
+
+  set windowSize(Size value) {
+    if (_windowSize == value) return;
+    _windowSize = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    // 头部约束有界（吸顶栏高度由 SliverAppBar 决定），自身铺满头部；
+    // 副本子树按整窗尺寸布局，允许超出自身边界，绘制时由外层裁剪。
+    size = constraints.biggest;
+    child?.layout(BoxConstraints.tight(_windowSize), parentUsesSize: true);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final child = this.child;
+    if (child == null) return;
+    context.paintChild(child, offset - localToGlobal(Offset.zero));
+  }
+
+  @override
+  bool hitTestSelf(Offset position) => true;
 }
 
 /// 自定义背景图层：铺满整窗，并把整棵路由树换成半透明玻璃表面。
@@ -255,6 +346,9 @@ class AppBackgroundLayer extends StatelessWidget {
       fit: BoxFit.cover,
       filterQuality: FilterQuality.medium,
       cacheWidth: _decodeWidth(context),
+      // 窗口缩放会连续改变解码尺寸、切换 ImageProvider；gapless 让旧帧
+      // 保留到新帧解码完成，配合解码宽度分档取整，缩放中背景不再闪烁。
+      gaplessPlayback: true,
     );
     if (background.blurEnabled) {
       // ImageFiltered 只模糊图片本身，开销远小于对整页实时 BackdropFilter；
@@ -281,11 +375,14 @@ class AppBackgroundLayer extends StatelessWidget {
     );
   }
 
-  /// 按屏幕最长边限制解码尺寸，控制整屏背景图的内存占用；
-  /// 覆盖裁切下该尺寸已足够清晰，毛玻璃模式下更看不出差异。
+  /// 按屏幕最长边限制解码尺寸，控制整屏背景图的内存占用；覆盖裁切下该尺寸
+  /// 已足够清晰，毛玻璃模式下更看不出差异。解码宽度按 256 物理像素一档
+  /// 向上取整：拖拽窗口边框时只在跨档瞬间重新解码，不再逐像素反复换图。
   int _decodeWidth(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    return (size.longestSide * dpr).round().clamp(640, 4096);
+    final raw = (size.longestSide * dpr).round();
+    final stepped = ((raw + 255) ~/ 256) * 256;
+    return stepped.clamp(640, 4096);
   }
 }

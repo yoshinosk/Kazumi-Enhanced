@@ -172,16 +172,15 @@ class _PopularPageState extends State<PopularPage> {
       elevation: 0,
       titleSpacing: 0,
       centerTitle: false,
-      // 吸顶时卡片会从标题栏下面滚过，需要遮罩；这里用 HeaderScrim 的渐变，
-      // 避免在半透明页面上叠出一条深色带。
+      // 吸顶时卡片会从标题栏下面滚过，需要遮罩；玻璃态下 HeaderScrim
+      // 用与整窗对齐的背景副本盖住它们，不会叠出一条深色带。
       backgroundColor: Colors.transparent,
       actions: buildActions(),
       title: null,
       flexibleSpace: Builder(
-        // 展开时下方没有内容滚过，无需遮罩；随标题栏收起把遮罩淡入。
+        // 头部下缘留 fade 比例渐隐，滚过的卡片从这里柔和淡出。
         builder: (context) => HeaderScrim(
           fade: 0.35,
-          strength: _collapseProgress(context),
           child: SafeArea(
             child: dtb.DragToMoveArea(
               child: LayoutBuilder(
@@ -261,17 +260,6 @@ class _PopularPageState extends State<PopularPage> {
         ),
       ),
     );
-  }
-
-  /// 吸顶标题栏的收起进度：完全展开 0，完全收起 1。
-  static double _collapseProgress(BuildContext context) {
-    final settings =
-        context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
-    if (settings == null) return 1;
-    final range = settings.maxExtent - settings.minExtent;
-    if (range <= 0) return 1;
-    return ((settings.maxExtent - settings.currentExtent) / range)
-        .clamp(0.0, 1.0);
   }
 
   List<Widget> buildActions() {
