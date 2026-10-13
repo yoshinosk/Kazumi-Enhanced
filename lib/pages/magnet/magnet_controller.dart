@@ -1004,11 +1004,17 @@ abstract class _MagnetController with Store {
     try {
       await _mediaController?.applyScrapeInfo(folderPath, entry.scrapeInfo!);
       // 清理旧版本同步遗留的「真实目录键」死数据：目录被扫描器拆成
-      // 逻辑分组后，真实目录键不再对应任何媒体库文件夹，删掉避免
-      // 设置膨胀与后续误匹配。
+      // 逻辑分组后，真实目录键不再对应任何媒体库文件夹。只允许清理
+      // 挂着**同一部番**旧结果的键 —— 该键可能承载其他任务（或分组
+      // 迁移发生前）的有效匹配，无条件删除会让媒体库匹配凭空丢失，
+      // 表现为「磁力页已搜刮、媒体库落到未匹配」。
       final rawDir = _actualDownloadDir(entry);
       if (rawDir.isNotEmpty && !localMediaPathsEqual(rawDir, folderPath)) {
-        await _mediaController?.removeScrapeResult(rawDir);
+        final stale = _mediaController?.getScrapeInfo(rawDir);
+        if (stale != null &&
+            stale.identityKey == entry.scrapeInfo!.identityKey) {
+          await _mediaController?.removeScrapeResult(rawDir);
+        }
       }
       _scrapeSyncedTaskIds.add(entry.taskId);
       _scrapeSyncFailures.remove(entry.taskId);
@@ -1178,7 +1184,12 @@ abstract class _MagnetController with Store {
       }
       final previousFolder = _scrapeKeyForEntry(entry);
       if (!localMediaPathsEqual(previousFolder, targetDirPath)) {
-        await media.removeScrapeResult(previousFolder);
+        // 旧键（通常为原下载目录）上可能挂着其他任务在分组迁移前的
+        // 有效匹配：仅当挂的是本任务同一部番的旧结果时才清理。
+        final stale = media.getScrapeInfo(previousFolder);
+        if (stale != null && stale.identityKey == info.identityKey) {
+          await media.removeScrapeResult(previousFolder);
+        }
       }
       await media.applyScrapeInfo(targetDirPath, info);
       await _downloads.markImported(entry.taskId, targetDirPath);
