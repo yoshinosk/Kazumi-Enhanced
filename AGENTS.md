@@ -30,6 +30,7 @@
 ## Git 约定
 
 - 日常开发在 `dev` 分支，`main` 为主分支（PR 目标）；提交信息用中文 + conventional 前缀（`feat:` / `fix:` / `docs:` / `refactor:`）。
+- 推送前若发现需要修复**尚未推送**的已提交代码，不要新增单独的 fix 提交，而应撤回原提交（`git reset --soft`），将修复内容与原改动合并为一个提交后再提交；已推送到远端的提交不做此操作。
 - `local_dandan_credentials.env`（`local_*.env`）与 `tools/_flutter_sdk/` 已 git-ignored，不要提交，也不要把其中的凭据写入代码。
 
 ## 修改日志（必须）
