@@ -140,7 +140,15 @@ class AutoUpdater {
       final currentVersion = ApiEndpoints.version;
 
       if (needUpdate(currentVersion, remoteVersion)) {
-        final availableTypes = _detectAvailableInstallationTypes();
+        final assets = data['assets'] as List<dynamic>? ?? [];
+        // 仅提供 release 中实际存在对应安装包的安装类型，
+        // 避免展示永远找不到下载链接的死选项（如未发布 MSIX 时的 MSIX 项）。
+        var availableTypes = _detectAvailableInstallationTypes()
+            .where((type) => getUpdateAssetForType(assets, type) != null)
+            .toList();
+        if (availableTypes.isEmpty) {
+          availableTypes = _detectAvailableInstallationTypes();
+        }
 
         return UpdateInfo(
           version: remoteVersion,
@@ -150,7 +158,7 @@ class AutoUpdater {
           publishedAt: data['published_at'] ?? '',
           installationType: availableTypes.first,
           availableInstallationTypes: availableTypes,
-          assets: data['assets'] ?? [],
+          assets: assets,
         );
       }
 
@@ -162,7 +170,7 @@ class AutoUpdater {
   }
 
   Future<Map<String, dynamic>> _latestRelease() async {
-    final raw = await _downloadClient.getPlain(ApiEndpoints.latestAppMirror);
+    final raw = await _downloadClient.getPlain(ApiEndpoints.latestApp);
     final data = json.decode(raw);
     if (data is! Map) {
       throw Exception('Invalid update response');
