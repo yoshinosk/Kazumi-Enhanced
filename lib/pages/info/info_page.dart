@@ -75,7 +75,11 @@ class _InfoPageState extends State<InfoPage>
     final votesCount = bangumiItem.votesCount;
     final missingVoteDistribution =
         votesCount.isEmpty || bangumiItem.votes <= 0 || votesCount.length < 10;
-    return bangumiItem.summary == '' || missingVoteDistribution;
+    // 有评分人数却缺排名，说明条目数据来自缺 rank 的旧缓存/列表源，刷新补全。
+    final missingRank = bangumiItem.votes > 0 && bangumiItem.rank <= 0;
+    return bangumiItem.summary == '' ||
+        missingVoteDistribution ||
+        missingRank;
   }
 
   Future<void> loadCharacters() async {

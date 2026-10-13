@@ -96,17 +96,22 @@ class BangumiItem {
     }
 
     List<int> parseBangumiVoteCount(Map<String, dynamic> jsonData) {
-      if (!jsonData.containsKey('rating')) {
+      final rating = jsonData['rating'];
+      if (rating is! Map) {
         return [];
       }
-      final json = jsonData['rating']['count'];
+      final json = rating['count'];
       // For api.bgm.tv
-      if (json is Map<String, dynamic>) {
-        return List<int>.generate(10, (i) => json['${i + 1}'] as int);
+      if (json is Map) {
+        return List<int>.generate(
+            10, (i) => (json['${i + 1}'] as num?)?.toInt() ?? 0);
       }
       // For next.bgm.tv
-      if (json is List<dynamic>) {
-        return json.map((e) => e as int).toList();
+      if (json is List) {
+        return List<int>.generate(10, (i) {
+          if (i >= json.length) return 0;
+          return (json[i] as num?)?.toInt() ?? 0;
+        });
       }
       return [];
     }
@@ -142,6 +147,7 @@ class BangumiItem {
     } else if (interestRaw is Map) {
       interest = BangumiInterest.fromJson(Map<String, dynamic>.from(interestRaw));
     }
+    final rating = json['rating'] is Map ? json['rating'] as Map : null;
     return BangumiItem(
       id: json['id'],
       type: json['type'] ?? 2,
@@ -152,7 +158,7 @@ class BangumiItem {
       summary: json['summary'] ?? '',
       airDate: airDateStr,
       airWeekday: dateStringToWeekday(airDateStr.isEmpty ? '2000-11-11' : airDateStr),
-      rank: json['rating']['rank'] ?? 0,
+      rank: (rating?['rank'] as num?)?.toInt() ?? 0,
       images: Map<String, String>.from(
         json['images'] ??
             {
@@ -166,8 +172,8 @@ class BangumiItem {
       tags: tagList,
       alias: bangumiAlias,
       ratingScore: double.parse(
-          (json['rating']['score'] ?? 0.0).toDouble().toStringAsFixed(1)),
-      votes: json['rating']['total'] ?? 0,
+          ((rating?['score'] ?? 0.0) as num).toDouble().toStringAsFixed(1)),
+      votes: (rating?['total'] as num?)?.toInt() ?? 0,
       votesCount: voteList,
       info: json['info'] ?? '',
       metaTags: List<String>.from(json['metaTags'] ?? json['meta_tags'] ?? []),

@@ -4,7 +4,7 @@ import 'package:kazumi/bean/widget/collect_button.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:kazumi/pages/info/rating_detail_sheet.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
 // 视频卡片 - 水平布局
@@ -25,7 +25,14 @@ class BangumiInfoCardV extends StatefulWidget {
 }
 
 class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
-  int touchedIndex = -1;
+  bool get _canOpenRatingDetail =>
+      widget.showRating &&
+      !widget.isLoading &&
+      widget.bangumiItem.votes > 0;
+
+  void _openRatingDetail() {
+    showRatingDetailSheet(context, bangumiItem: widget.bangumiItem);
+  }
 
   Widget get voteBarChart {
     return Flexible(
@@ -38,78 +45,7 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
           SizedBox(height: 16),
           AspectRatio(
             aspectRatio: 2,
-            child: BarChart(
-              duration: Duration(milliseconds: 80),
-              BarChartData(
-                // alignment: BarChartAlignment.spaceEvenly,
-                borderData: FlBorderData(show: false),
-                gridData: FlGridData(show: false),
-                barTouchData: BarTouchData(
-                  touchCallback: (FlTouchEvent event, barTouchResponse) {
-                    setState(() {
-                      if (!event.isInterestedForInteractions ||
-                          barTouchResponse == null ||
-                          barTouchResponse.spot == null) {
-                        touchedIndex = -1;
-                        return;
-                      }
-                      touchedIndex =
-                          barTouchResponse.spot!.touchedBarGroupIndex;
-                    });
-                  },
-                  touchTooltipData: BarTouchTooltipData(
-                    getTooltipColor: (_) =>
-                        Theme.of(context).colorScheme.inverseSurface,
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      var percentage =
-                          widget.bangumiItem.votesCount[groupIndex] /
-                              widget.bangumiItem.votes *
-                              100;
-                      return BarTooltipItem(
-                        '${percentage.toStringAsFixed(2)}% (${widget.bangumiItem.votesCount[groupIndex]}人)',
-                        TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.onInverseSurface),
-                      );
-                    },
-                  ),
-                ),
-                barGroups: List<BarChartGroupData>.generate(
-                  10,
-                  (i) => BarChartGroupData(
-                    x: i + 1,
-                    barRods: [
-                      BarChartRodData(
-                        toY: widget.bangumiItem.votesCount[i].toDouble(),
-                        color: touchedIndex == i
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).disabledColor,
-                        width: 20,
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(5)),
-                      )
-                    ],
-                    // showingTooltipIndicators: [0],
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 30,
-                      getTitlesWidget: (value, meta) => SideTitleWidget(
-                        meta: meta,
-                        space: 10,
-                        child: Text(value.toInt().toString()),
-                      ),
-                    ),
-                  ),
-                  topTitles: const AxisTitles(),
-                  leftTitles: const AxisTitles(),
-                  rightTitles: const AxisTitles(),
-                ),
-              ),
-            ),
+            child: RatingDistributionChart(bangumiItem: widget.bangumiItem),
           ),
         ],
       ),
@@ -194,69 +130,100 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                                     ),
                                   ),
                                   SizedBox(height: 8),
-                                  Text(
-                                    widget.showRating
-                                        ? '${widget.bangumiItem.votes} 人评分:'
-                                        : '*** 人评分:',
-                                  ),
-                                  if (widget.isLoading)
-                                    // Skeleton Loader 占位符
-                                    Text(
-                                      '10.0 ********',
-                                      style: TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                    ),
-                                  if (!widget.isLoading)
-                                    Row(
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: _canOpenRatingDetail
+                                        ? _openRatingDetail
+                                        : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           widget.showRating
-                                              ? '${widget.bangumiItem.ratingScore}'
+                                              ? '${widget.bangumiItem.votes} 人评分:'
+                                              : '*** 人评分:',
+                                        ),
+                                        if (widget.isLoading)
+                                          // Skeleton Loader 占位符
+                                          Text(
+                                            '10.0 ********',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                          ),
+                                        if (!widget.isLoading)
+                                          Row(
+                                            children: [
+                                              Text(
+                                                widget.showRating
+                                                    ? '${widget.bangumiItem.ratingScore}'
+                                                    : '***',
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              RatingBarIndicator(
+                                                itemCount: 5,
+                                                rating: widget.showRating
+                                                    ? widget.bangumiItem
+                                                            .ratingScore
+                                                            .toDouble() /
+                                                        2
+                                                    : 0,
+                                                itemBuilder: (context, index) =>
+                                                    Icon(
+                                                  Icons.star_rounded,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                ),
+                                                itemSize: 20.0,
+                                              ),
+                                            ],
+                                          ),
+                                        SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              'Bangumi Ranked:',
+                                            ),
+                                            if (_canOpenRatingDetail) ...[
+                                              const SizedBox(width: 4),
+                                              Icon(
+                                                Icons.chevron_right,
+                                                size: 18,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        Text(
+                                          widget.showRating
+                                              ? (widget.bangumiItem.rank > 0
+                                                  ? '#${widget.bangumiItem.rank}'
+                                                  : '未上榜')
                                               : '***',
                                           style: TextStyle(
-                                            fontSize: 16,
+                                            fontSize: 20,
                                             fontWeight: FontWeight.bold,
                                             color: Theme.of(context)
                                                 .colorScheme
                                                 .primary,
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        RatingBarIndicator(
-                                          itemCount: 5,
-                                          rating: widget.showRating
-                                              ? widget.bangumiItem.ratingScore
-                                                      .toDouble() /
-                                                  2
-                                              : 0,
-                                          itemBuilder: (context, index) => Icon(
-                                            Icons.star_rounded,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                          ),
-                                          itemSize: 20.0,
-                                        ),
                                       ],
-                                    ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Bangumi Ranked:',
-                                  ),
-                                  Text(
-                                    widget.showRating
-                                        ? '#${widget.bangumiItem.rank}'
-                                        : '***',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
                                     ),
                                   ),
                                 ],
