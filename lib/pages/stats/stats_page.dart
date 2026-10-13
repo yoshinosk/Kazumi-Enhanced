@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:kazumi/bean/card/bangumi_card_grid.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
@@ -13,6 +14,7 @@ import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/pages/collect/collect_library_query.dart';
 import 'package:kazumi/pages/stats/stats_controller.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/surface_theme.dart';
 import 'package:fl_chart/fl_chart.dart';
 
@@ -38,9 +40,15 @@ class _StatsPageState extends State<StatsPage>
 
   StatsController get controller => widget.controller;
 
+  /// 季度列表的卡片视图大小（大 / 中 / 小），与补标页共用同一份设置。
+  BangumiCardViewSize _viewSize = BangumiCardViewSize.large;
+
   @override
   void initState() {
     super.initState();
+    _viewSize = BangumiCardViewSize.fromName(
+      GStorage.getSetting(SettingsKeys.bangumiCardViewSize),
+    );
     widget.controller.load();
     widget.controller.startListening();
   }
@@ -98,6 +106,12 @@ class _StatsPageState extends State<StatsPage>
     controller.leaveSelection();
   }
 
+  void _changeViewSize(BangumiCardViewSize size) {
+    if (size == _viewSize) return;
+    setState(() => _viewSize = size);
+    unawaited(GStorage.putSetting(SettingsKeys.bangumiCardViewSize, size.name));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -139,6 +153,7 @@ class _StatsPageState extends State<StatsPage>
                         groups: groups,
                         undatedCount: controller.undatedCount,
                         controller: controller,
+                        viewSize: _viewSize,
                         onOpen: (item) =>
                             context.pushNamed('/info/', arguments: item),
                         onMarkSeason: (year, month) => context.pushNamed(
@@ -181,6 +196,7 @@ class _StatsPageState extends State<StatsPage>
               ),
           ],
         ),
+        BangumiCardViewSizeMenu(value: _viewSize, onChanged: _changeViewSize),
         IconButton(
           tooltip: '多选打标',
           icon: const Icon(Icons.checklist_rounded),

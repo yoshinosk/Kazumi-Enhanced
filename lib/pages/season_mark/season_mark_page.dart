@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:kazumi/bean/card/bangumi_card_grid.dart';
 import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
@@ -12,6 +13,7 @@ import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/pages/season_mark/season_mark_controller.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/surface_theme.dart';
 
 part 'season_mark_card.dart';
@@ -40,12 +42,18 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
   bool _selecting = false;
   final Set<int> _selectedIds = {};
 
+  /// 卡片视图大小（大 / 中 / 小），与追番统计页共用同一份设置。
+  BangumiCardViewSize _viewSize = BangumiCardViewSize.large;
+
   SeasonMarkController get controller => widget.controller;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _viewSize = BangumiCardViewSize.fromName(
+      GStorage.getSetting(SettingsKeys.bangumiCardViewSize),
+    );
     unawaited(controller.init(
       year: widget.initialYear,
       quarterMonth: widget.initialQuarterMonth,
@@ -96,6 +104,12 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
             controller.subjects.map((item) => item.id));
       }
     });
+  }
+
+  void _changeViewSize(BangumiCardViewSize size) {
+    if (size == _viewSize) return;
+    setState(() => _viewSize = size);
+    unawaited(GStorage.putSetting(SettingsKeys.bangumiCardViewSize, size.name));
   }
 
   void _bulkMark(CollectType type) {
@@ -166,6 +180,7 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
         ),
       ),
       actions: [
+        BangumiCardViewSizeMenu(value: _viewSize, onChanged: _changeViewSize),
         IconButton(
           tooltip: '多选打标',
           icon: const Icon(Icons.checklist_rounded),
@@ -286,21 +301,18 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
       final contentWidth = constraints.crossAxisExtent;
       final portrait =
           MediaQuery.orientationOf(context) == Orientation.portrait;
-      final spacing = portrait ? (contentWidth < 600 ? 8.0 : 12.0) : 16.0;
-      final scaler = MediaQuery.textScalerOf(context);
-      final textScale = (scaler.scale(14) / 14).clamp(1.0, double.infinity);
-      final minWidth =
-          (contentWidth < 600 ? 136.0 : 172.0) + 32 * (textScale - 1);
-      final columns = portrait
-          ? 3
-          : ((contentWidth + spacing) / (minWidth + spacing)).floor().clamp(1, 6);
-      final width = (contentWidth - spacing * (columns - 1)) / columns;
+      final layout = BangumiCardGridLayout.compute(
+        contentWidth: contentWidth,
+        portrait: portrait,
+        scaler: MediaQuery.textScalerOf(context),
+        size: _viewSize,
+      );
       return SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: portrait ? 12 : spacing,
-          mainAxisExtent: _MarkCard.extent(width, scaler),
+          crossAxisCount: layout.columns,
+          crossAxisSpacing: layout.spacing,
+          mainAxisSpacing: layout.mainAxisSpacing,
+          mainAxisExtent: layout.cardExtent,
         ),
         itemCount: entries.length,
         itemBuilder: (context, index) {
@@ -309,6 +321,7 @@ class _SeasonMarkPageState extends State<SeasonMarkPage> {
             key: ValueKey('mark-${item.id}'),
             item: item,
             collectType: collectType,
+            viewSize: _viewSize,
             selecting: _selecting,
             selected: _selectedIds.contains(item.id),
             onTap: () => _toggleSelect(item.id),

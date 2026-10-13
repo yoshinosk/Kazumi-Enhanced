@@ -8,6 +8,7 @@ class StatsGroupList extends StatelessWidget {
     required this.entries,
     required this.groups,
     required this.undatedCount,
+    required this.viewSize,
     required this.onOpen,
     required this.onMarkSeason,
   });
@@ -21,6 +22,10 @@ class StatsGroupList extends StatelessWidget {
   final List<StatsYearGroup> groups;
 
   final int undatedCount;
+
+  /// 卡片视图大小（大 / 中 / 小）
+  final BangumiCardViewSize viewSize;
+
   final ValueChanged<BangumiItem> onOpen;
 
   /// 跳转到对应年份 / 季度的补标页
@@ -102,21 +107,18 @@ class StatsGroupList extends StatelessWidget {
     return Builder(builder: (context) {
       final portrait =
           MediaQuery.orientationOf(context) == Orientation.portrait;
-      final spacing = portrait ? (contentWidth < 600 ? 8.0 : 12.0) : 16.0;
-      final scaler = MediaQuery.textScalerOf(context);
-      final textScale = (scaler.scale(14) / 14).clamp(1.0, double.infinity);
-      final minWidth =
-          (contentWidth < 600 ? 136.0 : 172.0) + 32 * (textScale - 1);
-      final columns = portrait
-          ? 3
-          : ((contentWidth + spacing) / (minWidth + spacing)).floor().clamp(1, 6);
-      final width = (contentWidth - spacing * (columns - 1)) / columns;
+      final layout = BangumiCardGridLayout.compute(
+        contentWidth: contentWidth,
+        portrait: portrait,
+        scaler: MediaQuery.textScalerOf(context),
+        size: viewSize,
+      );
       return SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: portrait ? 12 : spacing,
-          mainAxisExtent: _StatsCard.extent(width, scaler),
+          crossAxisCount: layout.columns,
+          crossAxisSpacing: layout.spacing,
+          mainAxisSpacing: layout.mainAxisSpacing,
+          mainAxisExtent: layout.cardExtent,
         ),
         itemCount: entries.length,
         itemBuilder: (context, index) {
@@ -124,6 +126,7 @@ class StatsGroupList extends StatelessWidget {
           return _StatsCard(
             key: ValueKey('stats-${entry.bangumiItem.id}'),
             entry: entry,
+            viewSize: viewSize,
             selecting: controller.selecting,
             selected: controller.selectedIds.contains(entry.bangumiItem.id),
             onOpen: () => onOpen(entry.bangumiItem),
@@ -265,6 +268,7 @@ class _StatsCard extends StatelessWidget {
   const _StatsCard({
     super.key,
     required this.entry,
+    required this.viewSize,
     required this.selecting,
     required this.selected,
     required this.onOpen,
@@ -273,19 +277,12 @@ class _StatsCard extends StatelessWidget {
   });
 
   final CollectedBangumi entry;
+  final BangumiCardViewSize viewSize;
   final bool selecting;
   final bool selected;
   final VoidCallback onOpen;
   final VoidCallback onToggle;
   final VoidCallback onLongPress;
-
-  static const _coverRatio = 0.65;
-
-  static double extent(double width, TextScaler scaler) {
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
-    return width / _coverRatio + 8 + titleHeight + 4 + statusHeight + 8;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -295,8 +292,10 @@ class _StatsCard extends StatelessWidget {
     final item = entry.bangumiItem;
     final title = CollectLibraryQuery.titleOf(entry);
     final type = CollectType.fromValue(entry.type);
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
+    final titleFontSize = viewSize.titleFontSize;
+    final statusFontSize = viewSize.statusFontSize;
+    final titleHeight = (scaler.scale(titleFontSize) * 2.7).ceilToDouble();
+    final statusHeight = (scaler.scale(statusFontSize) * 1.4).ceilToDouble();
     final shape = cardShape(context, 16) as RoundedRectangleBorder;
 
     return Material(
@@ -317,7 +316,7 @@ class _StatsCard extends StatelessWidget {
             children: [
               ExcludeSemantics(
                 child: AspectRatio(
-                  aspectRatio: _coverRatio,
+                  aspectRatio: bangumiCardCoverRatio,
                   child: Stack(
                     children: [
                       Positioned.fill(
@@ -381,7 +380,7 @@ class _StatsCard extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 13,
+                            fontSize: titleFontSize,
                             height: 1.35,
                             fontWeight: FontWeight.w600,
                           ),
@@ -404,15 +403,24 @@ class _StatsCard extends StatelessWidget {
     final type = CollectType.fromValue(entry.type);
     final hasRating = item.ratingScore > 0;
     final style = theme.textTheme.bodySmall?.copyWith(
-      fontSize: 11,
+      fontSize: viewSize.statusFontSize,
       height: 1.4,
       color: theme.colorScheme.onSurfaceVariant,
     );
     return Row(
       children: [
-        Text(type.label, style: style),
-        const Spacer(),
-        if (hasRating) Text('${item.ratingScore.toStringAsFixed(1)} 分', style: style),
+        // 状态标签占满剩余宽度并省略，评分固定在右侧：中 / 小视图卡片
+        // 较窄时优先保证评分完整可见，不会溢出。
+        Expanded(
+          child: Text(
+            type.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+        if (hasRating)
+          Text('${item.ratingScore.toStringAsFixed(1)} 分', style: style),
       ],
     );
   }
