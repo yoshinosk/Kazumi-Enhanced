@@ -77,9 +77,14 @@ class _InfoPageState extends State<InfoPage>
         votesCount.isEmpty || bangumiItem.votes <= 0 || votesCount.length < 10;
     // 有评分人数却缺排名，说明条目数据来自缺 rank 的旧缓存/列表源，刷新补全。
     final missingRank = bangumiItem.votes > 0 && bangumiItem.rank <= 0;
+    // 评分人数与分布总和不等，说明数据来自把收藏人数误写为评分人数的
+    // 旧镜像缓存，刷新纠正。
+    final votesMismatch = votesCount.isNotEmpty &&
+        bangumiItem.votes != votesCount.fold<int>(0, (sum, count) => sum + count);
     return bangumiItem.summary == '' ||
         missingVoteDistribution ||
-        missingRank;
+        missingRank ||
+        votesMismatch;
   }
 
   Future<void> loadCharacters() async {

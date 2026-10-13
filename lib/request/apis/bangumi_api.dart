@@ -475,9 +475,22 @@ class BangumiApi {
   }
 
   static Future<BangumiItem?> getBangumiInfoByID(int id) async {
-    // next.bgm.tv 直连在部分网络下不可达（详情刷新静默失败后 rank 等字段
-    // 只能停留在列表页带来的初始值），主请求用较短连接超时快速失败，
-    // 再回退到可达的 Bangumi 镜像 v0 接口。
+    // 详情刷新优先走 Bangumi 镜像 v0 接口：数据实时且各网络模式下可达；
+    // 失败时回退 next.bgm.tv p1（按加速设置直连 / ECH / 镜像改写，短超时
+    // 快速失败）。镜像缓存可能未收录条目或停留在过期快照，故不作首选。
+    try {
+      final jsonData = await _client.get(
+        ApiEndpoints.formatUrl(
+            ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiInfoByID,
+            [id]),
+      );
+      return BangumiItem.fromJson(jsonData);
+    } catch (e) {
+      KazumiLogger().w(
+        'Network: bangumi mirror info failed, trying next fallback',
+        error: e,
+      );
+    }
     try {
       final jsonData = await _client.get(
         ApiEndpoints.formatUrl(
@@ -488,19 +501,6 @@ class BangumiApi {
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 10),
         ),
-      );
-      return BangumiItem.fromJson(jsonData);
-    } catch (e) {
-      KazumiLogger().w(
-        'Network: bangumi next info failed, trying mirror fallback',
-        error: e,
-      );
-    }
-    try {
-      final jsonData = await _client.get(
-        ApiEndpoints.formatUrl(
-            ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiInfoByID,
-            [id]),
       );
       return BangumiItem.fromJson(jsonData);
     } catch (e) {

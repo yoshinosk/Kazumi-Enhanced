@@ -148,6 +148,23 @@ class BangumiItem {
       interest = BangumiInterest.fromJson(Map<String, dynamic>.from(interestRaw));
     }
     final rating = json['rating'] is Map ? json['rating'] as Map : null;
+    // Bangumi 镜像缓存可能把收藏人数写进 rating.total（与评分分布总和不符，
+    // 如 484 收藏 / 2 评分）；官方接口 total 恒等于分布总和，故分布有数据时
+    // 评分人数以分布总和为准，全零/缺失分布回退 total。
+    final voteSum = voteList.fold<int>(0, (sum, count) => sum + count);
+    final rawImages = json['images'] is Map ? json['images'] as Map : null;
+    final images = <String, String>{
+      if (rawImages != null)
+        for (final entry in rawImages.entries)
+          entry.key.toString(): entry.value?.toString() ?? ''
+      else ...{
+        'large': json['image']?.toString() ?? '',
+        'common': '',
+        'medium': '',
+        'small': '',
+        'grid': '',
+      },
+    };
     return BangumiItem(
       id: json['id'],
       type: json['type'] ?? 2,
@@ -159,21 +176,12 @@ class BangumiItem {
       airDate: airDateStr,
       airWeekday: dateStringToWeekday(airDateStr.isEmpty ? '2000-11-11' : airDateStr),
       rank: (rating?['rank'] as num?)?.toInt() ?? 0,
-      images: Map<String, String>.from(
-        json['images'] ??
-            {
-              "large": json['image'],
-              "common": "",
-              "medium": "",
-              "small": "",
-              "grid": ""
-            },
-      ),
+      images: images,
       tags: tagList,
       alias: bangumiAlias,
       ratingScore: double.parse(
           ((rating?['score'] ?? 0.0) as num).toDouble().toStringAsFixed(1)),
-      votes: (rating?['total'] as num?)?.toInt() ?? 0,
+      votes: voteSum > 0 ? voteSum : ((rating?['total'] as num?)?.toInt() ?? 0),
       votesCount: voteList,
       info: json['info'] ?? '',
       metaTags: List<String>.from(json['metaTags'] ?? json['meta_tags'] ?? []),

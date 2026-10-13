@@ -62,4 +62,90 @@ void main() {
       expect(item.isJapaneseAnime, isFalse);
     });
   });
+
+  group('BangumiItem 评分解析', () {
+    test('镜像把收藏人数误写进 rating.total 时，评分人数以分布总和为准', () {
+      // 复现 api.kazumi.fyi /p1/subjects 的真实脏数据：total=484（收藏数），
+      // 分布实际只有 2 人评分。
+      final item = BangumiItem.fromJson({
+        'id': 654294,
+        'type': 2,
+        'name': '冰剑的魔术师将要统一世界 第二季',
+        'summary': 'test',
+        'rating': {
+          'rank': 0,
+          'score': 8.5,
+          'total': 484,
+          'count': {'1': 0, '10': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0, '7': 0, '8': 1, '9': 1},
+        },
+      });
+      expect(item.votes, 2);
+      expect(item.votesCount, [0, 0, 0, 0, 0, 0, 0, 1, 1, 0]);
+      expect(item.ratingScore, 8.5);
+    });
+
+    test('p1 列表分布（List）与 total 一致时正常解析', () {
+      final item = BangumiItem.fromJson({
+        'id': 975,
+        'type': 2,
+        'name': 'CLANNAD',
+        'summary': 'test',
+        'rating': {
+          'rank': 105,
+          'score': 8.27,
+          'total': 4,
+          'count': [1, 0, 0, 0, 1, 0, 1, 0, 0, 1],
+        },
+      });
+      expect(item.votes, 4);
+      expect(item.rank, 105);
+      expect(item.votesCount.length, 10);
+    });
+
+    test('count 缺失时评分人数回退 rating.total', () {
+      final item = BangumiItem.fromJson(_slimJson());
+      expect(item.votes, 100);
+      expect(item.votesCount, isEmpty);
+    });
+
+    test('rating 缺失或畸形时兜底不抛错', () {
+      final noRating = BangumiItem.fromJson({
+        'id': 1,
+        'type': 2,
+        'name': 'x',
+        'summary': '',
+      });
+      expect(noRating.votes, 0);
+      expect(noRating.rank, 0);
+      expect(noRating.ratingScore, 0.0);
+      expect(noRating.votesCount, isEmpty);
+
+      final nullRating = BangumiItem.fromJson({
+        'id': 2,
+        'type': 2,
+        'name': 'x',
+        'summary': '',
+        'rating': null,
+      });
+      expect(nullRating.votes, 0);
+      expect(nullRating.votesCount, isEmpty);
+    });
+
+    test('分布长度不足 10 时自动补零', () {
+      final item = BangumiItem.fromJson({
+        'id': 3,
+        'type': 2,
+        'name': 'x',
+        'summary': '',
+        'rating': {
+          'rank': 1,
+          'score': 7.0,
+          'total': 3,
+          'count': [2, 1],
+        },
+      });
+      expect(item.votes, 3);
+      expect(item.votesCount, [2, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    });
+  });
 }
