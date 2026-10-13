@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
+import 'package:kazumi/bean/dialog/dialog.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -34,6 +36,19 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
     showRatingDetailSheet(context, bangumiItem: widget.bangumiItem);
   }
 
+  String get _title => widget.bangumiItem.nameCn.trim().isEmpty
+      ? widget.bangumiItem.name
+      : widget.bangumiItem.nameCn;
+
+  Future<void> _copyTitle() async {
+    try {
+      await Clipboard.setData(ClipboardData(text: _title));
+      if (mounted) KazumiDialog.showToast(message: '标题已复制');
+    } catch (error) {
+      if (mounted) KazumiDialog.showToast(message: '复制失败，请重试');
+    }
+  }
+
   Widget get voteBarChart {
     return Flexible(
       child: Column(
@@ -60,13 +75,15 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            widget.bangumiItem.nameCn == ''
-                ? widget.bangumiItem.name
-                : (widget.bangumiItem.nameCn),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.headlineSmall,
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _title.trim().isEmpty ? null : _copyTitle,
+            child: Text(
+              _title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
           ),
           SizedBox(height: 16),
           Expanded(
