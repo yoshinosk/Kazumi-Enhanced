@@ -13,23 +13,42 @@ import 'package:kazumi/utils/surface_theme.dart';
 double backgroundVeilAlpha(BackgroundProvider background) =>
     (1.0 - background.opacity).clamp(0.0, 1.0);
 
+/// 页面遮罩色（半透明）：背景图之上的那层「玻璃」。
+///
+/// 遮罩由 [AppSurfaceLayer] 在背景图与所有页面之间全局铺一层，
+/// 页面 Scaffold 自身全透明。需要在页面内容上自绘同款遮罩的地方
+/// （外观设置的背景预览、详情页页眉渐隐等）用它保持一致。
+/// 未启用背景图（非玻璃态）时返回不透明的主题底色，行为与从前一致。
+Color backgroundVeilColor(BuildContext context) {
+  final theme = Theme.of(context);
+  final base = pageVeilBaseColor(theme);
+  if (!(theme.extension<KazumiSurfaces>()?.glass ?? false)) return base;
+  final background = context.watch<BackgroundProvider>();
+  return base.withValues(alpha: backgroundVeilAlpha(background));
+}
+
 /// 背景启用时使用的全局主题：页面与卡片表面统一改为半透明。
 ///
-/// - [veil] 是页面遮罩的不透明度，负责 Scaffold / AppBar 底色；
-/// - 卡片等表面色在遮罩基础上按 [cardSurfaceAlphaScale] 再衰减一档，
+/// - 页面遮罩不再由页面铺：scaffoldBackgroundColor 置透明，遮罩由
+///   [AppSurfaceLayer] 在背景图与路由树之间全局铺唯一一层，页面互相叠放
+///   时遮罩不会翻倍，切换结束被盖路由剔除时也不会亮度跳变；
+/// - 卡片等表面色按 [cardSurfaceAlphaScale] 在遮罩基础上再衰减一档，
 ///   并以 [minCardSurfaceAlpha] 兜底：卡片比页面更透，背景图在卡片内更明显，
 ///   极端不透明度下文字仍然可读；
 /// - `surface` / `surfaceContainerLowest` 保持不透明：底部弹层等浮层叠在页面之上，
 ///   需要足够的对比度；弹窗另由 dialogTheme 与 modalSurfaceColor 兜住；
 /// - 卡片描边由 [KazumiSurfaces.glass] 提供，卡片用 [cardShape] 取；
-///   未自带 shape 的 [Card] 由这里的 cardTheme 统一补上。
+///   未自带 shape 的 [Card] 由这里的 cardTheme 统一补上；
+/// - 路由切换统一用 M3 forwards 淡入切换（透明底色）：旧页面先淡出再被剔除，
+///   新页面淡入，全程透出背景图，切换收尾不再闪跳。
 ThemeData backgroundSurfaceTheme(ThemeData base, double veil) {
   final colors = base.colorScheme;
   final veilAlpha = veil.clamp(0.0, 1.0);
   final alpha =
       (veilAlpha * cardSurfaceAlphaScale).clamp(minCardSurfaceAlpha, 1.0);
   Color fade(Color color) => color.withValues(alpha: alpha);
-  final surfaces = KazumiSurfaces.glass(colors);
+  final surfaces =
+      KazumiSurfaces.glass(colors, pageBase: pageVeilBaseColor(base));
   // 按扩展类型覆盖卡片表面样式，其余主题扩展保持不变。
   final extensions = Map<Object, ThemeExtension<dynamic>>.of(base.extensions)
     ..[KazumiSurfaces] = surfaces;
@@ -38,15 +57,23 @@ ThemeData backgroundSurfaceTheme(ThemeData base, double veil) {
   final panel = colors.surfaceContainer.solidAlpha();
   final sheet = colors.surfaceContainerLow.solidAlpha();
   final dialog = colors.surfaceContainerHigh.solidAlpha();
+  final glassTransitions = const FadeForwardsPageTransitionsBuilder(
+      backgroundColor: Colors.transparent);
 
   return base.copyWith(
-    scaffoldBackgroundColor:
-        base.scaffoldBackgroundColor.withValues(alpha: veilAlpha),
+    scaffoldBackgroundColor: Colors.transparent,
     appBarTheme: base.appBarTheme.copyWith(
-      // 页面遮罩已经铺在整页上：Scaffold appBar: 槽位的标题条下方没有内容，
-      // 再叠一层遮罩只会多出一条深色带，这里直接透明，由页面遮罩统一供底。
+      // 页面遮罩已由 AppSurfaceLayer 全局铺好：标题条下方就是遮罩与背景图，
+      // 再叠一层只会多出一条深色带，这里直接透明。
       // 需要遮住滚动内容的悬浮头部自己用 [HeaderScrim]。
       backgroundColor: Colors.transparent,
+    ),
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {
+        ...base.pageTransitionsTheme.builders,
+        TargetPlatform.android: glassTransitions,
+        TargetPlatform.windows: glassTransitions,
+      },
     ),
     colorScheme: colors.copyWith(
       surfaceContainer: fade(colors.surfaceContainer),
@@ -90,8 +117,8 @@ ThemeData opaqueSurfaceTheme(ThemeData theme) {
   final extensions = Map<Object, ThemeExtension<dynamic>>.of(theme.extensions)
     ..[KazumiSurfaces] = const KazumiSurfaces.solid();
   return theme.copyWith(
-    scaffoldBackgroundColor:
-        theme.scaffoldBackgroundColor.withValues(alpha: 1),
+    // 玻璃态的 scaffoldBackgroundColor 是透明的，页面实底色存在扩展里。
+    scaffoldBackgroundColor: pageVeilBaseColor(theme),
     appBarTheme: theme.appBarTheme.copyWith(
       backgroundColor:
           theme.appBarTheme.backgroundColor?.withValues(alpha: 1),
@@ -152,7 +179,8 @@ class HeaderScrim extends StatelessWidget {
     if (!glass || fade >= 1) {
       return ColoredBox(color: theme.scaffoldBackgroundColor, child: child);
     }
-    final solid = theme.scaffoldBackgroundColor.solidAlpha();
+    // 玻璃态下 scaffoldBackgroundColor 是透明的，遮罩实底色从扩展里取。
+    final solid = pageVeilBaseColor(theme);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -172,9 +200,12 @@ class HeaderScrim extends StatelessWidget {
 
 /// 自定义背景图层：铺满整窗，并把整棵路由树换成半透明玻璃表面。
 ///
-/// 挂在 `MaterialApp.builder` 上，位于根 Navigator 之上，因此设置、详情、
-/// 搜索、磁力等整页都能透出背景图；页面自身仍按 [backgroundSurfaceTheme]
-/// 铺遮罩底色。播放器等全屏页面用 [opaqueSurfaceTheme] 退出。
+/// 挂在 `MaterialApp.builder` 上，位于根 Navigator 之下，结构为
+/// 「背景图 → 全局唯一页面遮罩 → 半透明玻璃主题的路由树」：
+/// 设置、详情、搜索、磁力等整页都能透出背景图。遮罩全局只铺一层且不随
+/// 路由切换重建，页面互相叠放时不会翻倍变暗，切换收尾被盖路由剔除时也
+/// 不会亮度跳变（这正是此前设置页等页面闪烁的根源）。播放器等全屏页面
+/// 用 [opaqueSurfaceTheme] 退出。
 class AppSurfaceLayer extends StatelessWidget {
   const AppSurfaceLayer({super.key, required this.child});
 
@@ -184,15 +215,19 @@ class AppSurfaceLayer extends StatelessWidget {
   Widget build(BuildContext context) {
     final background = context.watch<BackgroundProvider>();
     if (!background.hasImage) return child;
+    final theme = Theme.of(context);
+    final veil = backgroundVeilAlpha(background);
     return Stack(
       fit: StackFit.expand,
       children: [
         const AppBackgroundLayer(),
+        // 全局唯一遮罩：取主题底色乘遮罩不透明度。页面 Scaffold 全透明，
+        // 所有路由共用这一层，遮罩浓度在任意页面、任意切换时刻都恒定。
+        ColoredBox(
+          color: theme.scaffoldBackgroundColor.withValues(alpha: veil),
+        ),
         Theme(
-          data: backgroundSurfaceTheme(
-            Theme.of(context),
-            backgroundVeilAlpha(background),
-          ),
+          data: backgroundSurfaceTheme(theme, veil),
           child: child,
         ),
       ],
@@ -202,8 +237,8 @@ class AppSurfaceLayer extends StatelessWidget {
 
 /// 自定义背景图层：铺满父级，按设置绘制图片与毛玻璃（高斯模糊）。
 ///
-/// 未设置背景图时渲染为空；透明度由页面侧的 [backgroundSurfaceTheme]
-/// 半透明底色实现，本组件只负责图片本身。
+/// 未设置背景图时渲染为空；本组件只负责图片本身，遮罩由
+/// [AppSurfaceLayer] 统一铺在图片之上。
 class AppBackgroundLayer extends StatelessWidget {
   const AppBackgroundLayer({super.key});
 
@@ -237,13 +272,9 @@ class AppBackgroundLayer extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 图片解码完成前先垫上主题底色，避免闪白 / 闪黑。
-          // 显式去掉 alpha：玻璃态下主题底色本身是半透明的，垫底必须是实色。
-          ColoredBox(
-            color: Theme.of(context)
-                .scaffoldBackgroundColor
-                .withValues(alpha: 1),
-          ),
+          // 图片解码完成前先垫上遮罩实底色，避免闪白 / 闪黑。
+          // 玻璃态下 scaffoldBackgroundColor 已透明，实底色从扩展里取。
+          ColoredBox(color: pageVeilBaseColor(Theme.of(context))),
           image,
         ],
       ),

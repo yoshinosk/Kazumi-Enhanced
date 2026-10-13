@@ -23,6 +23,7 @@ import 'package:kazumi/pages/timeline/timeline_module.dart';
 import 'package:kazumi/pages/video/video_module.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
+import 'package:kazumi/utils/surface_theme.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/my/my_controller.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
@@ -34,7 +35,19 @@ import 'package:kazumi/services/sync/danmaku_shield_sync_service.dart';
 final _tabTransition = CustomTransition(
   duration: const Duration(milliseconds: 70),
   transitionsBuilder: (context, animation, secondaryAnimation, child) {
-    return FadeTransition(opacity: animation, child: child);
+    // 玻璃态下页面 Scaffold 是透明的：主页壳被新页面盖住时同步淡出，
+    // 切换收尾路由剔除时内容才不会在半透明页面下突然消失；
+    // 非玻璃态保持原样（实色页面下淡出会露出空底）。
+    // 未被盖住时 secondaryAnimation 恒为 0，反向不透明度恒为 1，无副作用。
+    final glass =
+        Theme.of(context).extension<KazumiSurfaces>()?.glass ?? false;
+    return FadeTransition(
+      opacity: animation,
+      child: glass
+          ? FadeTransition(
+              opacity: ReverseAnimation(secondaryAnimation), child: child)
+          : child,
+    );
   },
 );
 

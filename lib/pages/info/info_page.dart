@@ -14,6 +14,7 @@ import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/info/info_actions_menu.dart';
@@ -560,7 +561,9 @@ class _InfoHeaderBackground extends StatelessWidget {
         final rasterWidth = width * _downsample;
         final rasterHeight = (height + _edgeBleed) * _downsample;
 
-        final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+        // 页眉图片向页面渐隐的底色：玻璃态下取全局页面遮罩色
+        // （scaffoldBackgroundColor 已透明），非玻璃态下与原值相同。
+        final backgroundColor = backgroundVeilColor(context);
 
         return ClipRect(
           child: Stack(

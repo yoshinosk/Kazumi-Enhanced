@@ -143,12 +143,12 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     );
   }
 
-  /// 导航栏 / 侧边栏的底色：背景启用时跟随页面遮罩色。
+  /// 导航栏 / 侧边栏的底色：背景启用时直接透明。
   ///
-  /// 遮罩色已由 AppSurfaceLayer 淡化成半透明，这里直接取环境主题的值，
-  /// 再乘一次遮罩会淡得过头。
+  /// 页面遮罩由 AppSurfaceLayer 全局铺在导航之下，导航栏透明即可与页面
+  /// 保持在同一层遮罩上；再叠半透明底色反而会比页面深一档。
   Color? _navSurface(BuildContext context, BackgroundProvider background) =>
-      background.hasImage ? Theme.of(context).scaffoldBackgroundColor : null;
+      background.hasImage ? Colors.transparent : null;
 
   Widget _bottomMenu(
     BuildContext context,

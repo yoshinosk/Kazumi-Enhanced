@@ -266,7 +266,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       },
                       child: Theme(
                         data: Theme.of(context).copyWith(
-                          pageTransitionsTheme: settingsPageTransitionsTheme,
+                          pageTransitionsTheme: settingsPageTransitionsTheme(
+                              Theme.of(context).pageTransitionsTheme),
                         ),
                         child: RouterOutlet(key: _outletKey),
                       ),
