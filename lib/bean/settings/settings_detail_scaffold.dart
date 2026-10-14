@@ -80,7 +80,8 @@ class SettingsDetailScaffold extends StatelessWidget {
     }
 
     // Routed panes paint their own surface so page transitions don't blend two
-    // panes together; the theme decides whether that surface is translucent.
+    // panes together; the global veil in AppSurfaceLayer keeps every pane at
+    // the same translucency as the rest of the app.
     return Scaffold(
       appBar: appBar,
       body: body,

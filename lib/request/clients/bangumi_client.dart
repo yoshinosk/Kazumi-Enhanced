@@ -23,12 +23,13 @@ class BangumiClient {
     bool requiresAuth = false,
     String? accessToken,
     CancelToken? cancelToken,
+    Options? options,
   }) async {
     try {
       final response = await DioFactory.bangumiDio.get(
         url,
         queryParameters: queryParameters,
-        options: Options(
+        options: (options ?? Options()).copyWith(
           headers: _headers(
             requiresAuth: requiresAuth,
             accessToken: accessToken,

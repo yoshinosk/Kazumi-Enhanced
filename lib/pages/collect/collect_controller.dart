@@ -417,6 +417,37 @@ abstract class _CollectController with Store {
     );
   }
 
+  /// 批量删除本地收藏并记录变更日志。
+  ///
+  /// 与 [bulkSetCollect] 一样仅本地写入，不逐条触发 Bangumi 即时同步，
+  /// 由后续全量同步上传远端。
+  @action
+  Future<({int deleted, int failed})> bulkDeleteCollect(
+      List<BangumiItem> bangumiItems) async {
+    var deleted = 0;
+    var failed = 0;
+    for (final bangumiItem in bangumiItems) {
+      try {
+        await _collectCrudRepository.deleteCollectible(bangumiItem.id);
+        await GStorage.appendCollectChange(
+          bangumiId: bangumiItem.id,
+          action: 3,
+          type: 5,
+        );
+        deleted++;
+      } catch (e, stackTrace) {
+        failed++;
+        KazumiLogger().e(
+          'Collect: failed to bulk delete collectible. id=${bangumiItem.id}',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    loadCollectibles();
+    return (deleted: deleted, failed: failed);
+  }
+
   /// 根据收藏类型获取番剧ID集合
   ///
   /// [type] 收藏类型

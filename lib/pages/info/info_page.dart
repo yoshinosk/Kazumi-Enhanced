@@ -14,6 +14,7 @@ import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
+import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/info/info_actions_menu.dart';
@@ -74,7 +75,16 @@ class _InfoPageState extends State<InfoPage>
     final votesCount = bangumiItem.votesCount;
     final missingVoteDistribution =
         votesCount.isEmpty || bangumiItem.votes <= 0 || votesCount.length < 10;
-    return bangumiItem.summary == '' || missingVoteDistribution;
+    // 有评分人数却缺排名，说明条目数据来自缺 rank 的旧缓存/列表源，刷新补全。
+    final missingRank = bangumiItem.votes > 0 && bangumiItem.rank <= 0;
+    // 评分人数与分布总和不等，说明数据来自把收藏人数误写为评分人数的
+    // 旧镜像缓存，刷新纠正。
+    final votesMismatch = votesCount.isNotEmpty &&
+        bangumiItem.votes != votesCount.fold<int>(0, (sum, count) => sum + count);
+    return bangumiItem.summary == '' ||
+        missingVoteDistribution ||
+        missingRank ||
+        votesMismatch;
   }
 
   Future<void> loadCharacters() async {
@@ -560,7 +570,9 @@ class _InfoHeaderBackground extends StatelessWidget {
         final rasterWidth = width * _downsample;
         final rasterHeight = (height + _edgeBleed) * _downsample;
 
-        final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+        // 页眉图片向页面渐隐的底色：玻璃态下取全局页面遮罩色
+        // （scaffoldBackgroundColor 已透明），非玻璃态下与原值相同。
+        final backgroundColor = backgroundVeilColor(context);
 
         return ClipRect(
           child: Stack(

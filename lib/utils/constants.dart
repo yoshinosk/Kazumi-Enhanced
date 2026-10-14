@@ -42,13 +42,25 @@ const Map<TargetPlatform, PageTransitionsBuilder> _pageTransitionBuilders =
 };
 
 /// Applied only to the settings navigator; fullscreen routes use the app theme.
-final PageTransitionsTheme settingsPageTransitionsTheme = PageTransitionsTheme(
-  builders: {
-    ..._pageTransitionBuilders,
-    TargetPlatform.linux: const FadeForwardsPageTransitionsBuilder(),
-    TargetPlatform.windows: const FadeForwardsPageTransitionsBuilder(),
-  },
-);
+///
+/// Takes the ambient (app-level) builders as the base so a glass-mode theme
+/// keeps its transparent cross-fade transitions inside the nested navigator.
+/// Desktop panes always use the M3 forwards fade; the transparent
+/// [FadeForwardsPageTransitionsBuilder.backgroundColor] keeps the custom
+/// background image visible while panes animate (the default opaque
+/// `surface` backdrop would flash when the transition ends).
+PageTransitionsTheme settingsPageTransitionsTheme(
+    PageTransitionsTheme ambient) {
+  return PageTransitionsTheme(
+    builders: {
+      ...ambient.builders,
+      TargetPlatform.linux: const FadeForwardsPageTransitionsBuilder(
+          backgroundColor: Colors.transparent),
+      TargetPlatform.windows: const FadeForwardsPageTransitionsBuilder(
+          backgroundColor: Colors.transparent),
+    },
+  );
+}
 
 /// Layout breakpoint according to google:
 /// https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes.

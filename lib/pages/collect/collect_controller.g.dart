@@ -79,6 +79,20 @@ mixin _$CollectController on _CollectController, Store {
     );
   }
 
+  late final _$bulkDeleteCollectAsyncAction = AsyncAction(
+    '_CollectController.bulkDeleteCollect',
+    context: context,
+  );
+
+  @override
+  Future<({int deleted, int failed})> bulkDeleteCollect(
+    List<BangumiItem> bangumiItems,
+  ) {
+    return _$bulkDeleteCollectAsyncAction.run(
+      () => super.bulkDeleteCollect(bangumiItems),
+    );
+  }
+
   @override
   String toString() {
     return '''

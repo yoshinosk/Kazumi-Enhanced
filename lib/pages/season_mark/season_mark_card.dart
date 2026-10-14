@@ -6,6 +6,7 @@ class _MarkCard extends StatelessWidget {
     super.key,
     required this.item,
     required this.collectType,
+    required this.viewSize,
     required this.selecting,
     required this.selected,
     required this.onTap,
@@ -18,6 +19,7 @@ class _MarkCard extends StatelessWidget {
 
   /// 当前收藏状态（0 = 未收藏）
   final int collectType;
+  final BangumiCardViewSize viewSize;
   final bool selecting;
   final bool selected;
 
@@ -31,14 +33,6 @@ class _MarkCard extends StatelessWidget {
   final ValueChanged<int> onMark;
   final VoidCallback onOpenDetails;
 
-  static const _coverRatio = 0.65;
-
-  static double extent(double width, TextScaler scaler) {
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
-    return width / _coverRatio + 8 + titleHeight + 4 + statusHeight + 8;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -46,8 +40,10 @@ class _MarkCard extends StatelessWidget {
     final scaler = MediaQuery.textScalerOf(context);
     final title = item.nameCn.trim().isNotEmpty ? item.nameCn : item.name;
     final type = CollectType.fromValue(collectType);
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
+    final titleFontSize = viewSize.titleFontSize;
+    final statusFontSize = viewSize.statusFontSize;
+    final titleHeight = (scaler.scale(titleFontSize) * 2.7).ceilToDouble();
+    final statusHeight = (scaler.scale(statusFontSize) * 1.4).ceilToDouble();
 
     final menuChildren = [
       for (final status
@@ -96,7 +92,7 @@ class _MarkCard extends StatelessWidget {
                 children: [
                   ExcludeSemantics(
                     child: AspectRatio(
-                      aspectRatio: _coverRatio,
+                      aspectRatio: bangumiCardCoverRatio,
                       child: Stack(
                         children: [
                           Positioned.fill(
@@ -167,7 +163,7 @@ class _MarkCard extends StatelessWidget {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                fontSize: 13,
+                                fontSize: titleFontSize,
                                 height: 1.35,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -178,22 +174,27 @@ class _MarkCard extends StatelessWidget {
                           height: statusHeight,
                           child: Row(
                             children: [
-                              Text(
-                                type.isCollected ? type.label : '未标记',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontSize: 11,
-                                  height: 1.4,
-                                  color: type.isCollected
-                                      ? colors.primary
-                                      : colors.onSurfaceVariant,
+                              // 状态文案占满剩余宽度并省略，评分固定在右侧：
+                              // 中 / 小视图卡片较窄时不会溢出。
+                              Expanded(
+                                child: Text(
+                                  type.isCollected ? type.label : '未标记',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: statusFontSize,
+                                    height: 1.4,
+                                    color: type.isCollected
+                                        ? colors.primary
+                                        : colors.onSurfaceVariant,
+                                  ),
                                 ),
                               ),
-                              const Spacer(),
                               if (item.ratingScore > 0)
                                 Text(
                                   item.ratingScore.toStringAsFixed(1),
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 11,
+                                    fontSize: statusFontSize,
                                     height: 1.4,
                                     color: colors.onSurfaceVariant,
                                   ),

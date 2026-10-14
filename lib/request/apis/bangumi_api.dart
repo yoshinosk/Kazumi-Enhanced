@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show Options;
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
 import 'package:kazumi/request/clients/bangumi_client.dart';
@@ -474,12 +475,32 @@ class BangumiApi {
   }
 
   static Future<BangumiItem?> getBangumiInfoByID(int id) async {
+    // 详情刷新优先走 Bangumi 镜像 v0 接口：数据实时且各网络模式下可达；
+    // 失败时回退 next.bgm.tv p1（按加速设置直连 / ECH / 镜像改写，短超时
+    // 快速失败）。镜像缓存可能未收录条目或停留在过期快照，故不作首选。
+    try {
+      final jsonData = await _client.get(
+        ApiEndpoints.formatUrl(
+            ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiInfoByID,
+            [id]),
+      );
+      return BangumiItem.fromJson(jsonData);
+    } catch (e) {
+      KazumiLogger().w(
+        'Network: bangumi mirror info failed, trying next fallback',
+        error: e,
+      );
+    }
     try {
       final jsonData = await _client.get(
         ApiEndpoints.formatUrl(
             ApiEndpoints.bangumiAPINextDomain +
                 ApiEndpoints.bangumiInfoByIDNext,
             [id]),
+        options: Options(
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
       );
       return BangumiItem.fromJson(jsonData);
     } catch (e) {

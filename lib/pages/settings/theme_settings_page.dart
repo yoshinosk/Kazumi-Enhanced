@@ -280,15 +280,15 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                     child: SizedBox(
                       height: 120,
                       width: double.infinity,
-                      // 预览与实际一致的叠加效果：背景图 + 半透明表面色。
-                      // 表面色直接取环境主题的值：AppSurfaceLayer 已经把整棵树
-                      // 换成玻璃态，这里再乘一次遮罩会比实际更透。
+                      // 预览与实际一致的叠加效果：背景图 + 全局页面遮罩。
+                      // 遮罩色取 backgroundVeilColor：与 AppSurfaceLayer
+                      // 铺在背景图上的那层同源，不会再乘一次导致更透。
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
                           const AppBackgroundLayer(),
                           ColoredBox(
-                            color: Theme.of(context).scaffoldBackgroundColor,
+                            color: backgroundVeilColor(context),
                           ),
                         ],
                       ),

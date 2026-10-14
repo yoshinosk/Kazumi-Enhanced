@@ -600,6 +600,13 @@ class SettingsKeys {
     'list',
     group: SettingGroup.interface,
   );
+
+  /// 追番统计 / 季度补标列表的番剧卡片视图大小：`large` / `medium` / `small`。
+  static const bangumiCardViewSize = SettingKey<String>(
+    'bangumiCardViewSize',
+    'large',
+    group: SettingGroup.collect,
+  );
   static const downloadParallelEpisodes = SettingKey<int>(
     _SettingBoxKey.downloadParallelEpisodes,
     2,
@@ -1218,6 +1225,7 @@ class SettingsKeys {
     proxyTestUrl,
     showRating,
     defaultCollectLayout,
+    bangumiCardViewSize,
     downloadParallelEpisodes,
     downloadParallelSegments,
     downloadDanmaku,

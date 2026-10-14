@@ -17,20 +17,29 @@ class KazumiSurfaces extends ThemeExtension<KazumiSurfaces> {
   const KazumiSurfaces({
     required this.glass,
     required this.cardOutline,
+    this.pageBaseColor,
   });
 
   /// 未启用背景图：表面不透明、不描边，视觉与引入本扩展前完全一致。
   const KazumiSurfaces.solid()
       : glass = false,
-        cardOutline = BorderSide.none;
+        cardOutline = BorderSide.none,
+        pageBaseColor = null;
 
   /// 启用背景图：表面半透明，卡片补一层细描边，从背景图里浮起来。
   ///
   /// 深浅主题都用 `onSurface` 压低透明度，描边在两种主题下都只比底色略深一点。
-  factory KazumiSurfaces.glass(ColorScheme colors) => KazumiSurfaces(
+  ///
+  /// [pageBase] 是页面遮罩的实底色（原 scaffoldBackgroundColor）。玻璃态下
+  /// scaffoldBackgroundColor 变透明（遮罩由 AppSurfaceLayer 全局铺一层），
+  /// 需要遮罩实底色的地方（悬浮头部、播放器退出玻璃态、背景图垫底等）
+  /// 从这里取回。
+  factory KazumiSurfaces.glass(ColorScheme colors, {required Color pageBase}) =>
+      KazumiSurfaces(
         glass: true,
         cardOutline:
             BorderSide(color: colors.onSurface.withValues(alpha: 0.14)),
+        pageBaseColor: pageBase,
       );
 
   /// 表面是否为玻璃态（半透明底色 + 卡片描边）。
@@ -39,11 +48,19 @@ class KazumiSurfaces extends ThemeExtension<KazumiSurfaces> {
   /// 卡片描边；[BorderSide.none] 表示不描边。
   final BorderSide cardOutline;
 
+  /// 玻璃态下页面遮罩的实底色；非玻璃态为 null（直接用 scaffoldBackgroundColor）。
+  final Color? pageBaseColor;
+
   @override
-  KazumiSurfaces copyWith({bool? glass, BorderSide? cardOutline}) =>
+  KazumiSurfaces copyWith({
+    bool? glass,
+    BorderSide? cardOutline,
+    Color? pageBaseColor,
+  }) =>
       KazumiSurfaces(
         glass: glass ?? this.glass,
         cardOutline: cardOutline ?? this.cardOutline,
+        pageBaseColor: pageBaseColor ?? this.pageBaseColor,
       );
 
   @override
@@ -52,6 +69,8 @@ class KazumiSurfaces extends ThemeExtension<KazumiSurfaces> {
     return KazumiSurfaces(
       glass: t < 0.5 ? glass : other.glass,
       cardOutline: BorderSide.lerp(cardOutline, other.cardOutline, t),
+      pageBaseColor:
+          Color.lerp(pageBaseColor, other.pageBaseColor, t) ?? pageBaseColor,
     );
   }
 }
@@ -62,6 +81,12 @@ extension KazumiSurfaceTheme on BuildContext {
       Theme.of(this).extension<KazumiSurfaces>() ??
       const KazumiSurfaces.solid();
 }
+
+/// 页面遮罩的实底色：玻璃态下 scaffoldBackgroundColor 已透明，
+/// 实底色存在主题扩展里；非玻璃态直接取 scaffoldBackgroundColor（本身不透明）。
+Color pageVeilBaseColor(ThemeData theme) =>
+    theme.extension<KazumiSurfaces>()?.pageBaseColor ??
+    theme.scaffoldBackgroundColor.withValues(alpha: 1);
 
 /// 卡片形状：圆角半径仍由各卡片自己决定，描边跟随 [KazumiSurfaces]。
 ///

@@ -12,14 +12,18 @@ ThemeData _baseTheme({Brightness brightness = Brightness.dark}) => buildAppTheme
 
 void main() {
   group('backgroundSurfaceTheme', () {
-    test('页面遮罩与卡片表面都变半透明，浮层用的 surface 保持不透明', () {
+    test('页面遮罩改为全局一层，页面底色透明，卡片表面仍半透明', () {
       final base = _baseTheme();
       final theme = backgroundSurfaceTheme(base, 0.65);
       final colors = theme.colorScheme;
 
-      expect(theme.scaffoldBackgroundColor.a, closeTo(0.65, 0.0001));
+      // 页面遮罩由 AppSurfaceLayer 全局铺一层，页面 Scaffold 全透明。
+      expect(theme.scaffoldBackgroundColor.a, 0);
+      // 遮罩实底色存在扩展里，供悬浮头部 / 播放器退出玻璃态等处取回。
+      expect(theme.extension<KazumiSurfaces>()!.pageBaseColor,
+          base.scaffoldBackgroundColor);
       // Scaffold appBar: 槽位的标题栏下方没有内容，叠遮罩只会多出一条深色带，
-      // 因此底色透明，由页面遮罩统一供底。
+      // 因此底色透明，由全局遮罩统一供底。
       expect(theme.appBarTheme.backgroundColor!.a, 0);
       // 卡片比页面更透，背景图在卡片内更明显。
       expect(colors.surfaceContainerLow.a,
@@ -112,13 +116,15 @@ void main() {
     });
 
     test('copyWith / lerp 保持描边描述完整', () {
-      final glass = KazumiSurfaces.glass(_baseTheme().colorScheme);
+      final glass = KazumiSurfaces.glass(_baseTheme().colorScheme,
+          pageBase: Colors.black);
       const solid = KazumiSurfaces.solid();
 
       expect(glass.copyWith().cardOutline, glass.cardOutline);
       expect(solid.lerp(glass, 0.5).cardOutline.width, closeTo(0.5, 0.0001));
       expect(solid.lerp(glass, 1).glass, isTrue);
       expect(glass.lerp(null, 0.5), glass);
+      expect(solid.lerp(glass, 1).pageBaseColor, Colors.black);
     });
   });
 }

@@ -4,14 +4,28 @@ part of 'stats_page.dart';
 class StatsGroupList extends StatelessWidget {
   const StatsGroupList({
     super.key,
+    required this.controller,
     required this.entries,
+    required this.groups,
     required this.undatedCount,
+    required this.viewSize,
     required this.onOpen,
     required this.onMarkSeason,
   });
 
+  final StatsController controller;
+
+  /// 状态筛选后的条目
   final List<CollectedBangumi> entries;
+
+  /// [entries] 按年份 → 季度归档的结果
+  final List<StatsYearGroup> groups;
+
   final int undatedCount;
+
+  /// 卡片视图大小（大 / 中 / 小）
+  final BangumiCardViewSize viewSize;
+
   final ValueChanged<BangumiItem> onOpen;
 
   /// 跳转到对应年份 / 季度的补标页
@@ -19,7 +33,12 @@ class StatsGroupList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final groups = groupByAirDate(entries);
+    if (entries.isEmpty) {
+      return const GeneralEmptyState(
+        icon: Icons.filter_alt_off_rounded,
+        title: '没有符合筛选条件的条目',
+      );
+    }
     if (groups.isEmpty) {
       return const GeneralEmptyState(
         icon: Icons.event_busy_rounded,
@@ -32,9 +51,14 @@ class StatsGroupList extends StatelessWidget {
       return CustomScrollView(
         primary: true,
         slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(inset, 12, inset, 0),
+            sliver: SliverToBoxAdapter(
+                child: _StatusFilterBar(controller: controller)),
+          ),
           if (undatedCount > 0)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(inset, 12, inset, 0),
+              padding: const EdgeInsets.fromLTRB(inset, 8, inset, 0),
               sliver: SliverToBoxAdapter(child: _UndatedBanner(count: undatedCount)),
             ),
           SliverPadding(
@@ -66,7 +90,7 @@ class StatsGroupList extends StatelessWidget {
                     ),
                     SliverPadding(
                       padding: const EdgeInsets.only(top: 10, bottom: 6),
-                      sliver: _grid(quarter.entries, contentWidth),
+                      sliver: _grid(controller, quarter.entries, contentWidth),
                     ),
                   ],
                 ],
@@ -78,34 +102,85 @@ class StatsGroupList extends StatelessWidget {
     });
   }
 
-  Widget _grid(List<CollectedBangumi> entries, double contentWidth) {
+  Widget _grid(
+      StatsController controller, List<CollectedBangumi> entries, double contentWidth) {
     return Builder(builder: (context) {
       final portrait =
           MediaQuery.orientationOf(context) == Orientation.portrait;
-      final spacing = portrait ? (contentWidth < 600 ? 8.0 : 12.0) : 16.0;
-      final scaler = MediaQuery.textScalerOf(context);
-      final textScale = (scaler.scale(14) / 14).clamp(1.0, double.infinity);
-      final minWidth =
-          (contentWidth < 600 ? 136.0 : 172.0) + 32 * (textScale - 1);
-      final columns = portrait
-          ? 3
-          : ((contentWidth + spacing) / (minWidth + spacing)).floor().clamp(1, 6);
-      final width = (contentWidth - spacing * (columns - 1)) / columns;
+      final layout = BangumiCardGridLayout.compute(
+        contentWidth: contentWidth,
+        portrait: portrait,
+        scaler: MediaQuery.textScalerOf(context),
+        size: viewSize,
+      );
       return SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: portrait ? 12 : spacing,
-          mainAxisExtent: _StatsCard.extent(width, scaler),
+          crossAxisCount: layout.columns,
+          crossAxisSpacing: layout.spacing,
+          mainAxisSpacing: layout.mainAxisSpacing,
+          mainAxisExtent: layout.cardExtent,
         ),
         itemCount: entries.length,
-        itemBuilder: (context, index) => _StatsCard(
-          key: ValueKey('stats-${entries[index].bangumiItem.id}'),
-          entry: entries[index],
-          onOpen: () => onOpen(entries[index].bangumiItem),
-        ),
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          return _StatsCard(
+            key: ValueKey('stats-${entry.bangumiItem.id}'),
+            entry: entry,
+            viewSize: viewSize,
+            selecting: controller.selecting,
+            selected: controller.selectedIds.contains(entry.bangumiItem.id),
+            onOpen: () => onOpen(entry.bangumiItem),
+            onToggle: () => controller.toggleSelect(entry.bangumiItem.id),
+            onLongPress: controller.enterSelection,
+          );
+        },
       );
     });
+  }
+}
+
+/// 状态筛选条
+class _StatusFilterBar extends StatelessWidget {
+  const _StatusFilterBar({required this.controller});
+
+  final StatsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _chip(context, 0, '全部', null),
+          for (final type
+              in CollectType.values.where((type) => type.isCollected))
+            _chip(context, type.value, type.label,
+                statusColorOf(colors, type)),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context, int value, String label, Color? color) {
+    final selected = controller.statusFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        selected: selected,
+        showCheckmark: false,
+        visualDensity: VisualDensity.compact,
+        label: Text(label),
+        avatar: color == null
+            ? null
+            : Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+        onSelected: (_) => controller.setStatusFilter(value),
+      ),
+    );
   }
 }
 
@@ -193,19 +268,21 @@ class _StatsCard extends StatelessWidget {
   const _StatsCard({
     super.key,
     required this.entry,
+    required this.viewSize,
+    required this.selecting,
+    required this.selected,
     required this.onOpen,
+    required this.onToggle,
+    required this.onLongPress,
   });
 
   final CollectedBangumi entry;
+  final BangumiCardViewSize viewSize;
+  final bool selecting;
+  final bool selected;
   final VoidCallback onOpen;
-
-  static const _coverRatio = 0.65;
-
-  static double extent(double width, TextScaler scaler) {
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
-    return width / _coverRatio + 8 + titleHeight + 4 + statusHeight + 8;
-  }
+  final VoidCallback onToggle;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -215,24 +292,31 @@ class _StatsCard extends StatelessWidget {
     final item = entry.bangumiItem;
     final title = CollectLibraryQuery.titleOf(entry);
     final type = CollectType.fromValue(entry.type);
-    final titleHeight = (scaler.scale(13) * 2.7).ceilToDouble();
-    final statusHeight = (scaler.scale(11) * 1.4).ceilToDouble();
+    final titleFontSize = viewSize.titleFontSize;
+    final statusFontSize = viewSize.statusFontSize;
+    final titleHeight = (scaler.scale(titleFontSize) * 2.7).ceilToDouble();
+    final statusHeight = (scaler.scale(statusFontSize) * 1.4).ceilToDouble();
+    final shape = cardShape(context, 16) as RoundedRectangleBorder;
 
     return Material(
       color: colors.surfaceContainerLow,
-      shape: cardShape(context, 16),
+      shape: selecting && selected
+          ? shape.copyWith(
+              side: BorderSide(color: colors.primary, width: 2))
+          : shape,
       clipBehavior: Clip.antiAlias,
       child: Semantics(
         button: true,
         label: '$title，${type.label}',
         child: InkWell(
-          onTap: onOpen,
+          onTap: selecting ? onToggle : onOpen,
+          onLongPress: onLongPress,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ExcludeSemantics(
                 child: AspectRatio(
-                  aspectRatio: _coverRatio,
+                  aspectRatio: bangumiCardCoverRatio,
                   child: Stack(
                     children: [
                       Positioned.fill(
@@ -257,6 +341,28 @@ class _StatsCard extends StatelessWidget {
                         top: 6,
                         child: _StatusChip(type: type),
                       ),
+                      if (selecting)
+                        Positioned.fill(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            color: selected
+                                ? colors.primary.withValues(alpha: 0.35)
+                                : Colors.transparent,
+                            alignment: Alignment.center,
+                            child: AnimatedOpacity(
+                              duration: const Duration(milliseconds: 150),
+                              opacity: selected ? 1 : 0,
+                              child: Icon(
+                                Icons.check_circle_rounded,
+                                color: Colors.white,
+                                size: 32,
+                                shadows: const [
+                                  Shadow(blurRadius: 6, color: Colors.black54)
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -274,7 +380,7 @@ class _StatsCard extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 13,
+                            fontSize: titleFontSize,
                             height: 1.35,
                             fontWeight: FontWeight.w600,
                           ),
@@ -297,15 +403,24 @@ class _StatsCard extends StatelessWidget {
     final type = CollectType.fromValue(entry.type);
     final hasRating = item.ratingScore > 0;
     final style = theme.textTheme.bodySmall?.copyWith(
-      fontSize: 11,
+      fontSize: viewSize.statusFontSize,
       height: 1.4,
       color: theme.colorScheme.onSurfaceVariant,
     );
     return Row(
       children: [
-        Text(type.label, style: style),
-        const Spacer(),
-        if (hasRating) Text('${item.ratingScore.toStringAsFixed(1)} 分', style: style),
+        // 状态标签占满剩余宽度并省略，评分固定在右侧：中 / 小视图卡片
+        // 较窄时优先保证评分完整可见，不会溢出。
+        Expanded(
+          child: Text(
+            type.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+        if (hasRating)
+          Text('${item.ratingScore.toStringAsFixed(1)} 分', style: style),
       ],
     );
   }
