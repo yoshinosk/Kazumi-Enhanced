@@ -3,7 +3,7 @@
 ![Kazumi](static/logo_readme.png)
 
 > [!IMPORTANT]
-> **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.3.8](https://github.com/Predidit/Kazumi/releases/tag/2.3.8)。**
+> **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.3.9](https://github.com/Predidit/Kazumi/releases/tag/2.3.9)。**
 > 我们在上游项目的基础上进行**功能加强**，重点新增了**本地媒体库**与**磁力下载**能力。
 > 🎉 **v1.0.0 已正式发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
 
@@ -59,7 +59,7 @@
 
 本项目已发布 **v1.0.0**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
 
-**上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.3.8**（上游暂无更新的提交），各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
+**上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.3.9**，各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
 
 ## 更新日志
 
