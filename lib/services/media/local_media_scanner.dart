@@ -294,7 +294,11 @@ int compareLocalMediaFilesForTest(LocalMediaFile a, LocalMediaFile b) =>
 String _normalize(String title) {
   return toSimplifiedChinese(title)
       .toLowerCase()
-      .replaceAll(RegExp(r'[\s\-_·・.。:：（）()\[\]【】{}「」『』"' '~～+×x*]'), '');
+      // 与 MediaScraper._normalize 保持一致：`×` 归一为 `x` 并保留 `x`，
+      // 避免 `xxxHOLiC` 与 `HOLiC` 之类的不同作品被折叠成同一个分组键。
+      .replaceAll('×', 'x')
+      .replaceAll(
+          RegExp(r'''[\s\-_·・.。:：（）()\[\]【】{}「」『』"'~～+*]'''), '');
 }
 
 /// 将分组标题清洗为可用于路径的片段（去掉 Windows 不允许的字符）。

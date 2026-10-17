@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/search/image_search_module.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
@@ -58,6 +62,7 @@ class ScrapeProgress {
     required this.failed,
     this.currentFolder,
     this.currentKeyword,
+    this.aborted = false,
   });
 
   final int done;
@@ -74,6 +79,9 @@ class ScrapeProgress {
 
   /// 当前正在使用的搜索关键词。
   final String? currentKeyword;
+
+  /// 是否因连续网络失败提前中止（未处理的文件夹保持原结果）。
+  final bool aborted;
 }
 
 /// 媒体搜刮器：将文件夹/文件名清洗为番剧关键词，再查询 Bangumi 获取元数据。
@@ -87,6 +95,54 @@ class MediaScraper {
 
   /// 单个标题最多派生的候选关键词数，避免一个文件夹打爆搜索接口。
   static const int _kMaxKeywordVariants = 6;
+
+  /// 批量搜刮的文件夹级并发数。过高会放大镜像限流风险，3 已能显著缩短总耗时。
+  static const int _kMaxConcurrentFolderScrapes = 3;
+
+  /// 连续多少个文件夹出错后中止本批搜刮（网络中断 / 镜像不可用）。
+  static const int _kMaxConsecutiveFailures = 5;
+
+  /// 每批搜刮最多实际请求 trace.moe 的次数。
+  ///
+  /// 匿名额度约为 10 次/分钟、150 次/天；批量库远超这个量级，必须有硬上限。
+  static const int _kMaxImageTracePerBatch = 10;
+
+  /// 每天最多实际请求 trace.moe 的次数（匿名额度约 150/天，留出余量）。
+  static const int _kMaxImageTracePerDay = 100;
+
+  /// 图片兜底拿到 AniList 标题后，最多再回搜 Bangumi 的标题数。
+  static const int _kMaxAniListTitleCandidates = 6;
+
+  /// 匹配置信度阈值：低于该值视为未命中。
+  static const double _kMatchThreshold = 0.4;
+
+  /// 达到该置信度即短路，不再尝试后续候选。
+  static const double _kHighConfidenceThreshold = 0.9;
+
+  /// 中低置信度时要求的「最优 - 次优」差距。
+  static const double _kSecondBestGap = 0.1;
+
+  /// 子串匹配时，条目名作为片段的最小长度。
+  static const int _kMinFragmentNameLength = 4;
+
+  /// 子串匹配时，条目名至少占关键词的比例。
+  static const double _kMinFragmentCoverage = 0.5;
+
+  /// LCS 兜底要求的最小公共子串长度与占比。
+  static const int _kMinLcsLength = 3;
+  static const double _kMinLcsRatio = 0.7;
+
+  /// 搜索缓存：同一个关键词在批量 / 多分组 / 重跑时只请求一次。
+  static const int _kSearchCacheMaxEntries = 128;
+  static const Duration _kSearchCacheTtl = Duration(minutes: 10);
+  static const Duration _kSearchNegativeTtl = Duration(minutes: 3);
+  static final Map<String, _SearchCacheEntry> _searchCache = {};
+  static final Map<String, Future<List<BangumiItem>?>> _searchInFlight = {};
+
+  /// trace.moe 结果缓存：同一文件（路径 + 大小 + 修改时间）只抽帧识别一次。
+  static const int _kTraceCacheMaxEntries = 100;
+  static const Duration _kTraceCacheTtl = Duration(hours: 1);
+  static final Map<String, _TraceCacheEntry> _traceCache = {};
 
   /// 常见「无意义占位标题」：测试/下载/临时目录等。
   ///
@@ -197,11 +253,13 @@ class MediaScraper {
       ' ',
     );
 
-    // 移除集数标记：EP01, 第01话, 第01集, - 01, _01, [01], 01v2, S01E01(-E02)
+    // 移除集数标记：EP01, 第01话, 第01集, - 01, _01, .01, [01], 01v2, S01E01(-E02)
     name = name.replaceAll(RegExp(r'\bEP?\s*\d+\b', caseSensitive: false), ' ');
     name = name.replaceAll(RegExp(r'第\s*\d+\s*[话話集]'), ' ');
     name = name.replaceAll(RegExp(r'\bS\d+E\d+(?:\s*-\s*E\s*\d+)?\b', caseSensitive: false), ' ');
-    name = name.replaceAll(RegExp(r'[-_]\s*\d{1,3}\s*(v\d+)?\s*$'), '');
+    // 点号分隔的集数必须在 `.`→空格 之前处理，否则 `Show.Name.-.01`
+    // 里的 `-` 与 `01` 隔着点号，匹配不到而残留成关键词。
+    name = name.replaceAll(RegExp(r'[.\-_]\s*\d{1,3}\s*(v\d+)?\s*$'), '');
     name = name.replaceAll(RegExp(r'\b\d{1,3}\s*v\d+\b'), ' ');
 
     // 移除 BD/DVD/WEB/Remux 等来源标记
@@ -253,6 +311,15 @@ class MediaScraper {
       return _clampSeason(en.group(1));
     }
 
+    // 1st Season / 2nd Season
+    final ordinal = RegExp(
+      r'(?:^|[^a-z])(\d{1,2})(?:st|nd|rd|th)\s+season\b',
+      caseSensitive: false,
+    ).firstMatch(lower);
+    if (ordinal != null) {
+      return _clampSeason(ordinal.group(1));
+    }
+
     // 第二季 / 第二期 / 第二部 / 【2季】
     final cnMatch =
         RegExp(r'第\s*([一二三四五六七八九十1-9１-９0-9]+)\s*[季期部]').firstMatch(base);
@@ -260,10 +327,11 @@ class MediaScraper {
       return _toArabicSeason(cnMatch.group(1)!);
     }
 
-    // 2期 / 1st Season 英文季数兜底
-    final suffix = RegExp(r'\b(?:[1-9１-９])(?:期)\b').firstMatch(base);
+    // 2期：不能依赖 `\b`——Dart 的单词边界是 ASCII 语义，`期` 不是单词字符，
+    // 尾部 `\b` 永远不成立。
+    final suffix = RegExp(r'(?:^|[^0-9０-９])([1-9１-９])\s*期').firstMatch(base);
     if (suffix != null) {
-      final n = _toArabicSeason(suffix.group(0)!.replaceAll('期', ''));
+      final n = _toArabicSeason(suffix.group(1)!);
       if (n != null && n > 1) return n;
     }
     return null;
@@ -291,7 +359,11 @@ class MediaScraper {
       '六': 6, '七': 7, '八': 8, '九': 9, '1': 1, '2': 2,
       '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
     };
-    final v = value.trim();
+    // 全角数字归一，`２期` 与 `2期` 等价。
+    final v = value.trim().replaceAllMapped(
+          RegExp(r'[０-９]'),
+          (m) => String.fromCharCode(m.group(0)!.codeUnitAt(0) - 0xFF10 + 0x30),
+        );
     if (v == '十') return 10;
     if (v.length >= 2 && v.startsWith('十')) {
       return 10 + map[v.substring(1)]!;
@@ -304,8 +376,13 @@ class MediaScraper {
   /// 繁简归一是关键：台配源（[ANi]/[Baha]）标题是繁体，而 Bangumi
   /// 条目名基本是简体或日文原名，不归一就永远打不上分。
   String _normalize(String s) {
-    return toSimplifiedChinese(s).toLowerCase().replaceAll(
-        RegExp(r'[\s\-_·・.。:：（）()\[\]【】{}「」『』"''~～+×x*]'), '');
+    return toSimplifiedChinese(s)
+        .toLowerCase()
+        // `×` 是乘号，`x` 是字母：统一成 `x`。既保留 `HUNTER×HUNTER` /
+        // `xxxHOLiC` 与普通短名的区分度，又让 `Hunter x Hunter` 仍能匹配。
+        .replaceAll('×', 'x')
+        .replaceAll(
+            RegExp(r'''[\s\-_·・.。:：（）()\[\]【】{}「」『』"'~～+*]'''), '');
   }
 
   /// 去掉标题里的「季数标记及其之后的一切」，得到主标题。
@@ -387,23 +464,34 @@ class MediaScraper {
   ///
   /// [keyword] 非空时使用指定关键词；否则自动尝试多个候选关键词。
   /// 全部失败时，若开启了图片识别兜底，会用视频抽帧走 trace.moe 以图搜番。
+  ///
+  /// [isCancelled] 在候选之间检查，取消后立即停止当前文件夹；
+  /// [reserveTrace] 由批量搜刮注入，用于限制每批 trace.moe 调用次数。
   Future<FolderScrapeResult> scrapeFolder({
     required LocalMediaFolder folder,
     String? keyword,
+    bool Function()? isCancelled,
+    bool Function()? reserveTrace,
   }) async {
     try {
+      _throwIfCancelled(isCancelled);
       final candidates = _buildCandidates(
         folder,
         keyword: keyword,
       );
 
+      // 不在第一个命中处直接返回：低置信度结果可能只是短名误配，
+      // 继续尝试后续候选，只有 ≥0.9 才短路。
+      _Match? bestAcrossCandidates;
+      String? bestKeyword;
       for (final candidate in candidates) {
+        _throwIfCancelled(isCancelled);
         if (candidate.keyword.isEmpty) continue;
-        final page = await BangumiApi.bangumiSearch(
-          candidate.keyword,
-          limit: 20,
-        );
-        final items = page?.items ?? const <BangumiItem>[];
+        final items = await _search(candidate.keyword);
+        if (items == null) {
+          // 搜索失败（网络 / 解析）不能当成「没找到」，否则会白跑图片兜底。
+          throw _SearchFailedException(candidate.keyword);
+        }
         if (items.isEmpty) continue;
 
         final best = _bestMatch(
@@ -412,19 +500,28 @@ class MediaScraper {
           season: candidate.season,
           year: candidate.year,
         );
-        if (best != null) {
-          return FolderScrapeResult(
-            folderPath: folder.path,
-            keyword: candidate.keyword,
-            status: ScrapeStatus.matched,
-            info: best.info,
-            confidence: best.confidence,
-          );
+        if (best == null) continue;
+        if (best.confidence >= _kHighConfidenceThreshold) {
+          return _matched(folder, candidate.keyword, best);
+        }
+        if (bestAcrossCandidates == null ||
+            best.confidence > bestAcrossCandidates.confidence) {
+          bestAcrossCandidates = best;
+          bestKeyword = candidate.keyword;
         }
       }
 
+      if (bestAcrossCandidates != null && bestKeyword != null) {
+        return _matched(folder, bestKeyword, bestAcrossCandidates);
+      }
+
+      _throwIfCancelled(isCancelled);
       // 文件名文本匹配全部失败 → 图片识别兜底，尽快中止后续无谓请求
-      final imageResult = await _scrapeByImageTrace(folder);
+      final imageResult = await _scrapeByImageTrace(
+        folder,
+        isCancelled: isCancelled,
+        reserveTrace: reserveTrace,
+      );
       if (imageResult != null) {
         return imageResult;
       }
@@ -434,6 +531,8 @@ class MediaScraper {
         keyword: keyword ?? cleanName(folder.name),
         status: ScrapeStatus.notFound,
       );
+    } on _ScrapeCancelled {
+      rethrow;
     } catch (e) {
       KazumiLogger().w('MediaScraper: search failed for "${folder.name}"',
           error: e);
@@ -446,12 +545,82 @@ class MediaScraper {
     }
   }
 
+  FolderScrapeResult _matched(
+    LocalMediaFolder folder,
+    String keyword,
+    _Match match,
+  ) =>
+      FolderScrapeResult(
+        folderPath: folder.path,
+        keyword: keyword,
+        status: ScrapeStatus.matched,
+        info: match.info,
+        confidence: match.confidence,
+      );
+
+  void _throwIfCancelled(bool Function()? isCancelled) {
+    if (isCancelled?.call() == true) throw const _ScrapeCancelled();
+  }
+
+  /// 带 LRU + TTL 的 Bangumi 搜索。
+  ///
+  /// 返回 null 表示请求失败（不缓存，交给调用方判 error）；
+  /// 返回空列表表示搜索成功但没有结果（负缓存，短时间内不重复请求）。
+  /// 同一关键词的并发请求会共享同一个 Future，避免多季文件夹同时开搜时重复发请求。
+  Future<List<BangumiItem>?> _search(String keyword) async {
+    final key = keyword.trim().toLowerCase();
+    final cached = _searchCache[key];
+    if (cached != null) {
+      if (DateTime.now().isBefore(cached.expiresAt)) {
+        // LRU touch：重新插入到队尾。
+        _searchCache.remove(key);
+        _searchCache[key] = cached;
+        return cached.items;
+      }
+      _searchCache.remove(key);
+    }
+
+    final inFlight = _searchInFlight[key];
+    if (inFlight != null) return inFlight;
+
+    final future = _fetchSearch(keyword, key);
+    _searchInFlight[key] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_searchInFlight[key], future)) {
+        _searchInFlight.remove(key);
+      }
+    }
+  }
+
+  Future<List<BangumiItem>?> _fetchSearch(String keyword, String key) async {
+    // 搜刮要的是「文本最像」，不是「最热门」；match 是 Bangumi 的相关度排序。
+    var page =
+        await BangumiApi.bangumiSearch(keyword, limit: 20, sort: 'match');
+    // 镜像 / 旧接口不认识 match 时回退 heat，避免整个搜刮链路失效。
+    page ??= await BangumiApi.bangumiSearch(keyword, limit: 20);
+    if (page == null) return null;
+
+    final items = page.items;
+    final ttl = items.isEmpty ? _kSearchNegativeTtl : _kSearchCacheTtl;
+    _searchCache[key] = _SearchCacheEntry(items, DateTime.now().add(ttl));
+    while (_searchCache.length > _kSearchCacheMaxEntries) {
+      _searchCache.remove(_searchCache.keys.first);
+    }
+    return items;
+  }
+
   /// 图片识别兜底：取文件夹内首个视频抽帧 → trace.moe 识别番剧 → Bangumi 标题匹配。
   ///
   /// 成功时返回匹配结果；不可用 / 识别失败 / 相似度过低时返回 null。
+  /// 同一文件（路径 + 大小 + 修改时间）的识别结果会在进程内缓存，
+  /// 重复搜刮不再抽帧、不再请求 trace.moe。
   Future<FolderScrapeResult?> _scrapeByImageTrace(
-    LocalMediaFolder folder,
-  ) async {
+    LocalMediaFolder folder, {
+    bool Function()? isCancelled,
+    bool Function()? reserveTrace,
+  }) async {
     bool enabled;
     try {
       enabled =
@@ -477,83 +646,147 @@ class MediaScraper {
     }
     if (pick == null) return null;
 
-    final frame = await VideoFrameExtractor.instance.extractFrame(pick.path);
-    if (frame == null) return null;
+    final cacheKey = _traceCacheKey(pick);
+    final now = DateTime.now();
+    Anilist? anilist;
+    double similarity = 0;
 
-    try {
-      final search = await TraceApi.searchAnimeByImageFile(
-        frame,
-        anilistInfo: 2,
-      );
-      final results = (search.result ?? const <ResultItem>[])
-        ..sort((a, b) => (b.similarity ?? 0).compareTo(a.similarity ?? 0));
-      if (results.isEmpty) return null;
-      final best = results.first;
-      final similarity = best.similarity ?? 0;
-      final anilist = best.anilist;
-      if (anilist == null || anilist.title == null) return null;
-      // trace.moe 官方建议：>0.87 视为强匹配，除了给一个下限兜底
-      if (similarity < 0.8) return null;
-
-      final title = anilist.title!;
-      final candidateTitles = <String>{
-        if (title.chinese != null && title.chinese!.trim().isNotEmpty)
-          title.chinese!.trim(),
-        if (title.romaji != null && title.romaji!.trim().isNotEmpty)
-          title.romaji!.trim(),
-        if (title.english != null && title.english!.trim().isNotEmpty)
-          title.english!.trim(),
-        if (title.native != null && title.native!.trim().isNotEmpty)
-          title.native!.trim(),
-        ...?anilist.synonyms,
-        ...?anilist.synonymsChinese,
-      };
-      candidateTitles.removeWhere((s) => s.trim().isEmpty);
-
-      final season = parseSeason(folder.name);
-      final year = parseYear(folder.name);
-
-      for (final candidate in candidateTitles) {
-        final page = await BangumiApi.bangumiSearch(candidate, limit: 20);
-        final items = page?.items ?? const <BangumiItem>[];
-        if (items.isEmpty) continue;
-        final bestMatch = _bestMatch(
-          candidate,
-          items,
-          season: season,
-          year: year,
-        );
-        if (bestMatch != null) {
-          return FolderScrapeResult(
-            folderPath: folder.path,
-            keyword: candidate,
-            status: ScrapeStatus.matched,
-            info: bestMatch.info,
-            confidence: bestMatch.confidence,
-          );
-        }
+    final cached = _traceCache[cacheKey];
+    if (cached != null && now.isBefore(cached.expiresAt)) {
+      anilist = cached.anilist;
+      similarity = cached.similarity;
+      _traceCache.remove(cacheKey);
+      _traceCache[cacheKey] = cached;
+    } else {
+      if (cached != null) _traceCache.remove(cacheKey);
+      // 预留名额：并发 worker 里 check-then-decrement 会互相越界，
+      // 这里把「检查 + 扣减」合成一次同步调用。
+      if (reserveTrace?.call() == false) return null;
+      if (!await _consumeTraceQuota()) {
+        KazumiLogger().i('MediaScraper: daily trace quota exhausted');
+        return null;
       }
 
-      // Bangumi 未命中时，退而用 AniList 信息直接展示（置信度=图片相似度）。
-      final displayName = title.chinese ?? title.romaji ?? title.english ?? title.native ?? '';
-      return FolderScrapeResult(
-        folderPath: folder.path,
-        keyword: displayName,
-        status: ScrapeStatus.matched,
-        info: MediaScrapeInfo.fromAniList(anilist),
-        confidence: similarity,
-      );
-    } catch (e) {
-      KazumiLogger().w(
-          'MediaScraper: image trace failed for "${folder.name}"',
-          error: e);
-      return null;
-    } finally {
+      final frame = await VideoFrameExtractor.instance.extractFrame(pick.path);
+      if (frame == null) return null;
+
       try {
-        if (await frame.exists()) {
-          await frame.delete();
+        final search = await TraceApi.searchAnimeByImageFile(
+          frame,
+          anilistInfo: 2,
+        );
+        final results = (search.result ?? const <ResultItem>[])
+          ..sort((a, b) => (b.similarity ?? 0).compareTo(a.similarity ?? 0));
+        if (results.isEmpty) return null;
+        final best = results.first;
+        final rawSimilarity = best.similarity ?? 0;
+        final found = best.anilist;
+        if (found == null || found.title == null) return null;
+        // trace.moe 官方建议：>0.87 视为强匹配，这里给一个下限兜底。
+        if (rawSimilarity < 0.8) return null;
+        anilist = found;
+        similarity = rawSimilarity.clamp(0.0, 1.0).toDouble();
+        _traceCache[cacheKey] = _TraceCacheEntry(
+          anilist,
+          similarity,
+          now.add(_kTraceCacheTtl),
+        );
+        while (_traceCache.length > _kTraceCacheMaxEntries) {
+          _traceCache.remove(_traceCache.keys.first);
         }
-      } catch (_) {}
+      } catch (e) {
+        KazumiLogger().w(
+            'MediaScraper: image trace failed for "${folder.name}"',
+            error: e);
+        return null;
+      } finally {
+        try {
+          if (await frame.exists()) {
+            await frame.delete();
+          }
+        } catch (_) {}
+      }
+    }
+
+    final title = anilist.title;
+    if (title == null) return null;
+    final candidateTitles = <String>{
+      if (title.chinese != null && title.chinese!.trim().isNotEmpty)
+        title.chinese!.trim(),
+      if (title.romaji != null && title.romaji!.trim().isNotEmpty)
+        title.romaji!.trim(),
+      if (title.english != null && title.english!.trim().isNotEmpty)
+        title.english!.trim(),
+      if (title.native != null && title.native!.trim().isNotEmpty)
+        title.native!.trim(),
+      ...?anilist.synonyms,
+      ...?anilist.synonymsChinese,
+    };
+    candidateTitles.removeWhere((s) => s.trim().isEmpty);
+
+    final season = parseSeason(folder.name);
+    final year = parseYear(folder.name);
+
+    // 标题去重后限量：AniList 的 synonyms 可能十几条，全查一遍成本太高。
+    for (final candidate
+        in candidateTitles.take(_kMaxAniListTitleCandidates)) {
+      _throwIfCancelled(isCancelled);
+      final items = await _search(candidate);
+      if (items == null) {
+        // 网络失败：保留已拿到的 AniList 信息，直接走下面的兜底展示。
+        break;
+      }
+      if (items.isEmpty) continue;
+      final bestMatch = _bestMatch(
+        candidate,
+        items,
+        season: season,
+        year: year,
+      );
+      if (bestMatch != null) {
+        return _matched(folder, candidate, bestMatch);
+      }
+    }
+
+    // Bangumi 未命中时，退而用 AniList 信息直接展示（置信度=图片相似度）。
+    final displayName =
+        title.chinese ?? title.romaji ?? title.english ?? title.native ?? '';
+    return FolderScrapeResult(
+      folderPath: folder.path,
+      keyword: displayName,
+      status: ScrapeStatus.matched,
+      info: MediaScrapeInfo.fromAniList(anilist),
+      confidence: similarity,
+    );
+  }
+
+  static String _traceCacheKey(LocalMediaFile file) =>
+      '${localMediaPathKey(file.path)}|${file.size}|'
+      '${file.modifiedAt.millisecondsSinceEpoch}';
+
+  /// 每日 trace.moe 配额：跨进程持久化，按自然日重置。
+  Future<bool> _consumeTraceQuota() async {
+    try {
+      final now = DateTime.now();
+      final dateKey = '${now.year}-'
+          '${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
+      var date = GStorage.getSetting(SettingsKeys.localMediaTraceDailyDate);
+      var count =
+          GStorage.getSetting(SettingsKeys.localMediaTraceDailyCount);
+      if (date != dateKey) {
+        date = dateKey;
+        count = 0;
+      }
+      if (count >= _kMaxImageTracePerDay) return false;
+      await GStorage.putSetting(
+          SettingsKeys.localMediaTraceDailyDate, date);
+      await GStorage.putSetting(
+          SettingsKeys.localMediaTraceDailyCount, count + 1);
+      return true;
+    } catch (_) {
+      // 存储未初始化（测试环境）时不阻断兜底。
+      return true;
     }
   }
 
@@ -634,6 +867,9 @@ class MediaScraper {
   }
 
   /// 从搜索结果中挑选最匹配的条目，返回置信度，过低返回 null（视为未命中）。
+  ///
+  /// 除绝对阈值外，中低置信度还要求「最优 - 次优」有足够差距，避免在两个
+  /// 分数接近的条目里随便选一个。
   _Match? _bestMatch(
     String keyword,
     List<BangumiItem> items, {
@@ -644,6 +880,7 @@ class MediaScraper {
     final normalizedKeyword = _normalize(keyword);
 
     _Match? best;
+    double second = 0;
     for (final item in items) {
       final score = _scoreItem(
         item,
@@ -651,15 +888,24 @@ class MediaScraper {
         season: season,
         year: year,
       );
-      if (score > 0 && (best == null || score > best.confidence)) {
+      if (score <= 0) continue;
+      if (best == null || score > best.confidence) {
+        second = best?.confidence ?? 0;
         best = _Match(
           MediaScrapeInfo.fromBangumiItem(item),
           score,
         );
+      } else if (score > second) {
+        second = score;
       }
     }
-    // 置信度阈值：避免「只搜到一部无关动画也标记为已匹配」。
-    if (best == null || best.confidence < 0.4) return null;
+    if (best == null || best.confidence < _kMatchThreshold) return null;
+    // 高置信度（精确名 / 包含关系）不再要求差距：同名的关联条目、重复条目
+    // 常常同分，强行要求差距会把正确结果也丢掉。
+    if (best.confidence < _kHighConfidenceThreshold &&
+        best.confidence - second < _kSecondBestGap) {
+      return null;
+    }
     return best;
   }
 
@@ -685,8 +931,9 @@ class MediaScraper {
     if (bestNameScore <= 0) return 0;
 
     double bonus = 0;
-    if (season != null && season > 1) {
-      // nameCn 常常不带季数标记，两个名字都试一遍再判断
+    if (season != null) {
+      // nameCn 常常不带季数标记，两个名字都试一遍再判断。
+      // 第一季同样要校验：否则 S1 文件夹会毫无阻力地匹配到第三季条目。
       final itemSeason =
           parseSeason(item.nameCn) ?? parseSeason(item.name);
       if (itemSeason == season) {
@@ -706,75 +953,172 @@ class MediaScraper {
       if (y == year) bonus += 0.08;
     }
     final score = bestNameScore + bonus;
-    return score < 0 ? 0 : score;
+    if (score <= 0) return 0;
+    // 置信度对外约定为 0~1，季数/年份加分不能把它推过 100%。
+    return score > 1 ? 1 : score;
   }
 
   /// 关键词与条目名称的相似度（0~1）。
   double _nameSimilarity(String keyword, String name) {
+    if (keyword.isEmpty || name.isEmpty) return 0;
     if (keyword == name) return 1.0;
-    if (name.contains(keyword) || keyword.contains(name)) {
-      // 长名包含短名：更偏向「更完整」的条目。
-      return keyword.length <= name.length ? 0.9 : 0.75;
+    // 关键词是条目名的一部分：短关键词匹配更完整的长标题。
+    if (name.contains(keyword)) return 0.9;
+    // 条目名是关键词的一部分：只有片段足够长、占比足够高时才可信。
+    // 否则「关于我转生变成史莱姆这档事」会命中条目「史莱姆」。
+    if (keyword.contains(name)) {
+      if (name.length < _kMinFragmentNameLength) return 0;
+      final coverage = name.length / keyword.length;
+      if (coverage < _kMinFragmentCoverage) return 0;
+      return 0.75 * coverage;
     }
-    // 最长公共子串占比兜底。
+    // 最长公共子串占比兜底：分母取较长串，避免长关键词配短条目时虚高。
     final lcs = _longestCommonSubstring(keyword, name);
-    if (lcs.isEmpty) return 0;
-    final ratio = lcs.length / name.length;
-    return ratio >= 0.6 ? ratio * 0.8 : 0;
+    if (lcs.length < _kMinLcsLength) return 0;
+    final ratio = lcs.length / math.max(keyword.length, name.length);
+    return ratio >= _kMinLcsRatio ? ratio * 0.8 : 0;
   }
 
+  /// 最长公共子串：滚动数组实现，避免每个别名都分配 O(n·m) 二维表。
   String _longestCommonSubstring(String a, String b) {
     if (a.isEmpty || b.isEmpty) return '';
-    final n = a.length;
-    final m = b.length;
-    final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+    var prev = List<int>.filled(b.length + 1, 0);
+    var curr = List<int>.filled(b.length + 1, 0);
     var maxLen = 0;
     var endIndex = 0;
-    for (var i = 1; i <= n; i++) {
-      for (var j = 1; j <= m; j++) {
+    for (var i = 1; i <= a.length; i++) {
+      for (var j = 1; j <= b.length; j++) {
         if (a[i - 1] == b[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-          if (dp[i][j] > maxLen) {
-            maxLen = dp[i][j];
+          curr[j] = prev[j - 1] + 1;
+          if (curr[j] > maxLen) {
+            maxLen = curr[j];
             endIndex = i;
           }
+        } else {
+          curr[j] = 0;
         }
+      }
+      final swap = prev;
+      prev = curr;
+      curr = swap;
+      // 复用行必须清零，否则上一轮的值会残留到下一次遍历。
+      for (var j = 0; j < curr.length; j++) {
+        curr[j] = 0;
       }
     }
     return maxLen == 0 ? '' : a.substring(endIndex - maxLen, endIndex);
   }
 
+  /// 测试用：直接验证打分逻辑，不依赖网络。
+  @visibleForTesting
+  ({double confidence, MediaScrapeInfo info})? bestMatchForTest(
+    String keyword,
+    List<BangumiItem> items, {
+    int? season,
+    int? year,
+  }) {
+    final match = _bestMatch(keyword, items, season: season, year: year);
+    if (match == null) return null;
+    return (confidence: match.confidence, info: match.info);
+  }
+
+  /// 测试用：验证归一化后的名称相似度。
+  @visibleForTesting
+  double nameSimilarityForTest(String keyword, String name) =>
+      _nameSimilarity(_normalize(keyword), _normalize(name));
+
+  /// 测试用：清空进程内搜索 / 图片识别缓存。
+  @visibleForTesting
+  static void clearCachesForTest() {
+    _searchCache.clear();
+    _searchInFlight.clear();
+    _traceCache.clear();
+  }
+
   /// 批量搜刮文件夹列表。
   ///
   /// [onProgress] 每处理完一个文件夹回调一次；
-  /// [isCancelled] 返回 true 时立即停止后续搜刮。
+  /// [isCancelled] 返回 true 时停止领取新文件夹，并在当前候选之间立即生效；
+  /// [concurrency] 文件夹级并发数，默认 [3]。
+  ///
+  /// 连续 [5] 个文件夹因网络 / 解析出错时提前中止本批，
+  /// 未处理的文件夹不会产生结果（调用方保留其旧匹配）。
   Future<List<FolderScrapeResult>> scrapeAll(
     List<LocalMediaFolder> folders, {
     void Function(ScrapeProgress progress)? onProgress,
     bool Function()? isCancelled,
+    int concurrency = _kMaxConcurrentFolderScrapes,
   }) async {
+    final total = folders.length;
+    if (total == 0) return const [];
+
     final results = <FolderScrapeResult>[];
+    var nextIndex = 0;
     var matched = 0;
     var failed = 0;
-    for (var i = 0; i < folders.length; i++) {
-      if (isCancelled != null && isCancelled()) break;
-      final folder = folders[i];
-      final result = await scrapeFolder(folder: folder);
-      results.add(result);
-      if (result.status == ScrapeStatus.matched) {
-        matched++;
-      } else {
-        failed++;
+    var consecutiveErrors = 0;
+    var circuitOpen = false;
+    var traceBudget = _kMaxImageTracePerBatch;
+    final workerCount = concurrency < 1
+        ? 1
+        : (concurrency > total ? total : concurrency);
+
+    Future<void> worker() async {
+      while (true) {
+        if (circuitOpen || isCancelled?.call() == true) return;
+        final index = nextIndex++;
+        if (index >= total) return;
+        final folder = folders[index];
+
+        FolderScrapeResult result;
+        try {
+          result = await scrapeFolder(
+            folder: folder,
+            isCancelled: isCancelled,
+            reserveTrace: () {
+              if (traceBudget <= 0) return false;
+              traceBudget--;
+              return true;
+            },
+          );
+        } on _ScrapeCancelled {
+          return;
+        }
+
+        results.add(result);
+        if (result.status == ScrapeStatus.matched) {
+          matched++;
+          consecutiveErrors = 0;
+        } else {
+          failed++;
+          if (result.status == ScrapeStatus.error) {
+            consecutiveErrors++;
+            if (consecutiveErrors >= _kMaxConsecutiveFailures) {
+              circuitOpen = true;
+              KazumiLogger().w(
+                'MediaScraper: $_kMaxConsecutiveFailures consecutive failures, '
+                'stopping batch at ${results.length}/$total',
+              );
+            }
+          } else {
+            consecutiveErrors = 0;
+          }
+        }
+        onProgress?.call(ScrapeProgress(
+          done: results.length,
+          total: total,
+          matched: matched,
+          failed: failed,
+          currentFolder: p.basename(folder.path),
+          currentKeyword: result.keyword,
+          aborted: circuitOpen,
+        ));
       }
-      onProgress?.call(ScrapeProgress(
-        done: i + 1,
-        total: folders.length,
-        matched: matched,
-        failed: failed,
-        currentFolder: p.basename(folder.path),
-        currentKeyword: result.keyword,
-      ));
     }
+
+    await Future.wait([
+      for (var i = 0; i < workerCount; i++) worker(),
+    ]);
     return results;
   }
 }
@@ -792,4 +1136,34 @@ class _KeywordCandidate {
   final String keyword;
   final int? season;
   final int? year;
+}
+
+/// 用户取消批量搜刮：不产生结果，直接退出当前 worker。
+class _ScrapeCancelled implements Exception {
+  const _ScrapeCancelled();
+}
+
+/// 搜索请求失败（网络 / 解析），用于把「没搜到」与「没搜成」区分开。
+class _SearchFailedException implements Exception {
+  const _SearchFailedException(this.keyword);
+
+  final String keyword;
+
+  @override
+  String toString() => 'bangumi search failed: $keyword';
+}
+
+class _SearchCacheEntry {
+  const _SearchCacheEntry(this.items, this.expiresAt);
+
+  final List<BangumiItem> items;
+  final DateTime expiresAt;
+}
+
+class _TraceCacheEntry {
+  const _TraceCacheEntry(this.anilist, this.similarity, this.expiresAt);
+
+  final Anilist anilist;
+  final double similarity;
+  final DateTime expiresAt;
 }
