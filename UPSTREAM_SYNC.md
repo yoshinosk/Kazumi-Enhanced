@@ -5,7 +5,7 @@
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.10.9)**:批次 1~7 已全部完成并合入 `dev`,上游功能同步至 **2.3.8**(目标 commit `7b19c307`,批次 7 完成于 2026.10.9);上游暂无更新的提交。
+> **当前状态(2026.10.15)**:批次 1~8 已全部完成并合入 `dev`,上游功能同步至 **2.3.9**(目标 commit `025dcb5c`,批次 8 完成于 2026.10.15)。
 > - 工程构建于 Flutter 3.47.2(批次 5/6/7 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(41 条既有 info),`flutter test` 452 项全部通过。
 > - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
 > - 批次 6 起 GitHub 直连恢复,辅助同步用 blobless clone(见批次 6 备注);fetch_upstream.py(api.github.com contents 接口)仍可用于单文件场景。
@@ -210,6 +210,37 @@
 | ✅ | 87cd48a7 | fix(timeline): 分页加载季时移除每列顶部线性进度条 | 2026.10.9 |
 | ❌ | 11671bc0 | version 2.3.8——本分支版本号独立(1.0.1),不接收 | - |
 | ✅ | 7b19c307 | fix(video_side_panel): 移除侧边面板左侧安全区内边距 | 2026.10.9 |
+
+## 批次 8:上游 2.3.8 → 2.3.9(基线 7b19c307 → 目标 025dcb5c,共 12 个提交,完成于 2026.10.15)
+
+- 策略:沿用批次 6/7 的逐提交内容移植;多数文件与基线逐字节一致,直接打补丁,冲突文件手工回植 fork 功能。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ❌ | 4e821e4 | fix(download): iOS 容器迁移后重定位下载路径——仅 iOS(平台约束),其新增的 download_path_migration.dart 与测试一并跳过 | - |
+| ✅ | 2768c23 | feat(download): Android 自定义下载目录(新 DownloadDirectoryHandler.kt + download_directory_service.dart;AndroidManifest 加 requestLegacyExternalStorage/WRITE_EXTERNAL_STORAGE;删除 secure_bookmark_service.dart;下载删除流程改为先暂停再删、失败可续传) | 2026.10.15 |
+| ✅ | 27c4efe | fix(windows): 保持 Flutter accessibility bridge 禁用(flutter_view 子类化拦截 WM_GETOBJECT;CMake 加 comctl32.lib) | 2026.10.15 |
+| ❌ | dc18be2 | deps: bump flutter 3.47.7——本机保持 3.47.2(沿用批次 5 决定) | - |
+| ✅ | 4960f9c | feat(update): 用户可选更新下载源(新 update_download_source/update_downloader/update_available_dialog;auto_updater 整体重构;network_error_mapper unknown 分支加 1s 超时守卫) | 2026.10.15 |
+| ✅ | d48fc8b | deps: bump media kit(803c4a27 → 6b188ae9) | 2026.10.15 |
+| ✅ | 290d0be | feat(player): 截图挑选面板全选开关(player_screenshot_controller 加 allSelected/setAllSelected) | 2026.10.15 |
+| ✅ | 216fb62 | refactor(player): 移除截图面板冗余返回按钮 | 2026.10.15 |
+| ✅ | ff85947 | feat(rules): API 搜索规则支持详情页地址模板(ApiSearchConfig.sourceTemplate,`@source` 替换;apiLevel 8→9) | 2026.10.15 |
+| ✅ | d34b3a4 | feat(rules): 移除内置默认规则(删 assets/plugins/*.json 与插件安装时间追踪器;plugins_controller 重写为纯 plugins.json;onboarding 不再自动装内置规则并新增 onboardingCompleted 键;详情页「开始观看」无规则时引导去规则管理) | 2026.10.15 |
+| ❌ | ca90522 | deps: bump git submodules(fastlane/.libmpv-android-video-build)——fork 无 fastlane 子模块 | - |
+| ❌ | 025dcb5 | version 2.3.9——本分支版本号独立,不接收 | - |
+
+### 批次 8 冲突文件与 fork 回植点
+
+- `auto_updater.dart`:保留 fork 的 `ApiEndpoints.latestApp`(检查更新接入本仓库)、release 安装类型按实际资产过滤、explorer.exe `/select,` 双参数 + `runInShell: false` 修复;接收上游新版对话框/下载器架构。
+- `update_available_dialog.dart`:fork 适配——GitHub release 响应无 `mirror_download_url`(上游由 kazumi.fyi 镜像后端注入),无镜像链接时隐藏「下载源」下拉并默认 GitHub。
+- `MainActivity.kt`:fork 保留 PiP/自启动/存储通道;`onRequestPermissionsResult` 合并 fork 多槽位权限回填与上游 handler 转发(requestCode 段不冲突:fork 2001+,handler 53010/53011)。
+- `AndroidManifest.xml`:fork 已有 MANAGE_EXTERNAL_STORAGE/READ_EXTERNAL_STORAGE(本地媒体库),仅补 requestLegacyExternalStorage 与 WRITE_EXTERNAL_STORAGE(maxSdkVersion 29)。
+- `init_page.dart` / `info_page.dart`:保留 fork 媒体库/磁力初始化、AppNotifications 权限串行化、磁力搜索面板、评分刷新修复等;接收上游启动导航重构与 `_startWatching`。
+- `download_controller.dart`:保留 fork 后台服务 lease 语义与弹幕侧车分集/作用域扩展;接收上游 deleteRecord/deleteEpisode `_stopEpisodes` 重构(移除 cancelDownload)。
+- `file_system.dart` / `flutter_window.cpp` / `CMakeLists.txt`:保留 fork revealInFileManager、auto_start_utils 等;接收上游子类化与 comctl32。
+- `settings_keys.dart`:在 fork 大型键表中按相同位置插入 `onboardingCompleted`。
+- `pubspec.yaml`:移除 `assets/plugins/` 资产项;media-kit ref 升至 6b188ae9;其余保持 fork 依赖。
 
 ## 决定跳过(按项目平台约束)
 

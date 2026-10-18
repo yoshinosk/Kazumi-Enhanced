@@ -87,6 +87,13 @@ abstract class _MagnetController with Store {
   /// 正在自动搜刮的任务 ID（防重入）。
   final Set<String> _autoScrapingTaskIds = {};
 
+  /// 自动搜刮连续失败计数与下次允许重试时间（taskId）。
+  final Map<String, int> _autoScrapeFailures = {};
+  final Map<String, DateTime> _autoScrapeNextAttempt = {};
+
+  /// 自动搜刮连续失败上限：超过后本会话不再自动重试，转为手动匹配。
+  static const int _maxAutoScrapeFailures = 3;
+
   /// 任务上次状态快照（用于检测终态跳变发通知）。
   final Map<String, String> _lastTaskStatuses = {};
 
@@ -783,6 +790,8 @@ abstract class _MagnetController with Store {
     _autoScrapingTaskIds.removeWhere((key) => !ids.contains(key));
     _scrapeKeyCache.removeWhere((key, _) => !ids.contains(key));
     _scrapeSyncFailures.removeWhere((key, _) => !ids.contains(key));
+    _autoScrapeFailures.removeWhere((key, _) => !ids.contains(key));
+    _autoScrapeNextAttempt.removeWhere((key, _) => !ids.contains(key));
     for (final entry in entries) {
       final prev = _lastTaskStatuses[entry.taskId];
       _lastTaskStatuses[entry.taskId] = entry.status;
@@ -884,8 +893,37 @@ abstract class _MagnetController with Store {
   void _maybeAutoScrape(MagnetDownloadEntry entry) {
     if (entry.scrapeAttempted) return;
     if (!GStorage.getSetting(SettingsKeys.magnetAutoScrapeOnComplete)) return;
+    if ((_autoScrapeFailures[entry.taskId] ?? 0) >= _maxAutoScrapeFailures) {
+      return;
+    }
+    final nextAttempt = _autoScrapeNextAttempt[entry.taskId];
+    if (nextAttempt != null && DateTime.now().isBefore(nextAttempt)) return;
     if (!_autoScrapingTaskIds.add(entry.taskId)) return;
     unawaited(_runAutoScrape(entry));
+  }
+
+  /// 自动搜刮失败退避：5s / 10s，连续 3 次后本会话不再自动重试。
+  ///
+  /// 此前错误分支刻意不置 scrapeAttempted，导致 onChanged 每 2s 重发一轮
+  /// 「候选搜索 + 图片兜底」；网络持续不可用时既费流量也刷日志。
+  void _scheduleAutoScrapeRetry(MagnetDownloadEntry entry) {
+    final failures = (_autoScrapeFailures[entry.taskId] ?? 0) + 1;
+    _autoScrapeFailures[entry.taskId] = failures;
+    KazumiLogger().w(
+      'MagnetController: auto scrape failed '
+      '($failures/$_maxAutoScrapeFailures) for ${entry.fileName}',
+    );
+    if (failures >= _maxAutoScrapeFailures) {
+      _autoScrapeNextAttempt.remove(entry.taskId);
+      KazumiDialog.showToast(
+        message: '「${entry.title.isEmpty ? entry.fileName : entry.title}」'
+            '自动识别连续失败，请稍后手动匹配',
+        duration: const Duration(seconds: 3),
+      );
+      return;
+    }
+    _autoScrapeNextAttempt[entry.taskId] =
+        DateTime.now().add(Duration(seconds: 5 * (1 << (failures - 1))));
   }
 
   /// 自动搜刮：把任务落盘文件构造成逻辑文件夹交给 MediaScraper。
@@ -896,20 +934,21 @@ abstract class _MagnetController with Store {
       if (folder == null) {
         // 无法确定落盘文件（旧数据无文件清单）：标记已尝试，否则
         // onChanged 每 2s 触发一次会无限重发 Bangumi 搜索请求。
+        _autoScrapeFailures.remove(entry.taskId);
+        _autoScrapeNextAttempt.remove(entry.taskId);
         await _downloads.markScrapeAttempted(entry.taskId);
         return;
       }
       final result = await _scraper.scrapeFolder(folder: folder);
       if (result.status == ScrapeStatus.error) {
-        // 网络 / 服务错误：不置 scrapeAttempted，留待下次状态同步重试，
-        // 避免瞬时失败把任务永久标记为「待确认」。
-        KazumiLogger().w(
-          'MagnetController: auto scrape error for ${entry.fileName}',
-        );
+        // 网络 / 服务错误：指数退避后重试，连续失败到上限后本会话放弃。
+        _scheduleAutoScrapeRetry(entry);
         return;
       }
       if (result.status == ScrapeStatus.matched && result.info != null) {
         final info = result.info!;
+        _autoScrapeFailures.remove(entry.taskId);
+        _autoScrapeNextAttempt.remove(entry.taskId);
         await _downloads.setScrapeInfo(
           entry.taskId,
           info,
@@ -926,6 +965,8 @@ abstract class _MagnetController with Store {
       KazumiLogger().i(
         'MagnetController: auto scrape not matched for ${entry.fileName}',
       );
+      _autoScrapeFailures.remove(entry.taskId);
+      _autoScrapeNextAttempt.remove(entry.taskId);
       await _downloads.markScrapeAttempted(entry.taskId);
       KazumiDialog.showToast(
         message:
@@ -935,7 +976,8 @@ abstract class _MagnetController with Store {
       );
     } catch (e) {
       KazumiLogger().w('MagnetController: auto scrape failed', error: e);
-      // 异常（网络中断等）不置 scrapeAttempted，后续轮次自动重试。
+      // 异常（网络中断等）同样走退避，避免每 2s 重试。
+      _scheduleAutoScrapeRetry(entry);
     } finally {
       _autoScrapingTaskIds.remove(entry.taskId);
     }

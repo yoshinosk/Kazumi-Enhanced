@@ -639,6 +639,11 @@ class SettingsKeys {
     false,
     group: SettingGroup.misc,
   );
+  static const onboardingCompleted = SettingKey<bool>(
+    'onboardingCompleted',
+    false,
+    group: SettingGroup.misc,
+  );
   static const bangumiSyncEnable = SettingKey<bool>(
     _SettingBoxKey.bangumiSyncEnable,
     false,
@@ -1058,6 +1063,19 @@ class SettingsKeys {
     group: SettingGroup.media,
   );
 
+  /// 图片识别兜底的每日配额（跨进程持久化，避免 trace.moe 公共额度被批量搜刮耗尽）。
+  static const localMediaTraceDailyDate = SettingKey<String>(
+    'localMediaTraceDailyDate',
+    '',
+    group: SettingGroup.media,
+  );
+
+  static const localMediaTraceDailyCount = SettingKey<int>(
+    'localMediaTraceDailyCount',
+    0,
+    group: SettingGroup.media,
+  );
+
   /// 批量搜刮时是否跳过已匹配的文件夹，只处理尚未匹配的番剧。
   ///
   /// 默认开启：已匹配的结果通常已人工确认过，重复搜刮既浪费请求配额，
@@ -1232,6 +1250,7 @@ class SettingsKeys {
     downloadDirectory,
     downloadDirectoryBookmark,
     shortcutDialogShown,
+    onboardingCompleted,
     bangumiSyncEnable,
     bangumiAccessToken,
     bangumiSyncPriority,
@@ -1289,6 +1308,8 @@ class SettingsKeys {
     localMediaSortDescending,
     localMediaFfmpegPath,
     localMediaTraceFallback,
+    localMediaTraceDailyDate,
+    localMediaTraceDailyCount,
     localMediaScrapeOnlyUnmatched,
     localMediaSyncBangumiProgress,
     localMediaThumbnails,

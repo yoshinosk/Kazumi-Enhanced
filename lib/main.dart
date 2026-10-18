@@ -7,6 +7,7 @@ import 'package:kazumi/bean/settings/theme_provider.dart';
 import 'package:kazumi/bean/settings/background_provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/services/download/download_directory_service.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:kazumi/services/network/metered_network_service.dart';
 import 'package:kazumi/services/network/ech_http_licenses.dart';
@@ -75,6 +76,7 @@ void main() async {
         }));
     return;
   }
+  await DownloadDirectoryService().restoreAccess();
   final showWindowButton = DesktopWindowConfig.showWindowButton;
   if (isDesktop()) {
     await windowManager.ensureInitialized();

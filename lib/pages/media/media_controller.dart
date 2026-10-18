@@ -738,6 +738,7 @@ abstract class _MediaController with Store {
       library
         ..clear()
         ..addAll(result.folders);
+      await _pruneStaleScrapeResults(result);
       _refreshResumePoints();
       unawaited(_repairPlaceholderHistories());
       if (isGridMode) {
@@ -799,6 +800,75 @@ abstract class _MediaController with Store {
     await GStorage.putSetting(
       SettingsKeys.localMediaLastGrouping,
       _encodeGroupingSnapshot(newGroupings),
+    );
+  }
+
+  /// 清理已不存在路径的搜刮结果。
+  ///
+  /// 只在「根目录存在且本轮确实扫出了文件夹」时清理该根下的旧键：
+  /// 磁盘暂时未挂载 / 目录无权限时扫描结果为空，不能据此把结果全部删掉。
+  /// 真实目录仍然存在时（可能只是暂时为空 / 无权限）也保留旧结果；
+  /// 逻辑分组路径本身不是真实目录，只有父目录本轮成功扫描过才视为失效。
+  /// 应用内删除（[removeFolder] / `deleteAnimeGroup`）已有各自的清理逻辑，
+  /// 这里覆盖的是应用外改名、移动、删除后留下的残留键。
+  Future<void> _pruneStaleScrapeResults(LocalMediaScanResult result) async {
+    if (result.folders.isEmpty) return;
+
+    final scannedRoots = <String>[
+      for (final root in folders)
+        if (Directory(root).existsSync() &&
+            result.folders.any((f) => isLocalMediaPathWithin(root, f.path)))
+          root,
+    ];
+    if (scannedRoots.isEmpty) return;
+
+    final scannedDirs = <String>{
+      for (final key in result.groupings.keys) localMediaPathKey(key),
+    };
+    bool isUnderScannedRoot(String path) =>
+        scannedRoots.any((root) => isLocalMediaPathWithin(root, path));
+
+    final folderKeys = <String>{
+      for (final folder in result.folders) localMediaPathKey(folder.path),
+    };
+    final fileKeys = <String>{
+      for (final folder in result.folders)
+        for (final file in folder.files) localMediaPathKey(file.path),
+    };
+
+    final staleFolders = scrapeResults.keys.where((key) {
+      if (!isUnderScannedRoot(key)) return false;
+      if (folderKeys.contains(localMediaPathKey(key))) return false;
+      // 真实目录还在：可能只是暂时为空或读取失败，保留旧结果。
+      if (Directory(key).existsSync()) return false;
+      // 逻辑分组路径不是真实目录；父目录扫过才说明该分组确实消失。
+      final parent = localMediaPathKey(p.dirname(key));
+      return scannedDirs.contains(parent);
+    }).toList();
+    final staleFiles = fileScrapeResults.keys.where((key) {
+      if (!isUnderScannedRoot(key)) return false;
+      if (fileKeys.contains(localMediaPathKey(key))) return false;
+      return !File(key).existsSync();
+    }).toList();
+    if (staleFolders.isEmpty && staleFiles.isEmpty) return;
+
+    for (final key in staleFolders) {
+      scrapeResults.remove(key);
+    }
+    for (final key in staleFiles) {
+      fileScrapeResults.remove(key);
+    }
+    if (staleFolders.isNotEmpty) {
+      await MediaScrapeStore.save(
+          Map<String, MediaScrapeInfo>.from(scrapeResults));
+    }
+    if (staleFiles.isNotEmpty) {
+      await MediaScrapeStore.saveFileResults(
+          Map<String, MediaScrapeInfo>.from(fileScrapeResults));
+    }
+    KazumiLogger().i(
+      'MediaController: pruned ${staleFolders.length} folder / '
+      '${staleFiles.length} file stale scrape results',
     );
   }
 
@@ -867,6 +937,7 @@ abstract class _MediaController with Store {
     scrapeCurrentName = '';
     scrapeKeyword = '';
     _scrapeCancelRequested = false;
+    var aborted = false;
     try {
       final results = await _scraper.scrapeAll(
         targets,
@@ -878,6 +949,7 @@ abstract class _MediaController with Store {
           scrapeFailed = progress.failed;
           scrapeCurrentName = progress.currentFolder ?? '';
           scrapeKeyword = progress.currentKeyword ?? '';
+          aborted = progress.aborted;
         },
       );
       final matched = <String, MediaScrapeInfo>{
@@ -885,11 +957,12 @@ abstract class _MediaController with Store {
           if (r.status == ScrapeStatus.matched && r.info != null)
             r.folderPath: r.info!,
       };
-      // 未匹配/出错的结果移除旧数据，避免残留过期匹配。
+      // 只清理「搜索完成但没找到」的旧数据；出错（网络 / 解析）时保留旧匹配，
+      // 避免一次网络抖动把用户已确认的结果清掉。
       // 注意：只清理本轮真正搜刮过的路径，跳过的已匹配结果必须原样保留。
       final unmatchedPaths = <String>{
         for (final r in results)
-          if (r.status != ScrapeStatus.matched) r.folderPath,
+          if (r.status == ScrapeStatus.notFound) r.folderPath,
       };
       scrapeResults
         ..removeWhere((path, _) => unmatchedPaths.contains(path))
@@ -899,8 +972,11 @@ abstract class _MediaController with Store {
       final scopeLabel = skipMatched ? '未匹配文件夹' : '文件夹';
       final toastMessage = _scrapeCancelRequested
           ? '已取消搜刮，匹配 ${matched.length}/${targets.length} 个$scopeLabel'
-          : '搜刮完成，匹配 ${matched.length}/${targets.length} 个$scopeLabel'
-              '，未找到 $scrapeFailed 个';
+          : aborted
+              ? '网络连续失败，已提前中止：处理 ${results.length}/${targets.length} 个，'
+                  '匹配 ${matched.length} 个'
+              : '搜刮完成，匹配 ${matched.length}/${targets.length} 个$scopeLabel'
+                  '，未找到 $scrapeFailed 个';
       KazumiDialog.showToast(message: toastMessage);
     } catch (e) {
       KazumiLogger().w('MediaController: scrapeAll failed', error: e);

@@ -53,6 +53,7 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
   late double autoImportConfidence;
   late bool syncBangumiProgress;
   late bool thumbnailsEnabled;
+  late bool traceFallbackEnabled;
   late bool watchFolderEnabled;
   late bool diskSpaceCheck;
   late bool groupDownloads;
@@ -116,6 +117,8 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
         GStorage.getSetting(SettingsKeys.localMediaSyncBangumiProgress);
     thumbnailsEnabled =
         GStorage.getSetting(SettingsKeys.localMediaThumbnails);
+    traceFallbackEnabled =
+        GStorage.getSetting(SettingsKeys.localMediaTraceFallback);
     watchFolderEnabled =
         GStorage.getSetting(SettingsKeys.localMediaWatchFolder);
     diskSpaceCheck = GStorage.getSetting(SettingsKeys.magnetDiskSpaceCheck);
@@ -652,6 +655,22 @@ class _MagnetSettingsPageState extends State<MagnetSettingsPage> {
             setState(() => thumbnailsEnabled = v);
             await GStorage.putSetting(SettingsKeys.localMediaThumbnails, v);
             await _mediaController.setThumbnailsEnabled(v);
+          },
+        ),
+        SettingsTile.switchTile(
+          leading: Icons.image_search_rounded,
+          title: const Text('图片识别兜底'),
+          description: Text(Platform.isAndroid
+              ? '未匹配时抽帧并经 trace.moe 识别番剧；每批最多 10 次、每天最多 100 次。'
+                  'Android 设备通常没有 ffmpeg，此开关不会生效'
+              : '未匹配时用 ffmpeg 抽帧并经 trace.moe 识别番剧；'
+                  '每批最多 10 次、每天最多 100 次，识别结果会缓存，避免耗尽公共服务额度'),
+          initialValue: traceFallbackEnabled,
+          onToggle: (value) async {
+            final v = value ?? traceFallbackEnabled;
+            setState(() => traceFallbackEnabled = v);
+            await GStorage.putSetting(
+                SettingsKeys.localMediaTraceFallback, v);
           },
         ),
         SettingsTile.switchTile(
