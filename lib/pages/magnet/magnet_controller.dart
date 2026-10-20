@@ -37,6 +37,10 @@ String? _cleanOptional(String? value) {
   return (v == null || v.isEmpty) ? null : v;
 }
 
+/// 设置中配置的默认字幕组（空字符串视为不限）。
+String? _defaultSearchFansub() =>
+    _cleanOptional(GStorage.getSetting(SettingsKeys.animesGardenFansub));
+
 abstract class _MagnetController with Store {
   _MagnetController({MediaController? mediaController})
     : _engine = MagnetSearchEngine(),
@@ -132,9 +136,7 @@ abstract class _MagnetController with Store {
   /// 当前搜索会话的字幕组筛选（仅 AG 源生效）。
   /// null 表示不限；初值取自设置默认值，可在搜索页覆盖。
   @observable
-  String? searchFansub = _cleanOptional(
-    GStorage.getSetting(SettingsKeys.animesGardenFansub),
-  );
+  String? searchFansub = _defaultSearchFansub();
 
   /// 当前关键词下搜索结果中出现过的字幕组候选（去重）。
   /// 独立于 searchResults 缓存，避免选中某字幕组后
@@ -560,6 +562,15 @@ abstract class _MagnetController with Store {
       final f = item.publisher?.trim();
       if (f != null && f.isNotEmpty) _fansubOptions.add(f);
     }
+  }
+
+  /// 恢复搜索界面的临时筛选为设置中的默认字幕组。
+  ///
+  /// 控制器是全局单例，关闭搜索界面后 [searchFansub] 会一直保留；
+  /// 每次进入搜索界面时调用，避免上一次会话选择的条件带到下一次搜索。
+  @action
+  void resetSearchFilter() {
+    searchFansub = _defaultSearchFansub();
   }
 
   /// 设置搜索字幕组筛选并重新搜索。null 表示不限。

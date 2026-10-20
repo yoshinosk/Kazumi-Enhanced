@@ -711,6 +711,18 @@ mixin _$MagnetController on _MagnetController, Store {
   }
 
   @override
+  void resetSearchFilter() {
+    final _$actionInfo = _$_MagnetControllerActionController.startAction(
+      name: '_MagnetController.resetSearchFilter',
+    );
+    try {
+      return super.resetSearchFilter();
+    } finally {
+      _$_MagnetControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   Future<void> refreshSearch() {
     final _$actionInfo = _$_MagnetControllerActionController.startAction(
       name: '_MagnetController.refreshSearch',

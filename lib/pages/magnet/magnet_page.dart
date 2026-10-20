@@ -76,16 +76,19 @@ class _MagnetPageState extends State<MagnetPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    final initial = widget.initialQuery;
-    if (initial != null && initial.trim().isNotEmpty) {
-      _searchController.text = initial.trim();
-      // 延迟一帧执行搜索，确保控制器已就绪。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        controller.search(initial.trim());
-      });
-    } else {
-      _searchController.text = controller.query;
-    }
+    final initialKeyword = widget.initialQuery?.trim() ?? '';
+    _searchController.text = initialKeyword.isNotEmpty
+        ? initialKeyword
+        : controller.query;
+    // 延迟一帧：搜索 Tab 挂载后也会恢复默认筛选；这里在发起初始
+    // 搜索前先重置一次，避免上一次会话选中的字幕组继续过滤本次结果。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      controller.resetSearchFilter();
+      if (initialKeyword.isNotEmpty) {
+        controller.search(initialKeyword);
+      }
+    });
     _checkClipboardForMagnetLink();
   }
 
@@ -261,6 +264,17 @@ class MagnetSearchTab extends StatefulWidget {
 class _MagnetSearchTabState extends State<MagnetSearchTab> {
   MagnetController get controller => widget.controller;
   bool _autoLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 控制器是全局单例，关闭搜索界面后筛选条件仍会保留；
+    // 每次进入搜索界面时恢复默认值，避免上一次会话的字幕组条件
+    // 继续过滤下一次搜索。延迟一帧，避免在其它页面构建期间触发刷新。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) controller.resetSearchFilter();
+    });
+  }
 
   /// 当前关键词下出现过的字幕组（去重排序），用于筛选选择器。
   /// 使用控制器缓存的候选列表：选中某字幕组后服务端过滤
