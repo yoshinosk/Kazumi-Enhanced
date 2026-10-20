@@ -381,6 +381,14 @@ abstract class _PlayerPlaybackController with Store {
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
+        // 放宽音频缓冲上限（mpv 默认约 0.2s）：USB DAC 等输出设备对调度
+        // 抖动敏感，系统高负载（做种、后台软件、安全软件过滤驱动）下
+        // 音频线程偶发抢占即触发 underrun，表现为音频断续；audio-buffer
+        // 只是上限、mpv 按需填充，增大后可吸收抖动且不影响音画同步。
+        await pp.setProperty("audio-buffer", "0.5");
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
       }
 
       // 字幕延迟（持久化设置）与 A-B 循环清理：换集/换源后 UI 侧

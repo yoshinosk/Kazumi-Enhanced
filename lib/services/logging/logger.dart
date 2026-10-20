@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -97,6 +98,20 @@ class KazumiLogOutput extends LogOutput {
   static final Lock _logLock = Lock();
   static String? _logFilePath;
 
+  /// 单个日志文件上限（超出后轮转）与保留的历史份数：
+  /// kazumi_logs.log → kazumi_logs.1.log → kazumi_logs.2.log，
+  /// 最旧的直接删除，防止日志文件无限增长。
+  static const int _maxLogBytes = 10 * 1024 * 1024;
+  static const int _maxRotatedFiles = 2;
+
+  /// 轮转文件超出该体积时直接删除而非保留（异常刷屏产生的历史巨型
+  /// 文件没有回溯价值，避免轮转后继续占用磁盘）。
+  static const int _maxKeptLogBytes = _maxLogBytes;
+
+  /// 累计写入该字节数后做一次文件体积检查（避免每条日志都 stat）。
+  static const int _sizeCheckIntervalBytes = 512 * 1024;
+  static int _bytesSinceSizeCheck = 0;
+
   static Future<String> _getLogFilePath() async {
     if (_logFilePath != null) return _logFilePath!;
 
@@ -110,10 +125,47 @@ class KazumiLogOutput extends LogOutput {
     return _logFilePath!;
   }
 
+  /// 当前文件超出上限时轮转；轮转链上体积异常的历史巨型文件直接删除。
+  static Future<void> _rotateIfNeeded(File file) async {
+    try {
+      final stat = await file.stat();
+      if (stat.size < _maxLogBytes) return;
+      final dir = file.parent;
+      for (var i = _maxRotatedFiles; i >= 1; i--) {
+        final src = File(p.join(dir.path, 'kazumi_logs.$i.log'));
+        if (!await src.exists()) continue;
+        if (i == _maxRotatedFiles) {
+          // 最旧的一份直接删除。
+          await src.delete();
+          continue;
+        }
+        // 中间档位：体积异常（异常刷屏残留的巨型文件）直接删除，否则移位。
+        if (await src.length() > _maxKeptLogBytes) {
+          await src.delete();
+        } else {
+          await src.rename(p.join(dir.path, 'kazumi_logs.${i + 1}.log'));
+        }
+      }
+      if (stat.size > _maxKeptLogBytes) {
+        // 当前文件异常超大（历史遗留巨型文件 / 轮转长期未生效）：直接删除，
+        // 不归档——异常刷屏的内容没有回溯价值，避免磁盘占用被原样保留。
+        await file.delete();
+      } else {
+        await file.rename(p.join(dir.path, 'kazumi_logs.1.log'));
+      }
+    } catch (_) {
+      // 轮转失败（文件被占用等）不阻断日志写入，下个检查周期再试。
+    }
+  }
+
   @override
   void output(OutputEvent event) {
-    for (var line in event.lines) {
-      print(line);
+    // release / profile 构建下 Windows GUI 子系统没有控制台，print 无意义，
+    // 仅调试构建输出到控制台。
+    if (kDebugMode) {
+      for (var line in event.lines) {
+        print(line);
+      }
     }
 
     // Write to file if: warning/error/fatal OR forceLog is enabled
@@ -134,9 +186,16 @@ class KazumiLogOutput extends LogOutput {
           final cleanLine = _removeAnsiCodes(line);
           buffer.writeln(cleanLine);
         }
+        final text = buffer.toString();
+
+        _bytesSinceSizeCheck += text.length;
+        if (_bytesSinceSizeCheck >= _sizeCheckIntervalBytes) {
+          _bytesSinceSizeCheck = 0;
+          await _rotateIfNeeded(file);
+        }
 
         await file.writeAsString(
-          buffer.toString(),
+          text,
           mode: FileMode.writeOnlyAppend,
         );
       } catch (e) {
@@ -244,6 +303,14 @@ Future<bool> clearLogs() async {
     final file = await getLogsPath();
     await KazumiLogOutput._logLock.synchronized(() async {
       await file.writeAsString('');
+      // 顺带清理轮转历史文件，保证「清除日志」后磁盘不残留旧日志。
+      for (var i = 1; i <= KazumiLogOutput._maxRotatedFiles; i++) {
+        final rotated = File(p.join(file.parent.path, 'kazumi_logs.$i.log'));
+        if (await rotated.exists()) {
+          await rotated.delete();
+        }
+      }
+      KazumiLogOutput._bytesSinceSizeCheck = 0;
     });
     return true;
   } catch (e) {

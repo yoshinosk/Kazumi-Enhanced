@@ -1482,22 +1482,30 @@ class MagnetDownloadService {
       entry._pendingVerification = decided.pendingVerification;
       // 诊断：引擎原生上报「完成 / 做种」时的完整现场，用于定位
       // 「文件不完整却显示做种中」的真实原因（引擎以为完成多少、以及
-      // decide 是否信任）。仅在完成态上报时打点，量可控。
+      // decide 是否信任）。
       // forceLog：INFO 默认不落盘，该诊断必须写入 kazumi_logs.log 才能
       // 在用户复现后回溯引擎现场。
+      // 注意：完成 / 做种态的引擎上报会随状态轮询与引擎 alert 流反复到达
+      // （前台可高达每秒数次），并非只在跃迁时上报一次；因此按
+      // 「nativeStatus>effective」键去重，仅在状态键变化时打点，
+      // 否则会无限刷屏（曾刷出 3.5GB 日志并持续侵蚀播放性能）。
       if (nativeStatus == 'complete' || nativeStatus == 'seeding') {
-        KazumiLogger().i(
-            'MagnetDownloadService: native completion of '
-            '${entry.fileName.isNotEmpty ? entry.fileName : entry.title}'
-            ' | state=${t.state} progress=${t.progress.toStringAsFixed(4)}'
-            ' done=${t.totalDone} wanted=${t.totalWanted}'
-            ' finished=${t.isFinished} meta=${t.hasMetadata}'
-            ' | entry total=${entry.totalLength} verified=${entry.verifiedLength}'
-            ' completed=${entry.completedLength} seeds=${entry.numSeeds} peers=${entry.numPeers}'
-            ' | completionTrusted=${entry._completionTrusted}'
-            ' pendingVerification=${entry._pendingVerification} effective=$effective'
-            ' | status=$nativeStatus -> ${status == nativeStatus ? 'kept' : status}',
-            forceLog: true);
+        final logKey = '$nativeStatus>$effective';
+        if (entry._lastCompletionLogKey != logKey) {
+          entry._lastCompletionLogKey = logKey;
+          KazumiLogger().i(
+              'MagnetDownloadService: native completion of '
+              '${entry.fileName.isNotEmpty ? entry.fileName : entry.title}'
+              ' | state=${t.state} progress=${t.progress.toStringAsFixed(4)}'
+              ' done=${t.totalDone} wanted=${t.totalWanted}'
+              ' finished=${t.isFinished} meta=${t.hasMetadata}'
+              ' | entry total=${entry.totalLength} verified=${entry.verifiedLength}'
+              ' completed=${entry.completedLength} seeds=${entry.numSeeds} peers=${entry.numPeers}'
+              ' | completionTrusted=${entry._completionTrusted}'
+              ' pendingVerification=${entry._pendingVerification} effective=$effective'
+              ' | status=$nativeStatus -> ${status == nativeStatus ? 'kept' : status}',
+              forceLog: true);
+        }
       }
       if (status != effective) {
         // 触发强制校验（仅此处有副作用）：让引擎真正 hash 磁盘文件。
@@ -2217,6 +2225,11 @@ class MagnetDownloadEntry {
   /// 真实下载字节（active 且 totalDone>0）或强制 recheck 确认任一途径置位，
   /// 防止对已可信的完成态重复触发可疑校验。
   bool _completionTrusted = false;
+
+  /// 上一次完成态诊断打点的状态键（不持久化）：完成 / 做种态的引擎上报
+  /// 会随状态轮询与 alert 流反复到达，按「nativeStatus>effective」键去重，
+  /// 仅在状态键变化时才写诊断日志，避免无限刷屏。
+  String? _lastCompletionLogKey;
 
   /// 进入 metadata 状态的时间（不持久化），元数据超时自动重试用。
   DateTime? _metadataStartedAt;
