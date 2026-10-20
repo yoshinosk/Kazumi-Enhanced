@@ -13,6 +13,7 @@ import 'package:kazumi/repositories/danmaku_shield_repository.dart';
 import 'package:kazumi/repositories/history_repository.dart';
 import 'package:kazumi/repositories/search_history_repository.dart';
 import 'package:kazumi/services/download/download_manager.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 import 'package:kazumi/services/player/audio_controller.dart';
 import 'package:kazumi/services/player/history_playback_service.dart';
 import 'package:kazumi/services/media/local_availability_service.dart';
@@ -50,6 +51,8 @@ final coreModule = createModule(
       ..addSingleton<MyController>(MyController.new)
       ..addSingleton<DownloadController>(DownloadController.new)
       ..addSingleton<MagnetController>(MagnetController.new)
-      ..addSingleton<MediaController>(MediaController.new);
+      ..addSingleton<MediaController>(MediaController.new)
+      // 局域网同步依赖已初始化的 MediaController / 历史仓库。
+      ..addSingleton<LanSyncService>(LanSyncService.new);
   },
 );

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
+import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
+import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -34,10 +36,15 @@ class HistoryPlaybackUnavailable extends HistoryPlaybackResult {
 /// The history page and the my page share this one resolution path; cards
 /// carry no source-lookup logic of their own.
 class HistoryPlaybackService {
-  HistoryPlaybackService(this._pluginsController, this._downloadController);
+  HistoryPlaybackService(
+    this._pluginsController,
+    this._downloadController,
+    this._mediaController,
+  );
 
   final PluginsController _pluginsController;
   final DownloadController _downloadController;
+  final MediaController _mediaController;
 
   /// [cancelToken] lets the caller abort the online lookup, e.g. when the
   /// loading dialog it put up is dismissed.
@@ -51,8 +58,7 @@ class HistoryPlaybackService {
       if (isStreamHistory(history)) {
         final args = await _streamArgs(history);
         return args == null
-            ? const HistoryPlaybackUnavailable(
-                '边下边播源已失效，请从下载页重新开始播放')
+            ? const HistoryPlaybackUnavailable('边下边播源已失效，请从下载页重新开始播放')
             : HistoryPlaybackReady(args);
       }
       // 本地媒体库条目：直接按记录的文件路径恢复，不经过下载记录查询。
@@ -83,12 +89,12 @@ class HistoryPlaybackService {
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 2);
       try {
-        final request = await client.headUrl(Uri.parse(url)).timeout(
-              const Duration(seconds: 2),
-            );
+        final request = await client
+            .headUrl(Uri.parse(url))
+            .timeout(const Duration(seconds: 2));
         final response = await request.close().timeout(
-              const Duration(seconds: 2),
-            );
+          const Duration(seconds: 2),
+        );
         // 仅 2xx 视为可达：流已删除时服务器典型响应 404（或 403），
         // 若放行则恢复后进入必定失败的播放页而非引导从下载页重新开始。
         if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -157,14 +163,41 @@ class HistoryPlaybackService {
   /// 混入其它番剧的剧集；分组失败时回退为同目录全部视频文件。
   Future<VideoPlaybackArgs?> _localMediaArgs(History history) async {
     final path = history.episodePageUrl;
-    if (path.isEmpty || !File(path).existsSync()) {
+    if (path.isEmpty) {
+      return null;
+    }
+    if (isLanMediaPath(path)) {
+      // 桌面端媒体库：从当前同步快照中找到文件所在分组，保持选集列表
+      // 与会话内其他集一致；连接失效时由上层提示重新同步。
+      LocalMediaFolder? folder;
+      for (final item in _mediaController.library) {
+        if (!item.isRemote) continue;
+        if (item.files.any((file) => file.path == path)) {
+          folder = item;
+          break;
+        }
+      }
+      if (folder == null) return null;
+      final files = List<LocalMediaFile>.of(folder.files);
+      final index = files.indexWhere((file) => file.path == path);
+      if (index < 0) return null;
+      if (files[index].playbackUrl?.isEmpty ?? true) return null;
+      return LocalMediaVideoPlaybackArgs(
+        bangumiItem: history.bangumiItem,
+        files: files,
+        selectedIndex: index,
+        pluginName: kLocalMediaAdapterName,
+        bangumiSyncId: history.bangumiItem.id,
+        remote: true,
+      );
+    }
+    if (!File(path).existsSync()) {
       return null;
     }
     final dir = p.dirname(path);
     var files = <LocalMediaFile>[];
     try {
-      final folders =
-          await LocalMediaScanner().scan(dir, groupByFolder: false);
+      final folders = await LocalMediaScanner().scan(dir, groupByFolder: false);
       for (final folder in folders) {
         if (folder.files.any((f) => f.path == path)) {
           files = List.of(folder.files);
@@ -179,8 +212,10 @@ class HistoryPlaybackService {
         }
       }
     } catch (e) {
-      KazumiLogger().w('HistoryPlaybackService: list local dir failed',
-          error: e);
+      KazumiLogger().w(
+        'HistoryPlaybackService: list local dir failed',
+        error: e,
+      );
       return null;
     }
     if (files.isEmpty) return null;

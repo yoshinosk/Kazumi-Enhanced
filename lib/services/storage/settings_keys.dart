@@ -439,6 +439,88 @@ class SettingsKeys {
     '',
     group: SettingGroup.sync,
   );
+  // 局域网同步（桌面端共享 / 手机端连接）
+  static const lanSyncServerEnable = SettingKey<bool>(
+    'lanSyncServerEnable',
+    false,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientEnable = SettingKey<bool>(
+    'lanSyncClientEnable',
+    false,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncAutoSync = SettingKey<bool>(
+    'lanSyncAutoSync',
+    true,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncCollectEnable = SettingKey<bool>(
+    'lanSyncCollectEnable',
+    true,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncServerId = SettingKey<String>(
+    'lanSyncServerId',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncServerName = SettingKey<String>(
+    'lanSyncServerName',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncServerToken = SettingKey<String>(
+    'lanSyncServerToken',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncServerPairingCode = SettingKey<String>(
+    'lanSyncServerPairingCode',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncServerPort = SettingKey<int>(
+    'lanSyncServerPort',
+    45870,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientToken = SettingKey<String>(
+    'lanSyncClientToken',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientServerId = SettingKey<String>(
+    'lanSyncClientServerId',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientServerName = SettingKey<String>(
+    'lanSyncClientServerName',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientHost = SettingKey<String>(
+    'lanSyncClientHost',
+    '',
+    group: SettingGroup.sync,
+  );
+  static const lanSyncClientPort = SettingKey<int>(
+    'lanSyncClientPort',
+    0,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncLastSyncAt = SettingKey<int>(
+    'lanSyncLastSyncAt',
+    0,
+    group: SettingGroup.sync,
+  );
+  static const lanSyncRemoteLibrary = SettingKey<String>(
+    'lanSyncRemoteLibrary',
+    '',
+    group: SettingGroup.sync,
+  );
+
   static const webDavURL = SettingKey<String>(
     _SettingBoxKey.webDavURL,
     '',
@@ -1211,6 +1293,22 @@ class SettingsKeys {
     danmakuShieldSyncDeviceId,
     danmakuShieldSyncState,
     danmakuShieldSyncCorruptState,
+    lanSyncServerEnable,
+    lanSyncClientEnable,
+    lanSyncAutoSync,
+    lanSyncCollectEnable,
+    lanSyncServerId,
+    lanSyncServerName,
+    lanSyncServerToken,
+    lanSyncServerPairingCode,
+    lanSyncServerPort,
+    lanSyncClientToken,
+    lanSyncClientServerId,
+    lanSyncClientServerName,
+    lanSyncClientHost,
+    lanSyncClientPort,
+    lanSyncLastSyncAt,
+    lanSyncRemoteLibrary,
     webDavURL,
     webDavUsername,
     webDavPassword,

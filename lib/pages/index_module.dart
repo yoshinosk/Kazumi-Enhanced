@@ -29,6 +29,7 @@ import 'package:kazumi/pages/my/my_controller.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/services/sync/danmaku_shield_sync_service.dart';
 
@@ -103,6 +104,7 @@ final indexModule = createModule(
           magnetController: inject<MagnetController>(),
           mediaController: inject<MediaController>(),
           danmakuShieldSync: inject<DanmakuShieldSyncService>(),
+          lanSync: inject<LanSyncService>(),
         ),
         transition: TransitionType.none,
       )

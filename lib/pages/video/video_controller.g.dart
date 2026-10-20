@@ -307,6 +307,7 @@ mixin _$VideoPageController on _VideoPageController, Store {
     required int selectedIndex,
     required String pluginName,
     required int? bangumiSyncId,
+    required bool remote,
   }) {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(
       name: '_VideoPageController._initForLocalMediaPlayback',
@@ -318,6 +319,7 @@ mixin _$VideoPageController on _VideoPageController, Store {
         selectedIndex: selectedIndex,
         pluginName: pluginName,
         bangumiSyncId: bangumiSyncId,
+        remote: remote,
       );
     } finally {
       _$_VideoPageControllerActionController.endAction(_$actionInfo);

@@ -4,6 +4,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/pages/settings/sync/sync_settings_widgets.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/sync/bangumi_sync_service.dart';
 
@@ -39,9 +40,13 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   Widget build(BuildContext context) => SettingsDetailScaffold(
         title: const Text('同步设置'),
         body: ListenableBuilder(
-          listenable: BangumiSyncService(),
+          listenable: Listenable.merge([
+            BangumiSyncService(),
+            inject<LanSyncService>(),
+          ]),
           builder: (context, _) {
             final bangumi = BangumiSyncService();
+            final lanSync = inject<LanSyncService>();
             final hasToken =
                 GStorage.getSetting(SettingsKeys.bangumiAccessToken)
                     .trim()
@@ -57,6 +62,24 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                     GStorage.getSetting(SettingsKeys.webDavEnableCollect) ||
                     GStorage.getSetting(SettingsKeys.webDavEnableDanmakuShield);
             final colors = Theme.of(context).colorScheme;
+            final lanStatus = lanSync.isServerSupported
+                ? switch (lanSync.serverState) {
+                    LanServerState.disabled => _SyncStatus.disabled,
+                    LanServerState.starting => _SyncStatus.connecting,
+                    LanServerState.running => _SyncStatus.enabled,
+                    LanServerState.error => _SyncStatus.connectionError,
+                  }
+                : switch (lanSync.clientState) {
+                    LanClientState.disabled => _SyncStatus.disabled,
+                    LanClientState.discovering ||
+                    LanClientState.connecting =>
+                      _SyncStatus.connecting,
+                    LanClientState.connected => _SyncStatus.enabled,
+                    LanClientState.unpaired => _SyncStatus.unconnected,
+                    LanClientState.offline ||
+                    LanClientState.error =>
+                      _SyncStatus.connectionError,
+                  };
             final cards = [
               _SyncServiceCard(
                 title: '追番同步',
@@ -120,6 +143,18 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                     }
                     return Column(spacing: 16, children: cards);
                   },
+                ),
+                _SyncServiceCard(
+                  title: '局域网同步',
+                  service: 'LAN',
+                  description: '同一 Wi-Fi 下，手机直接播放电脑媒体库。',
+                  content: '媒体库 · 收藏状态 · 播放进度 · 局域网串流',
+                  icon: Icons.router_rounded,
+                  color: colors.primaryContainer,
+                  onColor: colors.onPrimaryContainer,
+                  status: lanStatus,
+                  action: '管理局域网同步',
+                  onPressed: () => _open('/settings/lan/'),
                 ),
               ],
             );

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/search/image_search_module.dart';
+import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:path/path.dart' as p;
 
@@ -27,7 +28,11 @@ bool isSupportedVideoFile(String path) {
 }
 
 /// 媒体路径的比较键。Windows 忽略大小写，其他平台保留大小写。
+///
+/// 局域网伪路径（`kazumi-lan://...`）不是文件系统路径，原样作为键，
+/// 否则 `p.absolute` 会把协议前缀拼进当前工作目录。
 String localMediaPathKey(String path) {
+  if (isLanMediaPath(path)) return path;
   final normalized = p.normalize(p.absolute(path));
   return Platform.isWindows ? normalized.toLowerCase() : normalized;
 }
@@ -36,6 +41,9 @@ bool localMediaPathsEqual(String first, String second) =>
     localMediaPathKey(first) == localMediaPathKey(second);
 
 bool isLocalMediaPathWithin(String root, String candidate) {
+  if (isLanMediaPath(root) || isLanMediaPath(candidate)) {
+    return localMediaPathKey(root) == localMediaPathKey(candidate);
+  }
   final rootKey = localMediaPathKey(root);
   final candidateKey = localMediaPathKey(candidate);
   return rootKey == candidateKey || p.isWithin(rootKey, candidateKey);
@@ -48,12 +56,34 @@ class LocalMediaFile {
     required this.name,
     required this.size,
     required this.modifiedAt,
+    this.isRemote = false,
+    this.remotePath,
+    this.playbackUrl,
+    this.remoteFolderPath,
+    this.remoteFolderName,
   });
 
   final String path;
   final String name;
   final int size;
   final DateTime modifiedAt;
+
+  /// 是否来自局域网桌面端媒体库。
+  final bool isRemote;
+
+  /// 桌面端真实路径（仅 [isRemote] 时非空）。
+  final String? remotePath;
+
+  /// 实际交给播放器的地址；空值回退 [path]。
+  final String? playbackUrl;
+
+  /// 桌面端所在目录的真实路径 / 名称（用于分组与展示）。
+  final String? remoteFolderPath;
+  final String? remoteFolderName;
+
+  /// 播放地址：远程文件走 HTTP 流，本地文件直接用路径。
+  String get playableUrl =>
+      (playbackUrl != null && playbackUrl!.isNotEmpty) ? playbackUrl! : path;
 
   String get sizeLabel {
     if (size <= 0) return '';
@@ -68,19 +98,30 @@ class LocalMediaFile {
   }
 
   Map<String, dynamic> toJson() => {
-        'path': path,
-        'name': name,
-        'size': size,
-        'modifiedAt': modifiedAt.toIso8601String(),
-      };
+    'path': path,
+    'name': name,
+    'size': size,
+    'modifiedAt': modifiedAt.toIso8601String(),
+    if (isRemote) 'isRemote': true,
+    if (remotePath != null) 'remotePath': remotePath,
+    if (playbackUrl != null) 'playbackUrl': playbackUrl,
+    if (remoteFolderPath != null) 'remoteFolderPath': remoteFolderPath,
+    if (remoteFolderName != null) 'remoteFolderName': remoteFolderName,
+  };
 
   factory LocalMediaFile.fromJson(Map<String, dynamic> json) {
     return LocalMediaFile(
       path: json['path'] as String? ?? '',
       name: json['name'] as String? ?? '',
       size: (json['size'] as num?)?.toInt() ?? 0,
-      modifiedAt: DateTime.tryParse(json['modifiedAt'] as String? ?? '') ??
+      modifiedAt:
+          DateTime.tryParse(json['modifiedAt'] as String? ?? '') ??
           DateTime.now(),
+      isRemote: json['isRemote'] as bool? ?? false,
+      remotePath: json['remotePath'] as String?,
+      playbackUrl: json['playbackUrl'] as String?,
+      remoteFolderPath: json['remoteFolderPath'] as String?,
+      remoteFolderName: json['remoteFolderName'] as String?,
     );
   }
 
@@ -120,11 +161,14 @@ class LocalMediaFolder {
 
   int get count => files.length;
 
+  /// 是否来自局域网桌面端媒体库（路径为伪路径）。
+  bool get isRemote => isLanMediaPath(path);
+
   Map<String, dynamic> toJson() => {
-        'path': path,
-        'name': name,
-        'files': files.map((e) => e.toJson()).toList(),
-      };
+    'path': path,
+    'name': name,
+    'files': files.map((e) => e.toJson()).toList(),
+  };
 
   factory LocalMediaFolder.fromJson(Map<String, dynamic> json) {
     final fileList = json['files'] as List? ?? const [];
@@ -132,8 +176,9 @@ class LocalMediaFolder {
       path: json['path'] as String? ?? '',
       name: json['name'] as String? ?? '',
       files: fileList
-          .map((e) =>
-              LocalMediaFile.fromJson(Map<String, dynamic>.from(e as Map)))
+          .map(
+            (e) => LocalMediaFile.fromJson(Map<String, dynamic>.from(e as Map)),
+          )
           .toList(),
     );
   }
@@ -203,38 +248,38 @@ class MediaScrapeInfo {
 
   /// 转换为应用内播放 / 弹幕关联所需的 BangumiItem。
   BangumiItem toBangumiItem() => BangumiItem(
-        id: playbackId,
-        type: 2,
-        name: name,
-        nameCn: nameCn,
-        summary: summary,
-        airDate: airDate,
-        airWeekday: 0,
-        rank: 0,
-        images: {
-          'large': coverUrl,
-          'common': '',
-          'medium': '',
-          'small': '',
-          'grid': '',
-        },
-        tags: const [],
-        alias: const [],
-        ratingScore: 0,
-        votes: 0,
-        votesCount: const [],
-        info: '',
-      );
+    id: playbackId,
+    type: 2,
+    name: name,
+    nameCn: nameCn,
+    summary: summary,
+    airDate: airDate,
+    airWeekday: 0,
+    rank: 0,
+    images: {
+      'large': coverUrl,
+      'common': '',
+      'medium': '',
+      'small': '',
+      'grid': '',
+    },
+    tags: const [],
+    alias: const [],
+    ratingScore: 0,
+    votes: 0,
+    votesCount: const [],
+    info: '',
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'nameCn': nameCn,
-        'summary': summary,
-        'airDate': airDate,
-        'coverUrl': coverUrl,
-        'source': source.name,
-      };
+    'id': id,
+    'name': name,
+    'nameCn': nameCn,
+    'summary': summary,
+    'airDate': airDate,
+    'coverUrl': coverUrl,
+    'source': source.name,
+  };
 
   factory MediaScrapeInfo.fromJson(Map<String, dynamic> json) {
     final rawSource = json['source'] as String?;
@@ -276,7 +321,8 @@ class MediaScrapeInfo {
       nameCn: title?.chinese ?? title?.english ?? title?.native ?? '',
       summary: '',
       airDate: airDate,
-      coverUrl: anilist.coverImage?.large ??
+      coverUrl:
+          anilist.coverImage?.large ??
           anilist.coverImage?.medium ??
           anilist.coverImage?.extraLarge ??
           '',
@@ -315,15 +361,18 @@ class MediaScrapeStore {
 
   static Future<void> save(Map<String, MediaScrapeInfo> results) =>
       GStorage.putSetting(
-          SettingsKeys.localMediaScrapeResults, _encode(results));
+        SettingsKeys.localMediaScrapeResults,
+        _encode(results),
+      );
 
   static Map<String, MediaScrapeInfo> loadFileResults() =>
       _decode(GStorage.getSetting(SettingsKeys.localMediaFileScrapeResults));
 
-  static Future<void> saveFileResults(
-          Map<String, MediaScrapeInfo> results) =>
+  static Future<void> saveFileResults(Map<String, MediaScrapeInfo> results) =>
       GStorage.putSetting(
-          SettingsKeys.localMediaFileScrapeResults, _encode(results));
+        SettingsKeys.localMediaFileScrapeResults,
+        _encode(results),
+      );
 
   static Map<String, MediaScrapeInfo> _decode(String raw) {
     if (raw.isEmpty) return const {};
@@ -341,7 +390,5 @@ class MediaScrapeStore {
   }
 
   static String _encode(Map<String, MediaScrapeInfo> results) =>
-      jsonEncode(results.map(
-        (key, value) => MapEntry(key, value.toJson()),
-      ));
+      jsonEncode(results.map((key, value) => MapEntry(key, value.toJson())));
 }

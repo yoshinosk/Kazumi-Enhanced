@@ -48,17 +48,27 @@ class LocalEpisodesSection extends StatelessWidget {
         // 媒体库文件：按目录分组，每组分目录标题 + 集数 chips。
         if (availability.files.isNotEmpty) {
           final byDir = <String, List<LocalMediaFile>>{};
+          final folderNames = <String, String>{};
           for (final file in availability.files) {
-            (byDir[p.dirname(file.path)] ??= []).add(file);
+            final key = file.isRemote
+                ? 'lan:${file.remoteFolderPath ?? file.remoteFolderName ?? ''}'
+                : p.dirname(file.path);
+            (byDir[key] ??= []).add(file);
+            if (file.isRemote) {
+              folderNames[key] = file.remoteFolderName ?? '桌面端媒体库';
+            }
           }
           children.add(_GroupLabel(
             icon: Icons.video_library_outlined,
-            text: '本地媒体库 · ${availability.localFileCount} 个文件',
+            text: '本地与桌面端媒体库 · ${availability.localFileCount} 个文件',
           ));
           for (final entry in byDir.entries) {
             final files = entry.value;
+            final remote = files.any((file) => file.isRemote);
             children.add(_FolderChips(
-              folderName: p.basename(entry.key),
+              folderName: remote
+                  ? (folderNames[entry.key] ?? '桌面端媒体库')
+                  : p.basename(entry.key),
               files: files,
               onFileTap: (index) {
                 onPlay?.call();
@@ -70,6 +80,7 @@ class LocalEpisodesSection extends StatelessWidget {
                     selectedIndex: index,
                     pluginName: kLocalMediaAdapterName,
                     bangumiSyncId: bangumiId,
+                    remote: remote,
                   ),
                 );
               },

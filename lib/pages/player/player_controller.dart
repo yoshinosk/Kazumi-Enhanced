@@ -16,6 +16,7 @@ import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/pages/player/controller/player_syncplay_controller.dart';
 import 'package:kazumi/pages/player/controller/player_screenshot_controller.dart';
 import 'package:kazumi/services/storage/storage.dart';
+import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
@@ -51,6 +52,7 @@ class PlayerController implements Disposable {
     debug: debug,
     videoUrl: () => videoUrl,
     isLocalPlayback: () => isLocalPlayback,
+    isLanPlayback: () => isLanPlayback,
   );
   late final PlayerSyncPlayController syncplay = PlayerSyncPlayController(
     bangumiId: () => bangumiId,
@@ -85,6 +87,7 @@ class PlayerController implements Disposable {
   String? coverUrl;
   String videoUrl = '';
   bool isLocalPlayback = false;
+  bool isLanPlayback = false;
   Timer? hideVolumeUITimer;
   Timer? _volumeGestureSyncTimer;
   double? _pendingGestureVolume;
@@ -172,6 +175,7 @@ class PlayerController implements Disposable {
 
     videoUrl = params.videoUrl;
     isLocalPlayback = params.isLocalPlayback;
+    isLanPlayback = params.isLanPlayback;
     bangumiId = params.bangumiId;
     currentEpisode = params.episode;
     currentDanmakuEpisodeNumber = params.danmakuEpisodeNumber;
@@ -179,7 +183,8 @@ class PlayerController implements Disposable {
     referer = params.referer;
 
     KazumiLogger().i(
-      'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}',
+      'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, '
+      'url: ${redactLanStreamToken(params.videoUrl)}',
     );
 
     playback.resetForInit();

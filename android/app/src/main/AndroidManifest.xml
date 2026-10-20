@@ -75,6 +75,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 局域网同步：UDP 广播发现桌面端（部分机型需要多播锁保持接收） -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 16+ 本地网络访问保护（旧系统会忽略未知权限） -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- 本地媒体库：读取共享存储中的视频文件（API 33+） -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <!-- 本地媒体库：读取共享存储中的视频文件（API 30~32） -->

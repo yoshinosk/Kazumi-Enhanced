@@ -4,6 +4,9 @@ class PlaybackInitParams {
   final String videoUrl;
   final int offset;
   final bool isLocalPlayback;
+
+  /// 是否为局域网桌面端串流：需要绕过用户配置的 HTTP 代理。
+  final bool isLanPlayback;
   final VideoSourceFormat videoSourceFormat;
   final int bangumiId;
   final String pluginName;
@@ -36,6 +39,7 @@ class PlaybackInitParams {
     required this.videoUrl,
     required this.offset,
     required this.isLocalPlayback,
+    this.isLanPlayback = false,
     required this.bangumiId,
     required this.pluginName,
     required this.episode,
@@ -56,10 +60,7 @@ class PlaybackInitParams {
   });
 }
 
-enum DanmakuDestination {
-  chatRoom,
-  remoteDanmaku,
-}
+enum DanmakuDestination { chatRoom, remoteDanmaku }
 
 class SyncPlayChatMessage {
   final String username;

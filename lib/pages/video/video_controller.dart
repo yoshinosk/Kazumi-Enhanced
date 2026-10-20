@@ -35,10 +35,7 @@ part 'video_controller.g.dart';
 class VideoPageController = _VideoPageController with _$VideoPageController;
 
 class VideoEpisodeSelection {
-  const VideoEpisodeSelection({
-    required this.episode,
-    required this.road,
-  });
+  const VideoEpisodeSelection({required this.episode, required this.road});
 
   final int episode;
   final int road;
@@ -84,8 +81,10 @@ abstract class _VideoPageController with Store implements Disposable {
   String? _errorMessage;
 
   @observable
-  VideoEpisodeSelection selectedEpisode =
-      const VideoEpisodeSelection(episode: 1, road: 0);
+  VideoEpisodeSelection selectedEpisode = const VideoEpisodeSelection(
+    episode: 1,
+    road: 0,
+  );
 
   @observable
   VideoEpisodeSelection? playingEpisode;
@@ -156,6 +155,9 @@ abstract class _VideoPageController with Store implements Disposable {
 
   String _localMediaPluginName = '';
 
+  /// 本地媒体模式是否为局域网桌面端远程播放。
+  bool _localMediaRemote = false;
+
   /// 边下边播的适配器标识（流 URL 与文件名保存在 roadList 中）。
   String _streamPluginName = '';
 
@@ -213,6 +215,7 @@ abstract class _VideoPageController with Store implements Disposable {
           selectedIndex: args.selectedIndex,
           pluginName: args.pluginName,
           bangumiSyncId: args.bangumiSyncId,
+          remote: args.remote,
         );
       case MagnetStreamVideoPlaybackArgs():
         _initForStreamPlayback(
@@ -234,8 +237,9 @@ abstract class _VideoPageController with Store implements Disposable {
   }) {
     this.bangumiItem = bangumiItem;
     _offlinePluginName = pluginName;
-    title =
-        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    title = bangumiItem.nameCn.isNotEmpty
+        ? bangumiItem.nameCn
+        : bangumiItem.name;
     isOfflineMode = true;
     _loading = false;
 
@@ -261,7 +265,8 @@ abstract class _VideoPageController with Store implements Disposable {
       _playbackHistoryIdentity = null;
     }
     KazumiLogger().i(
-        'VideoPageController: initialized for offline playback, episode $episodeNumber (position: ${selected.episode})');
+      'VideoPageController: initialized for offline playback, episode $episodeNumber (position: ${selected.episode})',
+    );
   }
 
   void _buildOfflineRoadList(List<DownloadEpisode> episodes) {
@@ -271,11 +276,13 @@ abstract class _VideoPageController with Store implements Disposable {
     _offlineEpisodesByNumber.clear();
     _offlineEpisodesByNumber.addAll(snapshot.episodesByNumber);
     _offlineDisplayRoadToOriginalRoad.clear();
-    _offlineDisplayRoadToOriginalRoad
-        .addAll(snapshot.displayRoadToOriginalRoad);
+    _offlineDisplayRoadToOriginalRoad.addAll(
+      snapshot.displayRoadToOriginalRoad,
+    );
     _offlineOriginalRoadToDisplayRoad.clear();
-    _offlineOriginalRoadToDisplayRoad
-        .addAll(snapshot.originalRoadToDisplayRoad);
+    _offlineOriginalRoadToDisplayRoad.addAll(
+      snapshot.originalRoadToDisplayRoad,
+    );
   }
 
   String get offlinePluginName => _offlinePluginName;
@@ -291,23 +298,24 @@ abstract class _VideoPageController with Store implements Disposable {
     required int selectedIndex,
     required String pluginName,
     required int? bangumiSyncId,
+    required bool remote,
   }) {
     this.bangumiItem = bangumiItem;
     _localMediaPluginName = pluginName;
     _localMediaBangumiSyncId = bangumiSyncId;
-    title =
-        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    _localMediaRemote = remote;
+    title = bangumiItem.nameCn.isNotEmpty
+        ? bangumiItem.nameCn
+        : bangumiItem.name;
     isLocalMediaMode = true;
     _loading = false;
 
     _buildLocalMediaRoadList(files);
 
-    final safeIndex =
-        files.isEmpty ? 0 : selectedIndex.clamp(0, files.length - 1);
-    final selected = VideoEpisodeSelection(
-      episode: safeIndex + 1,
-      road: 0,
-    );
+    final safeIndex = files.isEmpty
+        ? 0
+        : selectedIndex.clamp(0, files.length - 1);
+    final selected = VideoEpisodeSelection(episode: safeIndex + 1, road: 0);
     selectedEpisode = selected;
     playingEpisode = null;
     final resolvedEpisode = _resolveLocalMediaEpisode(
@@ -320,7 +328,8 @@ abstract class _VideoPageController with Store implements Disposable {
       _playbackHistoryIdentity = null;
     }
     KazumiLogger().i(
-        'VideoPageController: initialized for local media playback, index $selectedIndex (position: ${selected.episode})');
+      'VideoPageController: initialized for local media playback, index $selectedIndex (position: ${selected.episode})',
+    );
   }
 
   void _buildLocalMediaRoadList(List<LocalMediaFile> files) {
@@ -328,11 +337,14 @@ abstract class _VideoPageController with Store implements Disposable {
     if (files.isEmpty) {
       return;
     }
-    roadList.add(Road(
-      name: '本地视频',
-      data: files.map((f) => f.path).toList(),
-      identifier: files.map((f) => f.name).toList(),
-    ));
+    roadList.add(
+      Road(
+        name: _localMediaRemote ? '桌面端媒体库' : '本地视频',
+        data: files.map((f) => f.playableUrl).toList(),
+        pageUrls: files.map((f) => f.path).toList(),
+        identifier: files.map((f) => f.name).toList(),
+      ),
+    );
   }
 
   /// 边下边播初始化：单文件 HTTP 流，写入历史（adapterName=magnet-stream）。
@@ -345,17 +357,20 @@ abstract class _VideoPageController with Store implements Disposable {
   }) {
     this.bangumiItem = bangumiItem;
     _streamPluginName = pluginName;
-    title =
-        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    title = bangumiItem.nameCn.isNotEmpty
+        ? bangumiItem.nameCn
+        : bangumiItem.name;
     isStreamMode = true;
     _loading = false;
 
     roadList.clear();
-    roadList.add(Road(
-      name: '边下边播',
-      data: [streamUrl],
-      identifier: [fileName.isEmpty ? '流式播放' : fileName],
-    ));
+    roadList.add(
+      Road(
+        name: '边下边播',
+        data: [streamUrl],
+        identifier: [fileName.isEmpty ? '流式播放' : fileName],
+      ),
+    );
 
     selectedEpisode = const VideoEpisodeSelection(episode: 1, road: 0);
     playingEpisode = null;
@@ -385,8 +400,15 @@ abstract class _VideoPageController with Store implements Disposable {
     if (index < 0 || index >= roadData.data.length) {
       return null;
     }
-    final path = roadData.data[index];
-    final name = (index < roadData.identifier.length &&
+    final playbackUrl = roadData.data[index];
+    final path =
+        (roadData.pageUrls != null &&
+            index < roadData.pageUrls!.length &&
+            roadData.pageUrls![index].isNotEmpty)
+        ? roadData.pageUrls![index]
+        : playbackUrl;
+    final name =
+        (index < roadData.identifier.length &&
             roadData.identifier[index].isNotEmpty)
         ? roadData.identifier[index]
         : '本地视频';
@@ -400,6 +422,7 @@ abstract class _VideoPageController with Store implements Disposable {
       roadIndex: targetRoad,
       displayTitle: name,
       pageUrl: path,
+      playbackUrl: playbackUrl,
       episodeNumber: danmakuEp,
       originalRoadIndex: targetRoad,
     );
@@ -544,7 +567,8 @@ abstract class _VideoPageController with Store implements Disposable {
       displayTitle: episodeTitle,
       pageUrl: downloadEpisode?.episodePageUrl ?? '',
       episodeNumber: episodeNumber,
-      originalRoadIndex: downloadEpisode?.road ??
+      originalRoadIndex:
+          downloadEpisode?.road ??
           _offlineDisplayRoadToOriginalRoad[targetRoad] ??
           targetRoad,
     );
@@ -572,8 +596,9 @@ abstract class _VideoPageController with Store implements Disposable {
     if (roadData.data.isEmpty) {
       return null;
     }
-    final name =
-        roadData.identifier.isNotEmpty ? roadData.identifier.first : '流式播放';
+    final name = roadData.identifier.isNotEmpty
+        ? roadData.identifier.first
+        : '流式播放';
     final parsed = parseLocalEpisodeNumber(name);
     final episodeNumber = parsed > 0 ? parsed : 1;
     return EpisodeRef.offline(
@@ -640,8 +665,9 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     final EpisodeCommentResponse value;
     try {
-      value =
-          await BangumiApi.getBangumiCommentsByEpisodeID(latestEpisodeInfo.id);
+      value = await BangumiApi.getBangumiCommentsByEpisodeID(
+        latestEpisodeInfo.id,
+      );
     } catch (_) {
       if (session.isStale) {
         return false;
@@ -653,15 +679,18 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     final commentsList = value.commentList;
     if (!isCommentsAscending) {
-      commentsList
-          .sort((a, b) => b.comment.createdAt.compareTo(a.comment.createdAt));
+      commentsList.sort(
+        (a, b) => b.comment.createdAt.compareTo(a.comment.createdAt),
+      );
     } else {
-      commentsList
-          .sort((a, b) => a.comment.createdAt.compareTo(b.comment.createdAt));
+      commentsList.sort(
+        (a, b) => a.comment.createdAt.compareTo(b.comment.createdAt),
+      );
     }
     _applyEpisodeComments(episode, latestEpisodeInfo, commentsList);
     KazumiLogger().i(
-        'VideoPageController: loaded comments list length ${episodeCommentsList.length}');
+      'VideoPageController: loaded comments list length ${episodeCommentsList.length}',
+    );
     return true;
   }
 
@@ -751,7 +780,8 @@ abstract class _VideoPageController with Store implements Disposable {
     final resolvedEpisode = _resolveOnlineEpisode(episode, road: currentRoad);
     if (resolvedEpisode == null) {
       KazumiLogger().e(
-          'VideoPageController: failed to resolve online episode. road=$currentRoad, episode=$episode');
+        'VideoPageController: failed to resolve online episode. road=$currentRoad, episode=$episode',
+      );
       _failLoading('集数解析失败');
       return;
     }
@@ -759,8 +789,9 @@ abstract class _VideoPageController with Store implements Disposable {
     _applyResolvedSelection(resolvedEpisode);
     _setOnlineHistoryIdentity(resolvedEpisode);
 
-    KazumiLogger()
-        .i('VideoPageController: changed to ${resolvedEpisode.displayTitle}');
+    KazumiLogger().i(
+      'VideoPageController: changed to ${resolvedEpisode.displayTitle}',
+    );
     final urlItem = normalizeEpisodeUrl(
       currentPlugin.baseUrl,
       resolvedEpisode.pageUrl,
@@ -781,11 +812,14 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    final resolvedEpisode =
-        _resolveOfflineEpisode(selection.episode, road: selection.road);
+    final resolvedEpisode = _resolveOfflineEpisode(
+      selection.episode,
+      road: selection.road,
+    );
     if (resolvedEpisode == null) {
       KazumiLogger().e(
-          'VideoPageController: failed to resolve offline episode. road=${selection.road}, episode=${selection.episode}');
+        'VideoPageController: failed to resolve offline episode. road=${selection.road}, episode=${selection.episode}',
+      );
       _failLoading('集数解析失败');
       return;
     }
@@ -805,11 +839,13 @@ abstract class _VideoPageController with Store implements Disposable {
       return;
     }
     _finishLoading();
-    final resolvedOffset =
-        offset > 0 ? offset : getHistoryOffsetFor(_playbackHistoryIdentity!);
+    final resolvedOffset = offset > 0
+        ? offset
+        : getHistoryOffsetFor(_playbackHistoryIdentity!);
 
     KazumiLogger().i(
-        'VideoPageController: offline episode changed to ${resolvedEpisode.historyEpisodeNumber} (index: ${selection.episode}), path: $localPath');
+      'VideoPageController: offline episode changed to ${resolvedEpisode.historyEpisodeNumber} (index: ${selection.episode}), path: $localPath',
+    );
 
     final params = PlaybackInitParams(
       videoUrl: localPath,
@@ -827,8 +863,9 @@ abstract class _VideoPageController with Store implements Disposable {
       referer: '',
       currentRoad: resolvedEpisode.roadIndex,
       coverUrl: bangumiItem.images['large'],
-      bangumiName:
-          bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
     );
 
     final initialized = await playerController.init(params);
@@ -856,8 +893,9 @@ abstract class _VideoPageController with Store implements Disposable {
 
   /// 弹幕侧车文件的作用域：用番剧名哈希区分同目录混放的多部番剧。
   String get _localMediaDanmakuScope {
-    final title =
-        bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name;
+    final title = bangumiItem.nameCn.isNotEmpty
+        ? bangumiItem.nameCn
+        : bangumiItem.name;
     return danmakuSidecarScope(title);
   }
 
@@ -867,16 +905,19 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    final resolvedEpisode =
-        _resolveLocalMediaEpisode(selection.episode, road: selection.road);
+    final resolvedEpisode = _resolveLocalMediaEpisode(
+      selection.episode,
+      road: selection.road,
+    );
     if (resolvedEpisode == null) {
       KazumiLogger().e(
-          'VideoPageController: failed to resolve local media episode. road=${selection.road}, episode=${selection.episode}');
+        'VideoPageController: failed to resolve local media episode. road=${selection.road}, episode=${selection.episode}',
+      );
       _failLoading('集数解析失败');
       return;
     }
 
-    final localPath = resolvedEpisode.pageUrl;
+    final localPath = resolvedEpisode.effectivePlaybackUrl;
     if (localPath.isEmpty) {
       _failLoading('文件路径为空');
       return;
@@ -887,16 +928,21 @@ abstract class _VideoPageController with Store implements Disposable {
       return;
     }
     _finishLoading();
-    final resolvedOffset =
-        offset > 0 ? offset : getHistoryOffsetFor(_playbackHistoryIdentity!);
+    final resolvedOffset = offset > 0
+        ? offset
+        : getHistoryOffsetFor(_playbackHistoryIdentity!);
 
     KazumiLogger().i(
-        'VideoPageController: local media episode changed to ${resolvedEpisode.historyEpisodeNumber} (index: ${selection.episode}), path: $localPath');
+      'VideoPageController: local media episode changed to ${resolvedEpisode.historyEpisodeNumber} (index: ${selection.episode}), path: $localPath',
+    );
 
     final params = PlaybackInitParams(
       videoUrl: localPath,
       offset: resolvedOffset,
-      isLocalPlayback: true,
+      // 远程流不能按本地文件开启 fuzzy 外挂字幕扫描；弹幕侧车文件同样
+      // 只在本机播放时读写。
+      isLocalPlayback: !_localMediaRemote,
+      isLanPlayback: _localMediaRemote,
       bangumiId: bangumiItem.id,
       pluginName: _localMediaPluginName,
       episode: resolvedEpisode.listIndex,
@@ -909,11 +955,12 @@ abstract class _VideoPageController with Store implements Disposable {
       referer: '',
       currentRoad: resolvedEpisode.roadIndex,
       coverUrl: bangumiItem.images['large'],
-      bangumiName:
-          bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
       bangumiNameAliases: _danmakuTitleAliases(resolvedEpisode.displayTitle),
-      localDanmakuDirectory: p.dirname(localPath),
-      danmakuScope: _localMediaDanmakuScope,
+      localDanmakuDirectory: _localMediaRemote ? null : p.dirname(localPath),
+      danmakuScope: _localMediaRemote ? null : _localMediaDanmakuScope,
     );
 
     final initialized = await playerController.init(params);
@@ -931,11 +978,14 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    final resolvedEpisode =
-        _resolveStreamEpisode(selection.episode, road: selection.road);
+    final resolvedEpisode = _resolveStreamEpisode(
+      selection.episode,
+      road: selection.road,
+    );
     if (resolvedEpisode == null) {
       KazumiLogger().e(
-          'VideoPageController: failed to resolve stream episode. road=${selection.road}, episode=${selection.episode}');
+        'VideoPageController: failed to resolve stream episode. road=${selection.road}, episode=${selection.episode}',
+      );
       _failLoading('流解析失败');
       return;
     }
@@ -954,7 +1004,8 @@ abstract class _VideoPageController with Store implements Disposable {
     _finishLoading();
 
     KazumiLogger().i(
-        'VideoPageController: stream episode changed to ${resolvedEpisode.historyEpisodeNumber}, url: ${resolvedEpisode.pageUrl}');
+      'VideoPageController: stream episode changed to ${resolvedEpisode.historyEpisodeNumber}, url: ${resolvedEpisode.pageUrl}',
+    );
 
     final params = PlaybackInitParams(
       videoUrl: resolvedEpisode.pageUrl,
@@ -972,8 +1023,9 @@ abstract class _VideoPageController with Store implements Disposable {
       referer: '',
       currentRoad: resolvedEpisode.roadIndex,
       coverUrl: bangumiItem.images['large'],
-      bangumiName:
-          bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
       bangumiNameAliases: _danmakuTitleAliases(resolvedEpisode.displayTitle),
     );
 
@@ -1007,8 +1059,9 @@ abstract class _VideoPageController with Store implements Disposable {
       );
       if (session.isActive && danmakuSession.isActive) {
         if (result.hasDanmakus) {
-          final bool enableDanmaku =
-              GStorage.getSetting(SettingsKeys.danmakuEnabledByDefault);
+          final bool enableDanmaku = GStorage.getSetting(
+            SettingsKeys.danmakuEnabledByDefault,
+          );
           playerController.danmaku.applyDanmakuLoad(
             result,
             enableDanmaku: enableDanmaku,
@@ -1027,13 +1080,14 @@ abstract class _VideoPageController with Store implements Disposable {
               if (d.time > maxT) maxT = d.time;
             }
             KazumiLogger().i(
-                'DanmakuDiag: local load ep=${params.danmakuEpisodeNumber} '
-                'count=${result.danmakus.length} '
-                'time=${minT.isFinite ? minT.toStringAsFixed(1) : '-'}..'
-                '${maxT.toStringAsFixed(1)}s '
-                'bangumiID=${dm.bangumiID} episodeId=${dm.danmakuEpisodeId} '
-                'on=$enableDanmaku offset=${dm.timelineOffsetSeconds}',
-                forceLog: true);
+              'DanmakuDiag: local load ep=${params.danmakuEpisodeNumber} '
+              'count=${result.danmakus.length} '
+              'time=${minT.isFinite ? minT.toStringAsFixed(1) : '-'}..'
+              '${maxT.toStringAsFixed(1)}s '
+              'bangumiID=${dm.bangumiID} episodeId=${dm.danmakuEpisodeId} '
+              'on=$enableDanmaku offset=${dm.timelineOffsetSeconds}',
+              forceLog: true,
+            );
           }
           if (enableDanmaku) {
             unawaited(
@@ -1075,9 +1129,15 @@ abstract class _VideoPageController with Store implements Disposable {
   }
 
   String? _getLocalVideoPath(
-      int bangumiId, String pluginName, int episodeNumber) {
-    final episode =
-        downloadRepository.getEpisode(bangumiId, pluginName, episodeNumber);
+    int bangumiId,
+    String pluginName,
+    int episodeNumber,
+  ) {
+    final episode = downloadRepository.getEpisode(
+      bangumiId,
+      pluginName,
+      episodeNumber,
+    );
     return downloadManager.getLocalVideoPath(episode);
   }
 
@@ -1108,11 +1168,13 @@ abstract class _VideoPageController with Store implements Disposable {
         return;
       }
       _finishLoading();
-      KazumiLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
+      KazumiLogger().i(
+        'VideoPageController: resolved video URL: ${source.url}',
+      );
 
-      final bool forceAdBlocker =
-          GStorage.getSetting(SettingsKeys.forceAdBlocker);
+      final bool forceAdBlocker = GStorage.getSetting(
+        SettingsKeys.forceAdBlocker,
+      );
 
       final params = PlaybackInitParams(
         videoUrl: source.url,
@@ -1223,16 +1285,21 @@ OfflineRoadListSnapshot buildOfflineRoadListSnapshot(
     final displayRoad = roads.length;
     displayRoadToOriginalRoad[displayRoad] = originalRoad;
     originalRoadToDisplayRoad[originalRoad] = displayRoad;
-    roads.add(Road(
-      name: originalRoad >= 0
-          ? '播放列表${originalRoad + 1}'
-          : '播放列表${displayRoad + 1}',
-      data: roadEpisodes.map((e) => e.episodeNumber.toString()).toList(),
-      identifier: roadEpisodes
-          .map((e) =>
-              e.episodeName.isNotEmpty ? e.episodeName : '第${e.episodeNumber}集')
-          .toList(),
-    ));
+    roads.add(
+      Road(
+        name: originalRoad >= 0
+            ? '播放列表${originalRoad + 1}'
+            : '播放列表${displayRoad + 1}',
+        data: roadEpisodes.map((e) => e.episodeNumber.toString()).toList(),
+        identifier: roadEpisodes
+            .map(
+              (e) => e.episodeName.isNotEmpty
+                  ? e.episodeName
+                  : '第${e.episodeNumber}集',
+            )
+            .toList(),
+      ),
+    );
   }
 
   return OfflineRoadListSnapshot(
@@ -1249,6 +1316,7 @@ class EpisodeRef {
     required this.roadIndex,
     required this.displayTitle,
     required this.pageUrl,
+    this.playbackUrl,
     required this.sortNumber,
     required this.historyEpisodeNumber,
     required this.danmakuEpisodeNumber,
@@ -1259,6 +1327,11 @@ class EpisodeRef {
   final int roadIndex;
   final String displayTitle;
   final String pageUrl;
+
+  /// 实际播放地址；为空时回退 [pageUrl]。
+  final String? playbackUrl;
+
+  String get effectivePlaybackUrl => playbackUrl ?? pageUrl;
 
   /// Episode sort number.
   /// - Online: parsed from [displayTitle] via [extractEpisodeNumber];
@@ -1283,8 +1356,9 @@ class EpisodeRef {
       pageUrl: pageUrl,
       sortNumber: parsedEpisodeNumber > 0 ? parsedEpisodeNumber : null,
       historyEpisodeNumber: listIndex,
-      danmakuEpisodeNumber:
-          parsedEpisodeNumber > 0 ? parsedEpisodeNumber : listIndex,
+      danmakuEpisodeNumber: parsedEpisodeNumber > 0
+          ? parsedEpisodeNumber
+          : listIndex,
       originalRoadIndex: roadIndex,
     );
   }
@@ -1294,6 +1368,7 @@ class EpisodeRef {
     required int roadIndex,
     required String displayTitle,
     required String pageUrl,
+    String? playbackUrl,
     required int episodeNumber,
     required int originalRoadIndex,
   }) = _OfflineEpisodeRef;
@@ -1305,11 +1380,12 @@ class _OfflineEpisodeRef extends EpisodeRef {
     required super.roadIndex,
     required super.displayTitle,
     required super.pageUrl,
+    super.playbackUrl,
     required int episodeNumber,
     required super.originalRoadIndex,
   }) : super(
-          sortNumber: episodeNumber,
-          historyEpisodeNumber: episodeNumber,
-          danmakuEpisodeNumber: episodeNumber,
-        );
+         sortNumber: episodeNumber,
+         historyEpisodeNumber: episodeNumber,
+         danmakuEpisodeNumber: episodeNumber,
+       );
 }

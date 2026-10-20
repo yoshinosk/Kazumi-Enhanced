@@ -10,6 +10,7 @@ import 'package:kazumi/pages/player/controller/player_debug_controller.dart';
 import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/utils/constants.dart';
+import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/network/system_proxy_service.dart';
@@ -62,12 +63,14 @@ abstract class _PlayerPlaybackController with Store {
     required this.debug,
     required this.videoUrl,
     required this.isLocalPlayback,
+    required this.isLanPlayback,
   });
 
   final ShaderAssetService shaderAssetService;
   final PlayerDebugController debug;
   final String Function() videoUrl;
   final bool Function() isLocalPlayback;
+  final bool Function() isLanPlayback;
   late final PlaybackCachePolicy cachePolicy = PlaybackCachePolicy(
     isLocalPlayback: isLocalPlayback,
     currentPlayer: () => mediaPlayer,
@@ -417,7 +420,10 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
-      final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
+      // 局域网串流不应经过代理：系统代理 / 用户代理通常只转发公网流量，
+      // 走代理会导致 192.168.x.x 访问失败或明显卡顿。
+      final bool proxyEnable =
+          !isLanPlayback() && GStorage.getSetting(SettingsKeys.proxyEnable);
       if (proxyEnable) {
         final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
         final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
@@ -428,7 +434,7 @@ abstract class _PlayerPlaybackController with Store {
           }
           KazumiLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
         }
-      } else if (SystemProxyService.isActive) {
+      } else if (!isLanPlayback() && SystemProxyService.isActive) {
         final proxy = SystemProxyService.proxyFor('https');
         if (proxy != null) {
           await pp.setProperty("http-proxy", 'http://${proxy.$1}:${proxy.$2}');
@@ -513,14 +519,17 @@ abstract class _PlayerPlaybackController with Store {
             );
           } else if (showPlayerError) {
             KazumiDialog.showToast(
-              message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
+              message:
+                  '播放器内部错误 ${event.toString()} '
+                  '${redactLanStreamToken(videoUrl())}',
               duration: const Duration(seconds: 5),
               showActionButton: true,
             );
           }
         }
         KazumiLogger().e(
-          'PlayerController: Player intent error ${videoUrl()}',
+          'PlayerController: Player intent error '
+          '${redactLanStreamToken(videoUrl())}',
           error: event,
         );
       });

@@ -17,6 +17,7 @@ import 'package:kazumi/pages/magnet/magnet_page.dart'
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/utils/local_episode_parser.dart';
@@ -31,6 +32,8 @@ import 'package:path/path.dart' as p;
 String _inferLocalTitle(LocalMediaFile file) {
   final fromFile = sanitizeAnimeTitle(file.name);
   if (fromFile.length >= 2) return fromFile;
+  final remoteFolder = file.remoteFolderName ?? '';
+  if (file.isRemote && remoteFolder.isNotEmpty) return remoteFolder;
   final folderName = p.basename(p.dirname(file.path));
   final fromFolder = sanitizeAnimeTitle(folderName);
   if (fromFolder.length >= 2) return fromFolder;
@@ -101,8 +104,9 @@ String mediaResumeText(MediaResumePoint resume) {
 /// 番剧头部续播按钮文案：看完时指向下一集。
 String mediaResumeActionLabel(MediaResumePoint resume) {
   if (resume.finished) {
-    final nextEp =
-        resume.nextFile == null ? 0 : parseLocalEpisodeNumber(resume.nextFile!.name);
+    final nextEp = resume.nextFile == null
+        ? 0
+        : parseLocalEpisodeNumber(resume.nextFile!.name);
     return nextEp > 0 ? '下一集 EP$nextEp' : '下一集';
   }
   final ep = resume.episode;
@@ -158,8 +162,8 @@ _FileWatchMark? _fileWatchMarkFor(
       label: resume.finished
           ? '上次看完$epPart'
           : resume.positionLabel.isNotEmpty
-              ? '上次看到 ${resume.positionLabel}'
-              : '上次看到$epPart',
+          ? '上次看到 ${resume.positionLabel}'
+          : '上次看到$epPart',
     );
   }
   final positions = controller.watchPositionsFor(folder);
@@ -213,6 +217,10 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
     // 应用回到前台时重扫一次（桌面端窗口聚焦同样触发）。
     if (state == AppLifecycleState.resumed) {
       controller.scan();
+      final lanSync = inject<LanSyncService>();
+      if (lanSync.clientEnabled) {
+        unawaited(lanSync.syncNow(quiet: true));
+      }
     }
   }
 
@@ -255,9 +263,19 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
           // 排序（仅番剧 / 网格视图有意义）
           _SortMenu(controller: controller),
           IconButton(
+            tooltip: '局域网同步',
+            icon: const Icon(Icons.router_rounded),
+            onPressed: () => context.pushNamed('/settings/lan/'),
+          ),
+          IconButton(
             tooltip: '扫描',
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: controller.isScanning ? null : () => controller.scan(),
+            onPressed: controller.isScanning
+                ? null
+                : () {
+                    controller.scan();
+                    inject<LanSyncService>().syncNow(quiet: true);
+                  },
           ),
           IconButton(
             tooltip: '搜刮元数据',
@@ -273,46 +291,53 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
           ),
         ],
       ),
-      body: Observer(
-        builder: (_) {
-          if (controller.isScanning && controller.library.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (controller.folders.isEmpty) {
-            return Center(
-              child: GeneralEmptyState(
-                icon: Icons.folder_off_rounded,
-                title: '尚未添加任何文件夹\n点击右上角添加本地视频目录',
-              ),
-            );
-          }
-          if (controller.library.isEmpty) {
-            return Center(
-              child: GeneralEmptyState(
-                icon: Icons.video_library_outlined,
-                title: '所选文件夹中没有发现视频文件',
-              ),
-            );
-          }
-          if (controller.isGridMode) {
-            return _GridView(
-              controller: controller,
-              query: _searchQuery,
-              onFileTap: _playFile,
-            );
-          }
-          return controller.isAnimeMode
-              ? _AnimeView(
-                  controller: controller,
-                  query: _searchQuery,
-                  onFileTap: _playFile,
-                )
-              : _FolderView(
-                  controller: controller,
-                  query: _searchQuery,
-                  onFileTap: _playFile,
-                );
-        },
+      body: Column(
+        children: [
+          const _LanSyncBanner(),
+          Expanded(
+            child: Observer(
+              builder: (_) {
+                if (controller.isScanning && controller.library.isEmpty) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (controller.folders.isEmpty && !controller.hasLanLibrary) {
+                  return Center(
+                    child: GeneralEmptyState(
+                      icon: Icons.folder_off_rounded,
+                      title: '尚未添加任何文件夹\n点击右上角添加本地视频目录',
+                    ),
+                  );
+                }
+                if (controller.library.isEmpty) {
+                  return Center(
+                    child: GeneralEmptyState(
+                      icon: Icons.video_library_outlined,
+                      title: '所选文件夹中没有发现视频文件',
+                    ),
+                  );
+                }
+                if (controller.isGridMode) {
+                  return _GridView(
+                    controller: controller,
+                    query: _searchQuery,
+                    onFileTap: _playFile,
+                  );
+                }
+                return controller.isAnimeMode
+                    ? _AnimeView(
+                        controller: controller,
+                        query: _searchQuery,
+                        onFileTap: _playFile,
+                      )
+                    : _FolderView(
+                        controller: controller,
+                        query: _searchQuery,
+                        onFileTap: _playFile,
+                      );
+              },
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: _ScrapeProgressBar(controller: controller),
     );
@@ -339,6 +364,10 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
     final bangumiItem = info != null
         ? info.toBangumiItem()
         : _placeholderBangumiItem(_inferLocalTitle(file));
+    if (file.isRemote && (file.playbackUrl?.isEmpty ?? true)) {
+      KazumiDialog.showToast(message: '桌面端媒体库连接已失效，请到局域网同步设置重新连接');
+      return;
+    }
     final int index = siblings.indexWhere((f) => f.path == file.path);
     final args = LocalMediaVideoPlaybackArgs(
       bangumiItem: bangumiItem,
@@ -346,13 +375,14 @@ class _MediaLibraryPageState extends State<MediaLibraryPage>
       selectedIndex: index < 0 ? 0 : index,
       pluginName: kLocalMediaAdapterName,
       bangumiSyncId: info?.bangumiId,
+      remote: file.isRemote,
     );
     if (!context.mounted) return;
     context.pushNamed('/video/', arguments: args);
   }
 
   void _confirmScrape(BuildContext context) {
-    final total = controller.library.length;
+    final total = controller.localFolders.length;
     final unmatched = controller.unmatchedCount;
     var onlyUnmatched = controller.scrapeOnlyUnmatched;
 
@@ -633,6 +663,139 @@ class _SortGroupHeaderDelegate extends SliverPersistentHeaderDelegate {
       oldDelegate.title != title;
 }
 
+// ============ 局域网同步状态条 ============
+
+class _LanSyncBanner extends StatelessWidget {
+  const _LanSyncBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final service = inject<LanSyncService>();
+    final controller = inject<MediaController>();
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+        final (icon, title, subtitle, action, onPressed) = _bannerContent(
+          context,
+          service,
+          controller,
+        );
+        if (title.isEmpty) return const SizedBox.shrink();
+        return Material(
+          color: colorScheme.surfaceContainerLow,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: theme.textTheme.labelLarge),
+                      if (subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (action.isNotEmpty)
+                  TextButton(onPressed: onPressed, child: Text(action)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  (IconData, String, String, String, VoidCallback?) _bannerContent(
+    BuildContext context,
+    LanSyncService service,
+    MediaController controller,
+  ) {
+    if (service.isServerSupported) {
+      if (service.serverState != LanServerState.running) {
+        return (Icons.router, '', '', '', null);
+      }
+      return (
+        Icons.router_rounded,
+        '局域网共享已开启',
+        '手机端可在同一 Wi-Fi 下发现 ${service.serverName} · 配对码 ${service.pairingCode}',
+        '管理',
+        () => context.pushNamed('/settings/lan/'),
+      );
+    }
+    if (!service.isClientSupported) {
+      return (Icons.router, '', '', '', null);
+    }
+    if (!service.clientEnabled && !controller.hasLanLibrary) {
+      return (Icons.router, '', '', '', null);
+    }
+    final name = service.clientServerName.isNotEmpty
+        ? service.clientServerName
+        : '桌面端';
+    switch (service.clientState) {
+      case LanClientState.connected:
+        final time = service.lastSyncAt;
+        final timeText = time == null
+            ? '已连接'
+            : '${time.hour.toString().padLeft(2, '0')}:'
+                  '${time.minute.toString().padLeft(2, '0')} 已同步';
+        return (
+          Icons.router_rounded,
+          '桌面端 $name 在线',
+          '$timeText · ${service.lastFolderCount} 个目录 / '
+              '${service.lastFileCount} 个视频',
+          '同步',
+          () => service.syncNow(),
+        );
+      case LanClientState.unpaired:
+        return (
+          Icons.link_off_rounded,
+          '发现桌面端 $name',
+          '输入桌面端显示的 6 位配对码即可同步媒体库与播放进度',
+          '配对',
+          () => context.pushNamed('/settings/lan/'),
+        );
+      case LanClientState.offline:
+        return (
+          Icons.link_off_rounded,
+          '桌面端未连接',
+          controller.hasLanLibrary
+              ? '正在显示上次同步的媒体库，播放前请确认桌面端在线'
+              : (service.clientError.isNotEmpty
+                    ? service.clientError
+                    : '请确认桌面端已开启局域网共享'),
+          '重试',
+          () => service.syncNow(),
+        );
+      case LanClientState.discovering:
+      case LanClientState.connecting:
+        return (Icons.sync_rounded, '正在连接桌面端…', '', '', null);
+      case LanClientState.error:
+        return (
+          Icons.error_outline_rounded,
+          '局域网同步异常',
+          service.clientError,
+          '设置',
+          () => context.pushNamed('/settings/lan/'),
+        );
+      case LanClientState.disabled:
+        return (Icons.router, '', '', '', null);
+    }
+  }
+}
+
 // ============ 文件夹视图 ============
 
 class _FolderView extends StatelessWidget {
@@ -865,7 +1028,9 @@ class _FolderSectionState extends State<_FolderSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ListTile(
-          leading: const Icon(Icons.folder_rounded),
+          leading: Icon(
+            folder.isRemote ? Icons.computer_rounded : Icons.folder_rounded,
+          ),
           title: Text(
             info?.displayName ?? folder.name,
             maxLines: 1,
@@ -873,7 +1038,9 @@ class _FolderSectionState extends State<_FolderSection> {
             style: theme.textTheme.titleSmall,
           ),
           subtitle: Text(
-            '${folder.count} 个文件 · ${folder.path}',
+            folder.isRemote
+                ? '桌面端媒体库 · ${folder.count} 个文件'
+                : '${folder.count} 个文件 · ${folder.path}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall,
@@ -889,15 +1056,17 @@ class _FolderSectionState extends State<_FolderSection> {
                     visualDensity: VisualDensity.compact,
                   ),
                 ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                onSelected: (value) => _handleFolderAction(value, folder, info),
-                itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'match', child: Text('手动匹配番剧')),
-                  if (info != null)
-                    const PopupMenuItem(value: 'clear', child: Text('清除匹配')),
-                ],
-              ),
+              if (!folder.isRemote)
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) =>
+                      _handleFolderAction(value, folder, info),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'match', child: Text('手动匹配番剧')),
+                    if (info != null)
+                      const PopupMenuItem(value: 'clear', child: Text('清除匹配')),
+                  ],
+                ),
               Icon(_expanded ? Icons.expand_less : Icons.expand_more),
             ],
           ),
@@ -1005,8 +1174,7 @@ class _AnimeView extends StatelessWidget {
                             (f) =>
                                 f.name.toLowerCase().contains(q) ||
                                 f.files.any(
-                                  (file) =>
-                                      file.name.toLowerCase().contains(q),
+                                  (file) => file.name.toLowerCase().contains(q),
                                 ),
                           ),
                     )
@@ -1088,9 +1256,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
     final actions = <Widget>[
       if (resume != null && mediaResumeActionAvailable(resume))
         TextButton.icon(
-          style: TextButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-          ),
+          style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
           onPressed: () => widget.onFileTap(
             mediaResumeTargetFile(resume),
             resume.folder.files,
@@ -1104,22 +1270,17 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
         ),
       if (info != null && info.bangumiId != null)
         TextButton(
-          onPressed: () => context.pushNamed(
-            '/info/',
-            arguments: info.toBangumiItem(),
-          ),
+          onPressed: () =>
+              context.pushNamed('/info/', arguments: info.toBangumiItem()),
           child: const Text('详情'),
         ),
       if (info != null && info.bangumiId != null)
         TextButton(
-          onPressed: () => _showMissingEpisodesSheet(
-            context,
-            widget.controller,
-            group,
-          ),
+          onPressed: () =>
+              _showMissingEpisodesSheet(context, widget.controller, group),
           child: const Text('缺集'),
         ),
-      if (info != null)
+      if (info != null && !group.folders.any((folder) => folder.isRemote))
         TextButton(
           onPressed: () => _showManualMatchDialog(
             context,
@@ -1163,10 +1324,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
         if (info != null && info.airDate.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              info.airDate,
-              style: theme.textTheme.bodySmall,
-            ),
+            child: Text(info.airDate, style: theme.textTheme.bodySmall),
           ),
         if (resume != null)
           Padding(
@@ -1259,7 +1417,12 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                     padding: const EdgeInsets.only(left: 8, top: 4, bottom: 2),
                     child: Row(
                       children: [
-                        const Icon(Icons.folder_outlined, size: 16),
+                        Icon(
+                          folder.isRemote
+                              ? Icons.computer_rounded
+                              : Icons.folder_outlined,
+                          size: 16,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -1269,7 +1432,7 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
                             style: theme.textTheme.labelMedium,
                           ),
                         ),
-                        if (info == null)
+                        if (info == null && !folder.isRemote)
                           TextButton(
                             onPressed: () => _showManualMatchDialog(
                               context,
@@ -1338,8 +1501,10 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
 
   List<PopupMenuEntry<String>> _groupMenuItems() {
     final info = widget.group.info;
-    final resume =
-        widget.controller.resumePointForFolders(widget.group.folders);
+    final hasRemote = widget.group.folders.any((folder) => folder.isRemote);
+    final resume = widget.controller.resumePointForFolders(
+      widget.group.folders,
+    );
     return [
       if (resume != null && mediaResumeActionAvailable(resume))
         const PopupMenuItem(value: 'resume', child: Text('续播')),
@@ -1347,13 +1512,15 @@ class _AnimeGroupSectionState extends State<_AnimeGroupSection> {
         const PopupMenuItem(value: 'detail', child: Text('番剧详情')),
         const PopupMenuItem(value: 'missing', child: Text('缺集检测')),
       ],
-      if (info != null)
+      if (info != null && !hasRemote)
         const PopupMenuItem(value: 'rematch', child: Text('修改识别结果')),
-      const PopupMenuDivider(),
-      const PopupMenuItem(
-        value: 'delete',
-        child: Text('删除', style: TextStyle(color: Colors.red)),
-      ),
+      if (!hasRemote) ...[
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Text('删除', style: TextStyle(color: Colors.red)),
+        ),
+      ],
     ];
   }
 
@@ -1496,15 +1663,16 @@ class _GridView extends StatelessWidget {
                         final resume = controller.resumePointForFolders(
                           item.folders,
                         );
-                        final thumbPath = !item.isMatched &&
-                                item.folders.isNotEmpty
+                        final thumbPath =
+                            !item.isMatched && item.folders.isNotEmpty
                             ? controller.thumbnails[item.folders.first.path]
                             : null;
                         return _GridCard(
                           item: item,
                           resume: resume,
                           thumbPath: thumbPath,
-                          onResumeTap: resume == null ||
+                          onResumeTap:
+                              resume == null ||
                                   !mediaResumeActionAvailable(resume)
                               ? null
                               : () => onFileTap(
@@ -1758,8 +1926,7 @@ class _GridCardState extends State<_GridCard> {
     );
   }
 
-  String _resumeLabel(MediaResumePoint resume) =>
-      mediaResumeBadgeLabel(resume);
+  String _resumeLabel(MediaResumePoint resume) => mediaResumeBadgeLabel(resume);
 }
 
 class _Badge extends StatelessWidget {
@@ -2031,35 +2198,39 @@ void _showGridItemSheet(
                                     ),
                                     label: const Text('缺集检测'),
                                   ),
-                                  TextButton.icon(
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      visualDensity: VisualDensity.compact,
+                                  if (!item.folders.any(
+                                    (folder) => folder.isRemote,
+                                  ))
+                                    TextButton.icon(
+                                      style: TextButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      onPressed: () {
+                                        final folder = item.folders.first;
+                                        Navigator.pop(context);
+                                        showDialog<void>(
+                                          context: sheetContext,
+                                          builder: (_) => _ManualMatchDialog(
+                                            controller: controller,
+                                            title: '修改识别结果',
+                                            name: folder.name,
+                                            onMatch: (e) => controller
+                                                .setFolderMatch(folder.path, e),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.manage_search_rounded,
+                                        size: 18,
+                                      ),
+                                      label: const Text('修改识别结果'),
                                     ),
-                                    onPressed: () {
-                                      final folder = item.folders.first;
-                                      Navigator.pop(context);
-                                      showDialog<void>(
-                                        context: sheetContext,
-                                        builder: (_) => _ManualMatchDialog(
-                                          controller: controller,
-                                          title: '修改识别结果',
-                                          name: folder.name,
-                                          onMatch: (e) => controller
-                                              .setFolderMatch(folder.path, e),
-                                        ),
-                                      );
-                                    },
-                                    icon: const Icon(
-                                      Icons.manage_search_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('修改识别结果'),
-                                  ),
                                 ],
                               ),
                             ),
-                          if (!item.isMatched)
+                          if (!item.isMatched &&
+                              !item.folders.any((folder) => folder.isRemote))
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
                               child: TextButton.icon(
@@ -2104,7 +2275,12 @@ void _showGridItemSheet(
                     padding: const EdgeInsets.fromLTRB(20, 10, 20, 2),
                     child: Row(
                       children: [
-                        const Icon(Icons.folder_outlined, size: 16),
+                        Icon(
+                          folder.isRemote
+                              ? Icons.computer_rounded
+                              : Icons.folder_outlined,
+                          size: 16,
+                        ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -2185,10 +2361,10 @@ class _FileTile extends StatelessWidget {
     final (leadingIcon, leadingColor) = watchMark == null
         ? (Icons.play_circle_outline_rounded, null)
         : watchMark.finished
-            ? (Icons.check_circle_outline_rounded, colorScheme.outline)
-            : watchMark.isResume
-                ? (Icons.play_circle_rounded, colorScheme.primary)
-                : (Icons.play_circle_outline_rounded, null);
+        ? (Icons.check_circle_outline_rounded, colorScheme.outline)
+        : watchMark.isResume
+        ? (Icons.play_circle_rounded, colorScheme.primary)
+        : (Icons.play_circle_outline_rounded, null);
     return GestureDetector(
       // 桌面端右键文件条目直接弹出操作菜单（与「⋯」按钮一致）。
       onSecondaryTapUp: (_) => onMenu(),
@@ -2309,30 +2485,38 @@ void _showFileActionSheet(
             title: const Text('播放'),
             onTap: () {
               Navigator.pop(context);
-              if (Platform.isWindows || Platform.isAndroid) {
+              if (Platform.isWindows || Platform.isAndroid || file.isRemote) {
                 onPlay(file, siblings, info);
               } else {
                 OpenFilex.open(file.path);
               }
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.manage_search_rounded),
-            title: const Text('修改识别结果'),
-            onTap: () {
-              Navigator.pop(context);
-              showDialog<void>(
-                context: context,
-                builder: (_) => _ManualMatchDialog(
-                  controller: controller,
-                  title: '修改识别结果',
-                  name: file.name,
-                  onMatch: (item) => controller.setFileMatch(file, item),
-                ),
-              );
-            },
-          ),
-          if (controller.fileScrapeResults.containsKey(file.path))
+          if (file.isRemote)
+            const ListTile(
+              leading: Icon(Icons.router_rounded),
+              title: Text('桌面端文件'),
+              subtitle: Text('播放走局域网串流；重命名 / 移动 / 删除请在桌面端操作'),
+            ),
+          if (!file.isRemote)
+            ListTile(
+              leading: const Icon(Icons.manage_search_rounded),
+              title: const Text('修改识别结果'),
+              onTap: () {
+                Navigator.pop(context);
+                showDialog<void>(
+                  context: context,
+                  builder: (_) => _ManualMatchDialog(
+                    controller: controller,
+                    title: '修改识别结果',
+                    name: file.name,
+                    onMatch: (item) => controller.setFileMatch(file, item),
+                  ),
+                );
+              },
+            ),
+          if (!file.isRemote &&
+              controller.fileScrapeResults.containsKey(file.path))
             ListTile(
               leading: const Icon(Icons.remove_circle_outline),
               title: const Text('清除文件识别结果'),
@@ -2342,42 +2526,44 @@ void _showFileActionSheet(
                 KazumiDialog.showToast(message: '已恢复文件夹识别结果');
               },
             ),
-          ListTile(
-            leading: const Icon(Icons.drive_file_rename_outline),
-            title: const Text('重命名'),
-            onTap: () {
-              Navigator.pop(context);
-              _showRenameDialog(context, controller, file);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.drive_file_move_outline),
-            title: const Text('移动到...'),
-            onTap: () {
-              Navigator.pop(context);
-              _showMoveDialog(context, controller, file);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.folder_open_rounded),
-            title: const Text('打开文件所在目录'),
-            onTap: () {
-              Navigator.pop(context);
-              revealInFileManager(file.path).then((ok) {
-                if (!ok) {
-                  KazumiDialog.showToast(message: '无法打开文件管理器或文件不存在');
-                }
-              });
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text('删除', style: TextStyle(color: Colors.red)),
-            onTap: () {
-              Navigator.pop(context);
-              _confirmDelete(context, controller, file);
-            },
-          ),
+          if (!file.isRemote) ...[
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('重命名'),
+              onTap: () {
+                Navigator.pop(context);
+                _showRenameDialog(context, controller, file);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_move_outline),
+              title: const Text('移动到...'),
+              onTap: () {
+                Navigator.pop(context);
+                _showMoveDialog(context, controller, file);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_rounded),
+              title: const Text('打开文件所在目录'),
+              onTap: () {
+                Navigator.pop(context);
+                revealInFileManager(file.path).then((ok) {
+                  if (!ok) {
+                    KazumiDialog.showToast(message: '无法打开文件管理器或文件不存在');
+                  }
+                });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('删除', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _confirmDelete(context, controller, file);
+              },
+            ),
+          ],
           const SizedBox(height: 8),
         ],
       ),

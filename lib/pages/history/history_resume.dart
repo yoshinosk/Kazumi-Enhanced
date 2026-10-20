@@ -4,6 +4,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/dialog/dialog_task.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
+import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/player/history_playback_service.dart';
 import 'package:kazumi/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
@@ -51,9 +52,12 @@ Future<void> resumeHistoryPlayback(
   }, errorMessage: '暂时无法继续播放，请稍后重试');
   final reason = unavailableReason;
   if (!context.mounted || reason == null) return;
-  if (isLocalMediaHistory(history)) {
+  if (isLocalMediaHistory(history) &&
+      !isLanMediaPath(history.episodePageUrl)) {
     await showMissingLocalFileDialog(context, reason, history);
   } else {
+    // 桌面端媒体库条目不可用通常是电脑离线 / 配对失效，不需要引导用户
+    // 去本机找文件或重新下载。
     KazumiDialog.showToast(message: reason);
   }
 }

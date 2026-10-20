@@ -141,7 +141,8 @@ String _categoryPath(String location) {
     return '/settings/player';
   }
   if (_isWithinPath(location, '/settings/bangumi') ||
-      _isWithinPath(location, '/settings/webdav')) {
+      _isWithinPath(location, '/settings/webdav') ||
+      _isWithinPath(location, '/settings/lan')) {
     return '/settings/sync';
   }
   for (final group in _settingsGroups) {

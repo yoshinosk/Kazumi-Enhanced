@@ -53,10 +53,14 @@ class LocalMediaVideoPlaybackArgs extends VideoPlaybackArgs {
     required this.selectedIndex,
     required this.pluginName,
     this.bangumiSyncId,
+    this.remote = false,
   });
 
   /// 同一文件夹下的全部本地视频文件，支持选集切换。
   final List<LocalMediaFile> files;
+
+  /// 是否播放局域网桌面端媒体库（HTTP 流），而不是本机文件。
+  final bool remote;
 
   /// 本次点击要播放的文件在 [files] 中的索引。
   final int selectedIndex;

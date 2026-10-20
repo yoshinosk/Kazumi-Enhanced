@@ -63,6 +63,24 @@ mixin _$MediaController on _MediaController, Store {
     });
   }
 
+  late final _$lanServerNameAtom = Atom(
+    name: '_MediaController.lanServerName',
+    context: context,
+  );
+
+  @override
+  String get lanServerName {
+    _$lanServerNameAtom.reportRead();
+    return super.lanServerName;
+  }
+
+  @override
+  set lanServerName(String value) {
+    _$lanServerNameAtom.reportWrite(value, super.lanServerName, () {
+      super.lanServerName = value;
+    });
+  }
+
   late final _$isScanningAtom = Atom(
     name: '_MediaController.isScanning',
     context: context,
@@ -355,6 +373,16 @@ mixin _$MediaController on _MediaController, Store {
     );
   }
 
+  late final _$clearLanLibraryAsyncAction = AsyncAction(
+    '_MediaController.clearLanLibrary',
+    context: context,
+  );
+
+  @override
+  Future<void> clearLanLibrary() {
+    return _$clearLanLibraryAsyncAction.run(() => super.clearLanLibrary());
+  }
+
   late final _$setWatchFolderAsyncAction = AsyncAction(
     '_MediaController.setWatchFolder',
     context: context,
@@ -547,6 +575,28 @@ mixin _$MediaController on _MediaController, Store {
   );
 
   @override
+  void applyLanLibrary({
+    required String serverName,
+    required List<LocalMediaFolder> folders,
+    required Map<String, MediaScrapeInfo> folderScrapeResults,
+    required Map<String, MediaScrapeInfo> remoteFileScrapeResults,
+  }) {
+    final _$actionInfo = _$_MediaControllerActionController.startAction(
+      name: '_MediaController.applyLanLibrary',
+    );
+    try {
+      return super.applyLanLibrary(
+        serverName: serverName,
+        folders: folders,
+        folderScrapeResults: folderScrapeResults,
+        remoteFileScrapeResults: remoteFileScrapeResults,
+      );
+    } finally {
+      _$_MediaControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   void _refreshResumePoints() {
     final _$actionInfo = _$_MediaControllerActionController.startAction(
       name: '_MediaController._refreshResumePoints',
@@ -576,6 +626,7 @@ mixin _$MediaController on _MediaController, Store {
 thumbnails: ${thumbnails},
 folders: ${folders},
 library: ${library},
+lanServerName: ${lanServerName},
 isScanning: ${isScanning},
 scrapeResults: ${scrapeResults},
 fileScrapeResults: ${fileScrapeResults},

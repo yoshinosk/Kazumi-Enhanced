@@ -580,7 +580,9 @@ class _VideoPageState extends State<VideoPage>
     final bangumiId = videoPageController.bangumiItem.id;
     final mediaController = inject<MediaController>();
     return Tooltip(
-      message: '本地媒体库有该集，点击切换本地播放',
+      message: file.isRemote
+          ? '桌面端媒体库有该集，点击切换局域网串流'
+          : '本地媒体库有该集，点击切换本地播放',
       child: InkWell(
         borderRadius: BorderRadius.circular(4),
         onTap: () {
@@ -597,6 +599,7 @@ class _VideoPageState extends State<VideoPage>
               selectedIndex: index < 0 ? 0 : index,
               pluginName: kLocalMediaAdapterName,
               bangumiSyncId: bangumiId,
+              remote: file.isRemote,
             ),
           );
         },

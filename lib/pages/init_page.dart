@@ -6,6 +6,7 @@ import 'package:kazumi/pages/my/my_controller.dart';
 import 'package:kazumi/services/sync/bangumi_sync_service.dart';
 import 'package:kazumi/services/sync/danmaku_shield_sync_service.dart';
 import 'package:kazumi/services/sync/webdav.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -34,6 +35,7 @@ class InitPage extends StatefulWidget {
     required this.magnetController,
     required this.mediaController,
     required this.danmakuShieldSync,
+    required this.lanSync,
   });
 
   final PluginsController pluginsController;
@@ -44,6 +46,7 @@ class InitPage extends StatefulWidget {
   final MagnetController magnetController;
   final MediaController mediaController;
   final DanmakuShieldSyncService danmakuShieldSync;
+  final LanSyncService lanSync;
 
   @override
   State<InitPage> createState() => _InitPageState();
@@ -95,6 +98,9 @@ class _InitPageState extends State<InitPage> {
     } catch (e) {
       KazumiLogger().e('InitPage: magnetController.init() failed', error: e);
     }
+
+    // 局域网同步不阻塞启动：桌面端立即起服务，手机端在后台发现并同步。
+    unawaited(widget.lanSync.initialize());
 
     await _checkRunningOnX11();
     await _showShortcutDialog();
