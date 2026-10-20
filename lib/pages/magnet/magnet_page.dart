@@ -1350,10 +1350,10 @@ String _subscriptionSummary(MagnetSubscription sub) {
     }
     if (sub.minSizeMb != null) parts.add('≥${sub.minSizeMb}MB');
     if (sub.maxSizeMb != null) parts.add('≤${sub.maxSizeMb}MB');
-    if (sub.downloadPath != null) parts.add('目录:${sub.downloadPath}');
   } else {
     parts.add(sub.feedUrl);
   }
+  if (sub.downloadPath != null) parts.add('目录:${sub.downloadPath}');
   return parts.join('  ');
 }
 
@@ -3591,6 +3591,10 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
   List<AnimesGardenTeam> _teams = const [];
   bool _loadingTeams = false;
 
+  /// 保存请求进行中：用于按钮进度反馈并阻止重复提交（重复点击会创建
+  /// 多条相同订阅）。
+  bool _saving = false;
+
   @override
   void initState() {
     super.initState();
@@ -3610,8 +3614,20 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
       // 从搜索页带入的预设：填充关键词与字幕组，名称留空让用户填
       _feedCtrl.text = widget.presetFeedUrl ?? '';
       _fansub = widget.presetFansub;
+      // 新增订阅默认沿用上一次的下载路径，避免每次重复选择目录。
+      _pathCtrl.text = _lastUsedDownloadPath();
     }
     _loadTeams();
+  }
+
+  /// 上一次使用的下载目录：优先最近一个订阅配置的目录，
+  /// 其次设置中的默认磁力下载目录；都没有时留空（使用系统默认目录）。
+  String _lastUsedDownloadPath() {
+    for (final sub in widget.controller.subscriptions.reversed) {
+      final path = sub.downloadPath?.trim() ?? '';
+      if (path.isNotEmpty) return path;
+    }
+    return GStorage.getSetting(SettingsKeys.magnetDownloadDir).trim();
   }
 
   Future<void> _loadTeams() async {
@@ -3637,45 +3653,56 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
   }
 
   Future<void> _save() async {
+    // 同步置位，确保连续点击时后续调用直接返回（首次保存可能因
+    // 拉取 feed / 解析封面耗时数秒，期间按钮要保持不可重复提交）。
+    if (_saving) return;
     if (_feedCtrl.text.trim().isEmpty) {
       KazumiDialog.showToast(
         message: _kind == SubscriptionKind.mikan ? '请填写 RSS 地址' : '请填写搜索关键词',
       );
       return;
     }
-    double? parseMb(String s) {
-      final v = double.tryParse(s.trim());
-      return (s.trim().isEmpty || v == null) ? null : v;
-    }
+    setState(() => _saving = true);
+    try {
+      double? parseMb(String s) {
+        final v = double.tryParse(s.trim());
+        return (s.trim().isEmpty || v == null) ? null : v;
+      }
 
-    var sub = MagnetSubscription(
-      id: widget.existing?.id ?? '',
-      name: _nameCtrl.text.trim(),
-      feedUrl: _feedCtrl.text.trim(),
-      createdAt: widget.existing?.createdAt ?? DateTime.now(),
-      kind: _kind,
-      fansub: _fansub,
-      keywords: _keywordsCtrl.text.trim().isEmpty
-          ? null
-          : _keywordsCtrl.text.trim(),
-      since: _since,
-      minSizeMb: parseMb(_minSizeCtrl.text),
-      maxSizeMb: parseMb(_maxSizeCtrl.text),
-      downloadPath: _pathCtrl.text.trim().isEmpty
-          ? null
-          : _pathCtrl.text.trim(),
-      coverUrl: widget.existing?.coverUrl ?? '',
-    );
-    if (sub.coverUrl.isEmpty) {
-      final cover = await _resolveCover(sub);
-      if (cover != null) sub = sub.copyWith(coverUrl: cover);
+      var sub = MagnetSubscription(
+        id: widget.existing?.id ?? '',
+        name: _nameCtrl.text.trim(),
+        feedUrl: _feedCtrl.text.trim(),
+        createdAt: widget.existing?.createdAt ?? DateTime.now(),
+        kind: _kind,
+        fansub: _fansub,
+        keywords: _keywordsCtrl.text.trim().isEmpty
+            ? null
+            : _keywordsCtrl.text.trim(),
+        since: _since,
+        minSizeMb: parseMb(_minSizeCtrl.text),
+        maxSizeMb: parseMb(_maxSizeCtrl.text),
+        downloadPath: _pathCtrl.text.trim().isEmpty
+            ? null
+            : _pathCtrl.text.trim(),
+        coverUrl: widget.existing?.coverUrl ?? '',
+      );
+      if (sub.coverUrl.isEmpty) {
+        // 封面只是锦上添花，解析失败或超时都继续保存，避免卡住无反馈。
+        final cover = await _resolveCover(
+          sub,
+        ).timeout(const Duration(seconds: 8), onTimeout: () => null);
+        if (cover != null) sub = sub.copyWith(coverUrl: cover);
+      }
+      if (widget.existing == null) {
+        await widget.controller.addSubscription(sub);
+      } else {
+        await widget.controller.updateSubscription(sub);
+      }
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-    if (widget.existing == null) {
-      await widget.controller.addSubscription(sub);
-    } else {
-      await widget.controller.updateSubscription(sub);
-    }
-    if (mounted) Navigator.of(context).pop();
   }
 
   /// 通过 Bangumi 搜索解析订阅的番剧封面，失败时返回 null。
@@ -3844,30 +3871,30 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
                 ],
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.folder_rounded),
-              title: TextField(
-                controller: _pathCtrl,
-                decoration: const InputDecoration(
-                  labelText: '下载目录（可选，留空用默认）',
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              trailing: IconButton(
-                icon: const Icon(Icons.folder_open_rounded, size: 20),
-                tooltip: '选择目录',
-                onPressed: _pickDownloadDir,
+          ],
+          ListTile(
+            leading: const Icon(Icons.folder_rounded),
+            title: TextField(
+              controller: _pathCtrl,
+              decoration: const InputDecoration(
+                labelText: '自动下载目录（可选，留空用默认）',
+                isDense: true,
+                border: OutlineInputBorder(),
               ),
             ),
-          ],
+            trailing: IconButton(
+              icon: const Icon(Icons.folder_open_rounded, size: 20),
+              tooltip: '选择目录',
+              onPressed: _pickDownloadDir,
+            ),
+          ),
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _save,
+                onPressed: _saving ? null : _save,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   textStyle: const TextStyle(
@@ -3875,7 +3902,21 @@ class _AddSubscriptionPageState extends State<_AddSubscriptionPage> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                child: const Text('保存'),
+                child: _saving
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 10),
+                          Text('保存中…'),
+                        ],
+                      )
+                    : const Text('保存'),
               ),
             ),
           ),
