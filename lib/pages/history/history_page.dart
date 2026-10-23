@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -10,6 +12,7 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/history/history_list_view.dart';
 import 'package:kazumi/pages/history/history_record_tile.dart';
 import 'package:kazumi/pages/history/history_resume.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key, required this.controller});
@@ -29,6 +32,11 @@ class _HistoryPageState extends State<HistoryPage> {
   void initState() {
     super.initState();
     widget.controller.init();
+    // 打开历史页时顺带拉一次局域网同步：桌面端刚看过的进度不必等
+    // 3 分钟的定时同步；落库后由 controller 的变更订阅刷新列表。
+    if (inject<LanSyncService>().clientEnabled) {
+      unawaited(inject<LanSyncService>().syncNow(quiet: true));
+    }
   }
 
   Future<void> _deleteHistory(History history) async {

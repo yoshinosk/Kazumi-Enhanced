@@ -339,13 +339,18 @@ class LanProgressData {
   final int progressMs;
   final int updatedAtMs;
 
-  factory LanProgressData.fromProgress(Progress progress, DateTime fallback) =>
-      LanProgressData(
-        episode: progress.episode,
-        road: progress.road,
-        progressMs: progress.progress.inMilliseconds,
-        updatedAtMs: progress.effectiveUpdatedAtMs(fallback),
-      );
+  /// 分集进度快照。
+  ///
+  /// [Progress.updatedAtMs] 为 0 表示该进度写入时还没有分集时间戳（旧版本
+  /// 数据）。此处如实保留 0（未知），不能拿条目级的 [History.lastWatchTime]
+  /// 兜底：那会让几个月前的旧进度看起来像是「最后观看那集的时间」更新的，
+  /// 从而在合并时压掉对方设备刚看的新进度。
+  factory LanProgressData.fromProgress(Progress progress) => LanProgressData(
+    episode: progress.episode,
+    road: progress.road,
+    progressMs: progress.progress.inMilliseconds,
+    updatedAtMs: progress.updatedAtMs > 0 ? progress.updatedAtMs : 0,
+  );
 
   factory LanProgressData.fromJson(Map<String, dynamic> json) =>
       LanProgressData(
@@ -550,7 +555,7 @@ class LanHistoryEntry {
     episodePageUrl: history.episodePageUrl,
     progresses: [
       for (final progress in history.progresses.values)
-        LanProgressData.fromProgress(progress, history.lastWatchTime),
+        LanProgressData.fromProgress(progress),
     ],
   );
 

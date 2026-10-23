@@ -158,6 +158,36 @@ void main() {
       expect(restored.toHistory().key, original.key);
     });
 
+    test('legacy progress without timestamp loses to fresh remote progress', () {
+      final legacy = History(
+        bangumi,
+        1,
+        kLocalMediaAdapterName,
+        DateTime(2026, 10, 1),
+        '',
+        'EP1',
+        entryKind: HistoryEntryKind.offline,
+        episodePageUrl: r'E:\Anime\01.mkv',
+      )..progresses[1] = Progress(1, 0, 300000);
+
+      // 旧条目的分集进度没有 updatedAtMs：不能拿条目时间冒充分集时间。
+      final exported = LanHistoryEntry.fromHistory(legacy);
+      expect(exported.progresses.single.updatedAtMs, 0);
+
+      final remote = exported.copyWith(
+        progresses: [
+          const LanProgressData(
+            episode: 1,
+            road: 0,
+            progressMs: 1200000,
+            updatedAtMs: 1790000000000,
+          ),
+        ],
+      );
+      final merged = mergeLanHistory([exported], [remote]);
+      expect(merged.single.progresses.single.progressMs, 1200000);
+    });
+
     test('ignores non local-media history', () {
       final other = LanHistoryEntry(
         bangumiItem: bangumi,

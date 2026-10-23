@@ -47,6 +47,10 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
 
   static const Duration _syncInterval = Duration(minutes: 3);
 
+  /// 播放进度变化后追加推送的最小间隔：定时同步是 3 分钟一次，
+  /// 单靠它会让「手机上看完一集，电脑上进度没动」持续几分钟。
+  static const Duration _historyPushDelay = Duration(seconds: 20);
+
   final MediaController _mediaController;
   final CollectController _collectController;
   final LanHistoryStore _historyStore;
@@ -66,6 +70,9 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
   int _lastFileCount = 0;
 
   Timer? _timer;
+  Timer? _historyPushTimer;
+  StreamSubscription<void>? _historyChangesSubscription;
+  bool _historyPushDirty = false;
   bool _initialized = false;
   bool _syncing = false;
   bool _pairing = false;
@@ -152,6 +159,7 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
     if (isClientSupported) {
+      _watchHistoryChanges();
       if (clientEnabled) {
         _mediaController.restoreCachedLanLibrary();
         _startTimer();
@@ -234,6 +242,8 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
         KazumiLogger().i(
           'LanSync: server running at ${_serverAddresses.join(", ")}:'
           '${server.actualPort}',
+          // INFO 默认不落文件，关键状态用 forceLog 才能在日志里回溯。
+          forceLog: true,
         );
       }
     } catch (e, stackTrace) {
@@ -298,6 +308,9 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
       unawaited(_discoverAndSync());
     } else {
       _stopTimer();
+      _historyPushTimer?.cancel();
+      _historyPushTimer = null;
+      _historyPushDirty = false;
       _clientState = LanClientState.disabled;
       _connected = null;
       _clientError = '';
@@ -334,6 +347,36 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
   void _stopTimer() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  /// 播放进度落库后择机推给桌面端。
+  ///
+  /// 播放时历史每秒写一次，因此这里用「触发后固定间隔再推一次」的节流，
+  /// 而不是每次变更都重置的防抖——否则连续播放期间永远不会真正推送。
+  void _watchHistoryChanges() {
+    _historyChangesSubscription ??= _historyStore.changes.listen((_) {
+      _scheduleHistoryPush();
+    });
+  }
+
+  void _scheduleHistoryPush() {
+    if (!isClientSupported || !clientEnabled || !autoSync) return;
+    // 未连接时不做额外探测，交给 3 分钟的定时同步去重连。
+    if (!isClientConnected) return;
+    if (!GStorage.getSetting(SettingsKeys.lanSyncClientToken).isNotEmpty) {
+      return;
+    }
+    _historyPushDirty = true;
+    if (_historyPushTimer?.isActive ?? false) return;
+    _historyPushTimer = Timer(_historyPushDelay, () {
+      if (!_historyPushDirty) return;
+      _historyPushDirty = false;
+      if (_syncing) {
+        // 正在同步：留给下一次变更触发。
+        return;
+      }
+      unawaited(_discoverAndSync(quiet: true));
+    });
   }
 
   /// 立即同步（设置页按钮 / 媒体库刷新）。
@@ -541,7 +584,7 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
               : lanFilePath(server.serverId, entry.episodePageUrl),
         ),
     ];
-    await _historyStore.applyEntries(mappedHistory);
+    final writtenHistory = await _historyStore.applyEntries(mappedHistory);
     _mediaController.refreshLanResumePoints();
 
     if (collectEnabled) {
@@ -573,7 +616,10 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
     _clientError = '';
     KazumiLogger().i(
       'LanSync: synced $_lastFolderCount folders / $_lastFileCount files '
-      'from $server.name (${server.displayAddress})',
+      'from $server.name (${server.displayAddress}), '
+      '${payload.history.length} history entries, '
+      'wrote $writtenHistory',
+      forceLog: true,
     );
     notifyListeners();
   }
@@ -780,6 +826,10 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopTimer();
+    _historyPushTimer?.cancel();
+    _historyPushTimer = null;
+    unawaited(_historyChangesSubscription?.cancel());
+    _historyChangesSubscription = null;
     unawaited(_server?.stop());
     _server = null;
     super.dispose();

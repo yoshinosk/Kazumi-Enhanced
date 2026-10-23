@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -6,6 +8,7 @@ import 'package:kazumi/bean/dialog/dialog_task.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/history/history_resume.dart';
+import 'package:kazumi/services/lan/lan_sync_service.dart';
 
 /// 首页顶部的「继续观看」区域。
 ///
@@ -29,6 +32,12 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
   void initState() {
     super.initState();
     _historyController.init();
+    // 首页常驻，默认只在进入页面时读一次存储；打开时补一次局域网同步，
+    // 让桌面端刚看的进度尽快出现在「继续观看」里。
+    final lanSync = inject<LanSyncService>();
+    if (lanSync.clientEnabled) {
+      unawaited(lanSync.syncNow(quiet: true));
+    }
   }
 
   Future<void> _play(History history) async {

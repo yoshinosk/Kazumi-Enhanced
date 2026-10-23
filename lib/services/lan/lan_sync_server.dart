@@ -100,6 +100,7 @@ class LanSyncServer {
     KazumiLogger().i(
       'LanSyncServer: started on port $actualPort '
       '(discovery ${_udpSocket == null ? "off" : "on"})',
+      forceLog: true,
     );
   }
 
@@ -246,7 +247,10 @@ class LanSyncServer {
       return;
     }
     final deviceName = body?['deviceName']?.toString() ?? 'Kazumi';
-    KazumiLogger().i('LanSyncServer: paired with $deviceName ($remote)');
+    KazumiLogger().i(
+      'LanSyncServer: paired with $deviceName ($remote)',
+      forceLog: true,
+    );
     await _json(request, HttpStatus.ok, {
       'token': token,
       'server': info.toJson(),
@@ -282,6 +286,7 @@ class LanSyncServer {
       return;
     }
     final incoming = <LanHistoryEntry>[];
+    var droppedHistory = 0;
     final rawHistory = body['history'];
     if (rawHistory is List) {
       for (final raw in rawHistory) {
@@ -294,18 +299,35 @@ class LanSyncServer {
           // 任意本机路径到历史记录。
           if (entry.episodePageUrl.isNotEmpty &&
               !_isAllowedMediaPath(entry.episodePageUrl)) {
+            droppedHistory++;
             continue;
           }
           incoming.add(entry);
-        } catch (_) {}
+        } catch (_) {
+          droppedHistory++;
+        }
       }
+    }
+    if (droppedHistory > 0) {
+      // 静默丢弃会让「手机推了历史但电脑上没变化」无从排查。
+      KazumiLogger().w(
+        'LanSyncServer: dropped $droppedHistory history entries '
+        '(path outside media roots or invalid)',
+      );
     }
 
     final local = historyStore.exportLocalMediaHistory();
     final merged = mergeLanHistory(local, incoming);
+    var appliedHistory = 0;
     if (incoming.isNotEmpty) {
-      await historyStore.applyEntries(merged);
+      appliedHistory = await historyStore.applyEntries(merged);
     }
+    KazumiLogger().i(
+      'LanSyncServer: sync incoming=${incoming.length} '
+      'local=${local.length} merged=${merged.length} '
+      'applied=$appliedHistory',
+      forceLog: true,
+    );
 
     final collectEnabled = GStorage.getSetting(
       SettingsKeys.lanSyncCollectEnable,

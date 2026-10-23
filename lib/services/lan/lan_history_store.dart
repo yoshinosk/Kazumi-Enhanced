@@ -15,6 +15,9 @@ class LanHistoryStore {
 
   final IHistoryRepository _repository;
 
+  /// 历史盒子变更流（播放中每秒都会触发，订阅方需自行去抖）。
+  Stream<void> get changes => _repository.changes;
+
   /// 桌面端：导出全部本地媒体历史（真实路径）。
   List<LanHistoryEntry> exportLocalMediaHistory() {
     return [
@@ -53,9 +56,12 @@ class LanHistoryStore {
     if (incoming.isEmpty) return 0;
 
     var written = 0;
+    var failed = 0;
     await HistoryStorageCoordinator().run(() async {
-      try {
-        for (final entry in incoming) {
+      for (final entry in incoming) {
+        // 单条写失败不能中断整批：否则一条脏数据会让本次同步的所有
+        // 历史都丢弃，表现为「已连接但没有同步任何进度」。
+        try {
           final existing = GStorage.histories.get(entry.key);
           final merged = existing == null
               ? entry
@@ -66,16 +72,28 @@ class LanHistoryStore {
           }
           await GStorage.histories.put(entry.key, next);
           written++;
+        } catch (e, stackTrace) {
+          failed++;
+          KazumiLogger().w(
+            'LanSync: apply history entry failed (${entry.key})',
+            error: e,
+            stackTrace: stackTrace,
+          );
         }
+      }
+      try {
         await GStorage.histories.flush();
       } catch (e, stackTrace) {
         KazumiLogger().w(
-          'LanSync: apply history failed',
+          'LanSync: flush histories failed',
           error: e,
           stackTrace: stackTrace,
         );
       }
     });
+    if (failed > 0) {
+      KazumiLogger().w('LanSync: $failed history entries failed to apply');
+    }
     return written;
   }
 
