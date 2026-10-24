@@ -317,6 +317,7 @@ class LanSyncServer {
     }
 
     final local = historyStore.exportLocalMediaHistory();
+    _logHistoryKeyDiff(local, incoming);
     final merged = mergeLanHistory(local, incoming);
     var appliedHistory = 0;
     if (incoming.isNotEmpty) {
@@ -370,6 +371,30 @@ class LanSyncServer {
 
     final payload = buildPayload(history: merged, collectResult: collectResult);
     await _json(request, HttpStatus.ok, payload.toJson());
+  }
+
+  /// 记录两端历史 key 的差异。
+  ///
+  /// 汇总数（incoming/local/merged）相同时两端仍可能各自缺条目，只有列出
+  /// 差异的 key 才能判断「谁缺了谁」。无差异时不写日志，避免每次同步刷屏。
+  void _logHistoryKeyDiff(
+    List<LanHistoryEntry> local,
+    List<LanHistoryEntry> incoming,
+  ) {
+    final localKeys = {for (final entry in local) entry.key};
+    final incomingKeys = {for (final entry in incoming) entry.key};
+    final localOnly = localKeys.difference(incomingKeys).toList()..sort();
+    final remoteOnly = incomingKeys.difference(localKeys).toList()..sort();
+    if (localOnly.isEmpty && remoteOnly.isEmpty) return;
+    String brief(List<String> keys) => keys.length <= 12
+        ? keys.join(', ')
+        : '${keys.take(12).join(', ')} …(共 ${keys.length})';
+    KazumiLogger().i(
+      'LanSyncServer: history keys differ '
+      'localOnly=[${brief(localOnly)}] '
+      'remoteOnly=[${brief(remoteOnly)}]',
+      forceLog: true,
+    );
   }
 
   /// 构建当前媒体库快照。历史 / 收藏为可选覆盖（服务端合并后回传同一份）。

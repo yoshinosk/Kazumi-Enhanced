@@ -616,6 +616,9 @@ class LanHistoryEntry {
   );
 
   /// 合并两条同 key 条目：观看状态取较新一条，分集进度按更新时间逐集合并。
+  ///
+  /// 路径（[episodePageUrl]）不参与「谁更新」的判断：它标识文件归属，
+  /// 与观看时间无关。因此取非空的一方，避免空路径条目把有效路径抹掉。
   LanHistoryEntry merge(LanHistoryEntry other) {
     final base =
         lastWatchTime.isAfter(other.lastWatchTime) ||
@@ -634,7 +637,39 @@ class LanHistoryEntry {
     }
     final merged = byEpisode.values.toList()
       ..sort((a, b) => a.episode.compareTo(b.episode));
-    return base.copyWith(progresses: merged);
+    final path = base.episodePageUrl.isNotEmpty
+        ? base.episodePageUrl
+        : other.episodePageUrl;
+    return base.copyWith(
+      episodePageUrl: path,
+      progresses: merged,
+      // 分集进度与「最后观看集」不一致时（例如条目在旧版本写入时分集
+      // 进度丢失），按最新进度回填，历史页才能显示「看到 xx:xx」。
+      lastWatchEpisode: _consistentLastEpisode(base, merged),
+    );
+  }
+
+  static int _consistentLastEpisode(
+    LanHistoryEntry base,
+    List<LanProgressData> merged,
+  ) {
+    if (merged.isEmpty) return base.lastWatchEpisode;
+    for (final progress in merged) {
+      if (progress.episode == base.lastWatchEpisode) {
+        return base.lastWatchEpisode;
+      }
+    }
+    LanProgressData? newest;
+    for (final progress in merged) {
+      if (progress.updatedAtMs <= 0) continue;
+      if (newest == null ||
+          progress.updatedAtMs > newest.updatedAtMs ||
+          (progress.updatedAtMs == newest.updatedAtMs &&
+              progress.episode > newest.episode)) {
+        newest = progress;
+      }
+    }
+    return newest?.episode ?? base.lastWatchEpisode;
   }
 
   History toHistory() {

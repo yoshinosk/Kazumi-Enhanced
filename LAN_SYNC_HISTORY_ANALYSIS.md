@@ -52,3 +52,41 @@ LanSync: apply history entry failed (<key>)
 `incoming=0` → 手机端没有可上传的历史（检查手机历史条目的 `episodePageUrl` 是否 `kazumi-lan://` 开头）；
 `dropped>0` → 路径被媒体库根目录校验拦掉；
 `applied=0` 但 `merged` 有变化 → 合并后与本地一致，属于正常空转。
+
+## 五、2026-10-25 复核：抓到了具体丢失的条目
+
+### 取证方式（比截图可靠，可复用）
+
+1. 桌面端侧：`%APPDATA%/com.example/kazumi/hive/histories.hive` 直接正则解出全部 key，
+   得到桌面端 `local<id>::offline` 共 26 条。
+2. 手机端侧：release 包非 debuggable，Hive 读不到，日志也不在可读目录。于是临时用
+   Python 冒充桌面端（占用 `45870`，实现 `/api/v1/info`、`/api/v1/ping`、`/api/v1/sync`），
+   手机端启动后按已存地址直连上来，**完整抓到 25 条、1.08MB 的上传请求体**
+   （注意 Dart `HttpClient` 用 `Transfer-Encoding: chunked`，`Content-Length` 为 0，
+   解析必须按 chunk 解块）。抓完把桌面端真实快照原样回给手机，避免污染数据。
+
+### 结论
+
+| 方向 | 事实 | 原因 |
+| --- | --- | --- |
+| 手机 → 电脑 | 手机 26 条本地媒体历史只上传了 25 条；某本地媒体库条目（`local486347::offline`）从未上传 | 该条目在手机上的 `episodePageUrl` 不是 `kazumi-lan://<当前serverId>/f/...`，而 `exportForServer` 用路径判定归属，直接 `continue` |
+| 电脑 → 手机 | 桌面端 26 条都在手机上存在，但这一条在手机上停在旧进度且没有「看到 xx:xx」 | 合并按 `lastWatchTime` 取整条记录，手机这条更新 → 保留手机的失效路径；失效路径又让它无法上传，形成自我固化的死循环 |
+
+即：**路径既当身份又当数据**。路径一旦失效（换过配对 / serverId 变化 / 旧版本写入真实路径 / 被本机文件覆盖），该条目就永久退出同步，而且合并会把这个状态锁死。
+
+### 已修复
+
+1. `LanHistoryEntry.merge`：路径不参与「谁更新」判断，取非空的一方；`lastWatchEpisode`
+   与其分集进度不一致时按最新进度回填（恢复「看到」显示）。
+2. `LanHistoryStore.applyEntries`：客户端收到远端条目时，若本地同 key 条目的路径已失效
+   （空 / 属于其它桌面端 / 指向本机不存在的文件），**以远端伪路径为准**并计数日志。
+   本机真实存在的文件不会被改写。→ 失联条目下次同步自愈，随后正常上传。
+3. 日志：服务端新增 `LanSyncServer: history keys differ localOnly=[...] remoteOnly=[...]`
+   （仅在有差异时写）；客户端新增 `LanSync: exported M/N local history (skipped ...)`
+   （跳过集合变化时才写）。这两行本来就能一眼定位问题。
+
+### 仍然存在（未处理）
+
+- 历史删除依旧没有墓碑：一端删除，另一端会推回来。
+- 插件下载缓存（`AGE` / `MXdm` 等 adapter）与在线历史不参与局域网同步，属当前设计范围
+  （设置页写明只同步「本地播放进度」）；若需全量镜像需另行设计。

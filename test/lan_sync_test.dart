@@ -143,6 +143,56 @@ void main() {
       );
     });
 
+    test('merge keeps the non-empty episode path', () {
+      final withoutPath = LanHistoryEntry(
+        bangumiItem: bangumi,
+        lastWatchEpisode: 2,
+        lastWatchTime: DateTime(2026, 1, 2),
+        lastSrc: '',
+        lastWatchEpisodeName: 'EP2',
+        adapterName: kLocalMediaAdapterName,
+        entryKind: HistoryEntryKind.offline,
+        episodePageUrl: '',
+        progresses: const [],
+      );
+      final local = entry(
+        watchTime: DateTime(2026, 1, 1),
+        episode: 2,
+        progressMs: 500,
+        updatedAtMs: 1000,
+      );
+
+      // 时间更新的条目没有路径时，不能用空路径覆盖已有路径。
+      final merged = withoutPath.merge(local);
+      expect(merged.episodePageUrl, local.episodePageUrl);
+      expect(merged.lastWatchTime, DateTime(2026, 1, 2));
+    });
+
+    test('merge aligns last watched episode with per-episode progress', () {
+      final broken = LanHistoryEntry(
+        bangumiItem: bangumi,
+        lastWatchEpisode: 38,
+        lastWatchTime: DateTime(2026, 10, 4),
+        lastSrc: '',
+        lastWatchEpisodeName: 'EP38',
+        adapterName: kLocalMediaAdapterName,
+        entryKind: HistoryEntryKind.offline,
+        episodePageUrl: r'E:\Anime\38.mkv',
+        progresses: const [],
+      );
+      final remote = entry(
+        watchTime: DateTime(2026, 9, 2),
+        episode: 37,
+        progressMs: 900,
+        updatedAtMs: 2000,
+      );
+
+      // 最后观看集没有对应进度时按最新进度回填，历史页才会显示「看到」。
+      final merged = broken.merge(remote);
+      expect(merged.lastWatchEpisode, 37);
+      expect(merged.progresses, hasLength(1));
+    });
+
     test('serializes and restores history entry', () {
       final original = entry(
         watchTime: DateTime(2026, 1, 2, 3, 4, 5),
