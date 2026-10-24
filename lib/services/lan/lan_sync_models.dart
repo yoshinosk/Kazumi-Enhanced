@@ -9,6 +9,23 @@ import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
+/// 该历史条目是否参与局域网同步。
+///
+/// - 本地媒体库（`adapter == local`）：两端共享同一份媒体库，路径按局域网
+///   伪路径映射，进度与续播点都可直接迁移；
+/// - 在线观看（`entryKind == online`）：`lastSrc` 是插件源地址、
+///   `episodePageUrl` 是插件分集地址，与设备无关，对端装了同名插件即可继续看；
+/// - 磁力边下边播（`adapter == magnet-stream`）与插件下载缓存
+///   （`entryKind == offline` 且非本地媒体库）绑定单端文件，不同步。
+bool isLanSyncableHistory({
+  required String adapterName,
+  required String entryKind,
+}) {
+  if (adapterName == kLocalMediaAdapterName) return true;
+  if (adapterName == kMagnetStreamAdapterName) return false;
+  return HistoryEntryKind.normalize(entryKind) == HistoryEntryKind.online;
+}
+
 /// 协议版本。桌面端与手机端版本不一致时拒绝同步，避免半兼容状态。
 const int kLanSyncProtocolVersion = 1;
 
@@ -702,7 +719,12 @@ List<LanHistoryEntry> mergeLanHistory(
 ) {
   final byKey = <String, LanHistoryEntry>{};
   for (final entry in [...first, ...second]) {
-    if (entry.adapterName != kLocalMediaAdapterName) continue;
+    if (!isLanSyncableHistory(
+      adapterName: entry.adapterName,
+      entryKind: entry.entryKind,
+    )) {
+      continue;
+    }
     final existing = byKey[entry.key];
     byKey[entry.key] = existing == null ? entry : existing.merge(entry);
   }

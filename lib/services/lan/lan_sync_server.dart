@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/services/lan/lan_collect_store.dart';
 import 'package:kazumi/services/lan/lan_history_store.dart';
@@ -296,8 +297,10 @@ class LanSyncServer {
             Map<String, dynamic>.from(raw),
           );
           // 只接受媒体库根目录内的路径，避免已配对设备写入手工构造的
-          // 任意本机路径到历史记录。
-          if (entry.episodePageUrl.isNotEmpty &&
+          // 任意本机路径到历史记录。在线观看条目的路径是插件分集地址，
+          // 不是本机文件，不参与该校验。
+          if (entry.adapterName == kLocalMediaAdapterName &&
+              entry.episodePageUrl.isNotEmpty &&
               !_isAllowedMediaPath(entry.episodePageUrl)) {
             droppedHistory++;
             continue;
@@ -316,7 +319,7 @@ class LanSyncServer {
       );
     }
 
-    final local = historyStore.exportLocalMediaHistory();
+    final local = historyStore.exportHistoryForPeer();
     _logHistoryKeyDiff(local, incoming);
     final merged = mergeLanHistory(local, incoming);
     var appliedHistory = 0;
@@ -420,7 +423,7 @@ class LanSyncServer {
         for (final entry in mediaController.fileScrapeResults.entries)
           if (!isLanMediaPath(entry.key)) entry.key: entry.value,
       },
-      history: history ?? historyStore.exportLocalMediaHistory(),
+      history: history ?? historyStore.exportHistoryForPeer(),
       collectibles: collectResult?.collectibles ?? const [],
       collectTombstones: collectResult?.tombstones ?? const [],
       generatedAtMs: DateTime.now().millisecondsSinceEpoch,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/repositories/history_repository.dart';
@@ -578,11 +579,16 @@ class LanSyncService extends ChangeNotifier with WidgetsBindingObserver {
 
     final mappedHistory = [
       for (final entry in payload.history)
-        entry.copyWith(
-          episodePageUrl: entry.episodePageUrl.isEmpty
-              ? entry.episodePageUrl
-              : lanFilePath(server.serverId, entry.episodePageUrl),
-        ),
+        // 只有本地媒体库条目的路径是桌面端文件路径；在线观看条目的路径
+        // 是插件分集地址，改成局域网伪路径会直接毁掉条目。
+        if (entry.adapterName == kLocalMediaAdapterName)
+          entry.copyWith(
+            episodePageUrl: entry.episodePageUrl.isEmpty
+                ? entry.episodePageUrl
+                : lanFilePath(server.serverId, entry.episodePageUrl),
+          )
+        else
+          entry,
     ];
     final writtenHistory = await _historyStore.applyEntries(mappedHistory);
     _mediaController.refreshLanResumePoints();

@@ -196,9 +196,11 @@ class _LanSyncPageState extends State<LanSyncPage> {
               title: service.isServerSupported ? '把媒体库共享到手机' : '连上桌面端接着看',
               description: service.isServerSupported
                   ? '同一 Wi-Fi 下，手机端会自动发现这台电脑。'
-                        '媒体库、收藏状态与本地播放进度双向同步，视频以局域网串流播放。'
+                        '媒体库、在线观看历史、收藏状态与本地播放进度双向同步，'
+                        '视频以局域网串流播放。'
                   : '打开应用后自动发现同一 Wi-Fi 下的桌面端，'
-                        '同步媒体库、收藏状态与播放进度，并直接串流播放桌面端视频。',
+                        '同步媒体库、在线观看历史、收藏状态与播放进度，'
+                        '并直接串流播放桌面端视频。',
             ),
             if (service.isServerSupported) ..._serverSection(service),
             if (service.isClientSupported) ..._clientSection(service),

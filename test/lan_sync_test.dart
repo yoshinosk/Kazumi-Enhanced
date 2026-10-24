@@ -238,19 +238,56 @@ void main() {
       expect(merged.single.progresses.single.progressMs, 1200000);
     });
 
-    test('ignores non local-media history', () {
-      final other = LanHistoryEntry(
-        bangumiItem: bangumi,
-        lastWatchEpisode: 1,
-        lastWatchTime: DateTime(2026, 1, 1),
-        lastSrc: '',
-        lastWatchEpisodeName: '',
-        adapterName: 'plugin',
-        entryKind: HistoryEntryKind.online,
-        episodePageUrl: '',
-        progresses: const [],
+    test('syncs online history but skips device-bound entries', () {
+      LanHistoryEntry withAdapter(String adapter, String kind) =>
+          LanHistoryEntry(
+            bangumiItem: bangumi,
+            lastWatchEpisode: 1,
+            lastWatchTime: DateTime(2026, 1, 1),
+            lastSrc: 'https://example.com/bangumi/42',
+            lastWatchEpisodeName: 'EP1',
+            adapterName: adapter,
+            entryKind: kind,
+            episodePageUrl: 'https://example.com/ep/1',
+            progresses: const [],
+          );
+
+      // 在线观看：插件源地址与设备无关，两端都能继续看。
+      final online = withAdapter('AGE', HistoryEntryKind.online);
+      expect(
+        isLanSyncableHistory(adapterName: 'AGE', entryKind: 'online'),
+        isTrue,
       );
-      expect(mergeLanHistory([other], const []), isEmpty);
+      expect(mergeLanHistory([online], const []), hasLength(1));
+
+      // 磁力边下边播：流地址随引擎生命周期存活，换设备无意义。
+      expect(
+        isLanSyncableHistory(
+          adapterName: kMagnetStreamAdapterName,
+          entryKind: HistoryEntryKind.offline,
+        ),
+        isFalse,
+      );
+      expect(
+        mergeLanHistory(
+          [withAdapter(kMagnetStreamAdapterName, HistoryEntryKind.offline)],
+          const [],
+        ),
+        isEmpty,
+      );
+
+      // 插件下载缓存：绑定单端文件路径。
+      expect(
+        isLanSyncableHistory(adapterName: 'AGE', entryKind: 'offline'),
+        isFalse,
+      );
+      expect(
+        mergeLanHistory(
+          [withAdapter('AGE', HistoryEntryKind.offline)],
+          const [],
+        ),
+        isEmpty,
+      );
     });
   });
 

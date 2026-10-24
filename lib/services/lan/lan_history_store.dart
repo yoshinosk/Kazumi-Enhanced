@@ -23,25 +23,43 @@ class LanHistoryStore {
   /// 历史盒子变更流（播放中每秒都会触发，订阅方需自行去抖）。
   Stream<void> get changes => _repository.changes;
 
-  /// 桌面端：导出全部本地媒体历史（真实路径）。
-  List<LanHistoryEntry> exportLocalMediaHistory() {
+  /// 桌面端：导出全部可同步历史（本地媒体库 + 在线观看）。
+  ///
+  /// 在线条目的路径是插件分集地址、与设备无关，原样带给手机端；本地媒体库
+  /// 条目带真实路径，手机端会映射成局域网伪路径。
+  List<LanHistoryEntry> exportHistoryForPeer() {
     return [
       for (final history in _repository.getAllHistories())
-        if (isLocalMediaHistory(history)) LanHistoryEntry.fromHistory(history),
+        if (isLanSyncableHistory(
+          adapterName: history.adapterName,
+          entryKind: history.entryKind,
+        ))
+          LanHistoryEntry.fromHistory(history),
     ];
   }
 
-  /// 手机端：只导出属于当前桌面端的远程播放历史，并把伪路径还原为
+  /// 手机端：导出属于当前桌面端的远程播放历史，并把伪路径还原为
   /// 桌面端真实路径后再上传。
   ///
-  /// 被跳过的条目会写入日志：条目路径不属于该桌面端时它无法上传，
-  /// 是「电脑端看不到手机端进度」的直接原因，必须可排查。
+  /// 在线观看条目直接原样上传（插件分集地址与设备无关）；本地媒体库条目
+  /// 按路径归属过滤，被跳过的条目会写入日志——条目路径不属于该桌面端时
+  /// 它无法上传，是「电脑端看不到手机端进度」的直接原因，必须可排查。
   List<LanHistoryEntry> exportForServer(String serverId) {
     final result = <LanHistoryEntry>[];
     final skipped = <String>[];
     var candidates = 0;
     for (final history in _repository.getAllHistories()) {
-      if (!isLocalMediaHistory(history)) continue;
+      if (!isLanSyncableHistory(
+        adapterName: history.adapterName,
+        entryKind: history.entryKind,
+      )) {
+        continue;
+      }
+      if (history.adapterName != kLocalMediaAdapterName) {
+        // 在线观看：路径是插件分集地址，两端通用。
+        result.add(LanHistoryEntry.fromHistory(history));
+        continue;
+      }
       candidates++;
       final path = history.episodePageUrl;
       if (path.isEmpty) {
@@ -82,11 +100,15 @@ class LanHistoryStore {
   }
 
   /// 把远端条目写回本地：同 key 条目逐集合并，不删除本机其他历史
-  /// （手机本地视频、其他桌面端的历史保持不变）。
+  /// （手机本地视频、下载缓存、其他桌面端的历史保持不变）。
   Future<int> applyEntries(Iterable<LanHistoryEntry> entries) async {
     final incoming = [
       for (final entry in entries)
-        if (entry.adapterName == kLocalMediaAdapterName) entry,
+        if (isLanSyncableHistory(
+          adapterName: entry.adapterName,
+          entryKind: entry.entryKind,
+        ))
+          entry,
     ];
     if (incoming.isEmpty) return 0;
 
