@@ -6,6 +6,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
 import 'package:kazumi/bean/settings/background_provider.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:kazumi/services/deep_links/app_deep_links.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/download/download_directory_service.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
@@ -27,6 +28,7 @@ import 'package:kazumi/utils/danmaku_time_offset_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppDeepLinks().start();
   registerEchHttpLicenses();
   MediaKit.ensureInitialized();
   if (Platform.isAndroid || Platform.isIOS) {

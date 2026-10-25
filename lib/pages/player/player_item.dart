@@ -767,12 +767,8 @@ class _PlayerItemState extends State<PlayerItem>
     _progressBarDragHold = acquirePlayerPanelHold();
   }
 
-  Future<void> handleProgressBarSeek(Duration duration) async {
-    if (!playerController.seeking.updateInteractiveSeek(duration)) {
-      await playerController.seek(duration);
-      return;
-    }
-    await _finishInteractiveSeek();
+  void handleProgressBarDragEnd(bool cancelled) {
+    unawaited(_finishInteractiveSeek(cancelled: cancelled));
   }
 
   void _beginInteractiveSeek() {
@@ -1355,10 +1351,7 @@ class _PlayerItemState extends State<PlayerItem>
           );
         }
       }
-      if (!Platform.isWindows &&
-          !Platform.isMacOS &&
-          !Platform.isLinux &&
-          !playerController.panel.brightnessSeeking) {
+      if (!isDesktop() && !playerController.panel.brightnessSeeking) {
         ScreenBrightnessPlatform.instance.application.then((value) {
           if (!mounted) return;
           playerController.panel.brightness = value;
@@ -1833,7 +1826,7 @@ class _PlayerItemState extends State<PlayerItem>
                                 enterAndroidPictureInPicture,
                             handleProgressBarDragStart:
                                 handleProgressBarDragStart,
-                            handleProgressBarSeek: handleProgressBarSeek,
+                            handleProgressBarDragEnd: handleProgressBarDragEnd,
                             handleSuperResolutionChange:
                                 handleSuperResolutionChange,
                             onNextEpisode: () => handlePreNextEpisode('next'),

@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
@@ -16,6 +16,7 @@ import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/pages/player/player_panel_hold.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
@@ -25,12 +26,12 @@ import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:kazumi/pages/player/danmaku_offset_menu.dart';
 import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
 import 'package:kazumi/utils/constants.dart';
-import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
+import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/player/timed_shutdown_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/format.dart';
 import 'package:kazumi/pages/player/player_transport_bar.dart';
 import 'package:kazumi/pages/player/player_screenshot_controls.dart';
+import 'package:kazumi/pages/player/player_progress_bar.dart';
 
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
@@ -48,7 +49,7 @@ class PlayerItemPanel extends StatefulWidget {
     required this.onNextEpisode,
     required this.onPrevEpisode,
     required this.handleProgressBarDragStart,
-    required this.handleProgressBarSeek,
+    required this.handleProgressBarDragEnd,
     required this.handleSuperResolutionChange,
     required this.panelVisibilityController,
     this.onToggleSidePanel,
@@ -75,7 +76,7 @@ class PlayerItemPanel extends StatefulWidget {
   final VoidCallback handleScreenShot;
   final VoidCallback showScreenshotCandidates;
   final VoidCallback handleProgressBarDragStart;
-  final Future<void> Function(Duration duration) handleProgressBarSeek;
+  final void Function(bool cancelled) handleProgressBarDragEnd;
   final Future<void> Function(SuperResolutionMode mode)
   handleSuperResolutionChange;
   final AnimationController panelVisibilityController;
@@ -104,6 +105,14 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   late final PlayerController playerController;
   final TextEditingController textController = TextEditingController();
   final FocusNode textFieldFocus = FocusNode();
+  int? _danmakuPauseTick;
+
+  /// Whether this editor currently owns a pause. The sleep timer bumps
+  /// [TimedShutdownService.expiryTicks] when it actually expires, which revokes
+  /// the ownership even if the panel was rebuilt in between.
+  bool get _pausedByDanmakuEdit =>
+      _danmakuPauseTick == TimedShutdownService().expiryTicks.value;
+  bool _holdResumeForDestinationSheet = false;
 
   String? _cachedDanmakuColorHex;
   late Widget _cachedDanmakuOnIcon;
@@ -140,13 +149,6 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     });
   }
 
-  bool get _desktop => switch (defaultTargetPlatform) {
-    TargetPlatform.windows ||
-    TargetPlatform.linux ||
-    TargetPlatform.macOS => true,
-    _ => false,
-  };
-
   static const double _danmakuIconSize = 24.0;
   static const double _loadingIndicatorStrokeWidth = 2.0;
 
@@ -158,13 +160,14 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     // 全量回收由 _releasePlayerPanelHolds 负责（全屏切换等场景），
     // 这里静默释放，避免 dispose 回调里再起新的隐藏计时。
     _volumeOverlayHold?.releaseSilently();
+    textFieldFocus.removeListener(_onDanmakuEditFocusChanged);
     textController.dispose();
     textFieldFocus.dispose();
     super.dispose();
   }
 
   void _showVolumeOverlay() {
-    if (!_desktop) return;
+    if (!isDesktop()) return;
     // 重入（例如从浮层移回按钮）时也要取消待执行的延迟隐藏，
     // 否则浮层会在鼠标仍位于按钮上时被定时器关闭。
     _cancelVolumeOverlayHide();
@@ -255,15 +258,23 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   }
 
   Future<void> _submitDanmakuText(String message) async {
+    _holdResumeForDestinationSheet = true;
     textFieldFocus.unfocus();
 
     if (message.trim().isEmpty) {
       KazumiDialog.showToast(message: '弹幕内容为空');
+      _holdResumeForDestinationSheet = false;
+      _onDanmakuEditFocusChanged();
       return;
     }
 
     final destination = await showDanmakuDestinationSheet(context);
-    if (!mounted || destination == null) {
+    _holdResumeForDestinationSheet = false;
+    if (!mounted) {
+      return;
+    }
+    _onDanmakuEditFocusChanged();
+    if (destination == null) {
       return;
     }
 
@@ -304,22 +315,60 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     textController.clear();
   }
 
+  // A SyncPlay room is left alone: a local pause there is either broadcast to
+  // everyone or undone by the next server state message.
+  void _onDanmakuEditFocusChanged() {
+    if (playerController.syncplay.hasSession) return;
+    if (textFieldFocus.hasFocus) {
+      if (GStorage.getSetting<bool>(SettingsKeys.pauseOnDanmakuEdit) &&
+          playerController.playback.playing) {
+        _danmakuPauseTick = TimedShutdownService().expiryTicks.value;
+        unawaited(playerController.pause(enableSync: false));
+      }
+    } else if (_canResumeAfterDanmakuEdit) {
+      _danmakuPauseTick = null;
+      unawaited(playerController.play(enableSync: false));
+    }
+  }
+
+  /// Only undoes a pause this editor created, and only when nothing else owns
+  /// playback: no destination sheet, no app in the background (desktop window
+  /// switches report inactive), and no dialog on top.
+  bool get _canResumeAfterDanmakuEdit =>
+      _pausedByDanmakuEdit &&
+      !_holdResumeForDestinationSheet &&
+      (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+          AppLifecycleState.resumed &&
+      (ModalRoute.of(context)?.isCurrent ?? false);
+
+
+  // Keeps the tap that dismisses the composer away from the video and the play
+  // button. The region must stay in the text field's group, or the paste/copy/
+  // select-all toolbar stops responding.
+  Widget _danmakuEditBarrier(Widget child) {
+    return ListenableBuilder(
+      listenable: textFieldFocus,
+      builder: (context, _) => TextFieldTapRegion(
+        consumeOutsideTaps: textFieldFocus.hasFocus && _pausedByDanmakuEdit,
+        child: child,
+      ),
+    );
+  }
+
   Widget get _danmakuTextField {
     return Observer(
       builder: (context) {
         return PlayerPanelHoldFocusRegion(
           acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
           child: Container(
-            constraints: _desktop
+            constraints: isDesktop()
                 ? const BoxConstraints(maxWidth: 500, maxHeight: 33)
                 : const BoxConstraints(maxHeight: 33),
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: TextField(
               focusNode: textFieldFocus,
               style: TextStyle(
-                fontSize: _desktop ? 15 : 13,
-                color: Colors.white,
-              ),
+                  fontSize: isDesktop() ? 15 : 13, color: Colors.white),
               controller: textController,
               textAlignVertical: TextAlignVertical.center,
               decoration: InputDecoration(
@@ -331,19 +380,14 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     ? '发个友善的弹幕见证当下'
                     : '已关闭弹幕',
                 hintStyle: TextStyle(
-                  fontSize: _desktop ? 15 : 13,
-                  color: Colors.white60,
-                ),
+                    fontSize: isDesktop() ? 15 : 13, color: Colors.white60),
                 alignLabelWithHint: true,
                 contentPadding: EdgeInsets.symmetric(
-                  vertical: 8,
-                  horizontal: _desktop ? 8 : 12,
-                ),
+                    vertical: 8, horizontal: isDesktop() ? 8 : 12),
                 border: OutlineInputBorder(
                   borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(_desktop ? 8 : 20),
-                  ),
+                  borderRadius:
+                      BorderRadius.all(Radius.circular(isDesktop() ? 8 : 20)),
                 ),
                 suffixIconConstraints: const BoxConstraints(minWidth: 0),
                 suffixIcon: Row(
@@ -361,9 +405,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                             ? Theme.of(context).colorScheme.primaryContainer
                             : Theme.of(context).disabledColor,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            _desktop ? 8 : 20,
-                          ),
+                          borderRadius:
+                              BorderRadius.circular(isDesktop() ? 8 : 20),
                         ),
                       ),
                       child: const Text('发送'),
@@ -430,6 +473,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   void initState() {
     super.initState();
     playerController = widget.playerController;
+    textFieldFocus.addListener(_onDanmakuEditFocusChanged);
     // 底栏自动隐藏时同步移除音量滑块浮层，避免 LayerLink 目标随底栏
     // 滑出后浮层残留成“孤立滑块”。
     _volumeOverlayVisibilityReaction = reaction(
@@ -441,18 +485,20 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         }
       },
     );
-    final visibility = widget.panelVisibilityController.drive(
-      CurveTween(curve: Curves.easeInOut),
-    );
-    _topOffsetAnimation = visibility.drive(
-      Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero),
-    );
-    _bottomOffsetAnimation = visibility.drive(
-      Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero),
-    );
-    _rightOffsetAnimation = visibility.drive(
-      Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero),
-    );
+    final visibility = widget.panelVisibilityController
+        .drive(CurveTween(curve: Curves.easeInOut));
+    _topOffsetAnimation = visibility.drive(Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ));
+    _bottomOffsetAnimation = visibility.drive(Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ));
+    _rightOffsetAnimation = visibility.drive(Tween<Offset>(
+      begin: const Offset(1, 0),
+      end: Offset.zero,
+    ));
     _cachedDanmakuOffIcon = RepaintBoundary(
       child: SvgPicture.asset(
         'assets/images/danmaku_off.svg',
@@ -629,13 +675,13 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 value: showVolume
                     ? playerController.playback.volume
                     : playerController.panel.brightness,
-                maxValue: showVolume && _desktop ? 200 : 100,
+                maxValue: showVolume && isDesktop() ? 200 : 100,
                 disableAnimations: widget.disableAnimations,
               );
             },
           ),
         ),
-        if (!_desktop)
+        if (!isDesktop())
           Positioned(
             right: 0,
             top: 0,
@@ -895,23 +941,24 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   );
 
   Widget get _desktopDanmakuControls => LayoutBuilder(
-    builder: (context, constraints) => Center(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildDanmakuToggleButton(context),
-          // 弹幕时间轴快速调整菜单（fork：分集级偏移作用域入口）。
-          DanmakuOffsetMenu(
-            danmakuController: playerController.danmaku,
-            onChanged:
-                playerController.danmaku.clearAndInvalidateScheduledDanmakus,
+        builder: (context, constraints) => Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildDanmakuToggleButton(context),
+              // 弹幕时间轴快速调整菜单（fork：分集级偏移作用域入口）。
+              DanmakuOffsetMenu(
+                danmakuController: playerController.danmaku,
+                onChanged:
+                    playerController.danmaku.clearAndInvalidateScheduledDanmakus,
+              ),
+              _danmakuSettingsButton,
+              if (constraints.maxWidth > 600)
+                _danmakuEditBarrier(_danmakuTextField),
+            ],
           ),
-          _danmakuSettingsButton,
-          if (constraints.maxWidth > 600) _danmakuTextField,
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 
   Widget get _syncPlayMenuItem => MenuItemButton(
     onPressed: widget.showSyncPlayPanel,
@@ -1135,8 +1182,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   Widget get _wideControls => Row(
     children: [
-      if (_desktop) Expanded(child: _desktopDanmakuControls),
-      if (!_desktop) ...[
+      if (isDesktop()) Expanded(child: _desktopDanmakuControls),
+      if (!isDesktop()) ...[
         IconButton(
           color: Colors.white,
           icon: playerController.danmaku.danmakuOn
@@ -1147,7 +1194,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         ),
         if (playerController.danmaku.danmakuOn) ...[
           _danmakuSettingsButton,
-          Expanded(child: _danmakuTextField),
+          Expanded(child: _danmakuEditBarrier(_danmakuTextField)),
         ] else
           const Spacer(),
       ],
@@ -1192,7 +1239,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         tooltip: muted ? '取消静音' : '静音',
         onPressed: () => playerController.toggleMute(),
       );
-      if (!_desktop) {
+      if (!isDesktop()) {
         return button;
       }
       return CompositedTransformTarget(
@@ -1222,7 +1269,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         compact: compact,
         timePlacement: PlayerTimeLabelPlacement.forViewport(
           MediaQuery.sizeOf(context),
-          desktop: _desktop,
+          desktop: isDesktop(),
         ),
         playPause: IconButton(
           tooltip: playerController.playback.playing ? '暂停' : '播放',
@@ -1245,40 +1292,25 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           onPressed: widget.onNextEpisode,
         ),
         // Playback ticks only rebuild the progress bar and its time labels.
-        progressBuilder: (location) => Observer(
-          builder: (context) {
-            final bar = ProgressBar(
-              thumbRadius: 8,
-              thumbGlowRadius: 18,
-              timeLabelLocation: location,
-              timeLabelTextStyle: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-              progress: playerController.playback.currentPosition,
-              buffered: playerController.playback.buffer,
-              total: playerController.playback.duration,
-              onSeek: widget.handleProgressBarSeek,
-              onDragStart: (_) => widget.handleProgressBarDragStart(),
-              onDragUpdate: (details) => playerController.seeking
-                  .updateInteractiveSeek(details.timeStamp),
-            );
-            if (!_desktop) {
-              return bar;
-            }
-            return _ProgressHoverPreview(
-              total: playerController.playback.duration,
-              child: bar,
-            );
-          },
+        progressBuilder: ({required sideLabels}) => Observer(
+          builder: (context) => PlayerProgressBar(
+            sideLabels: sideLabels,
+            progress: playerController.playback.currentPosition,
+            buffered: playerController.playback.buffer,
+            total: playerController.playback.duration,
+            onDragStart: widget.handleProgressBarDragStart,
+            onDragUpdate: (position) => playerController.seeking
+                .updateInteractiveSeek(position),
+            onDragEnd: widget.handleProgressBarDragEnd,
+            onSeek: playerController.seek,
+          ),
         ),
         timeLabel: Observer(
           builder: (context) => Text(
             '${compact ? '    ' : ''}${durationToString(playerController.playback.currentPosition)} / ${durationToString(playerController.playback.duration)}',
             style: TextStyle(
               color: Colors.white,
-              fontSize: !compact && _desktop ? 16 : 12,
+              fontSize: !compact && isDesktop() ? 16 : 12,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
@@ -1293,7 +1325,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     if (videoPageController.isPip) {
       return compact ? const Text('    ') : const SizedBox.shrink();
     }
-    if (!_desktop && widget.fillsWindow && !videoPageController.isFullscreen) {
+    if (!isDesktop() &&
+        widget.fillsWindow &&
+        !videoPageController.isFullscreen) {
       return const SizedBox.shrink();
     }
     return IconButton(
@@ -1348,18 +1382,18 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 ),
               ),
               _forwardButton(),
-              if (_desktop)
+              if (isDesktop())
                 PlayerScreenshotControls(
                   controller: playerController.screenshots,
                   onCapture: widget.handleScreenShot,
                   onReview: widget.showScreenshotCandidates,
                 ),
-              if ((_desktop &&
+              if ((isDesktop() &&
                       (compact || !videoPageController.isFullscreen)) ||
-                  (defaultTargetPlatform == TargetPlatform.android))
+                  Platform.isAndroid)
                 IconButton(
                   onPressed: () async {
-                    if (_desktop) {
+                    if (isDesktop()) {
                       if (videoPageController.isPip) {
                         await PipUtils.exitDesktopPIPWindow();
                       } else {
@@ -1645,74 +1679,3 @@ class _VolumeSliderCard extends StatelessWidget {
   }
 }
 
-/// 桌面端进度条悬停时间预览：在光标上方显示对应时间点的气泡。
-class _ProgressHoverPreview extends StatefulWidget {
-  const _ProgressHoverPreview({required this.total, required this.child});
-
-  final Duration total;
-  final Widget child;
-
-  @override
-  State<_ProgressHoverPreview> createState() => _ProgressHoverPreviewState();
-}
-
-class _ProgressHoverPreviewState extends State<_ProgressHoverPreview> {
-  static const double _bubbleWidth = 56;
-
-  double? _hoverX;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        Duration? preview;
-        double? bubbleLeft;
-        if (_hoverX != null && width > 0 && widget.total > Duration.zero) {
-          final ratio = (_hoverX! / width).clamp(0.0, 1.0);
-          preview = Duration(
-            milliseconds: (widget.total.inMilliseconds * ratio).round(),
-          );
-          bubbleLeft = (_hoverX! - _bubbleWidth / 2).clamp(
-            0.0,
-            width - _bubbleWidth,
-          );
-        }
-        return MouseRegion(
-          onHover: (event) => setState(() => _hoverX = event.localPosition.dx),
-          onExit: (_) => setState(() => _hoverX = null),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              widget.child,
-              if (preview != null && bubbleLeft != null)
-                Positioned(
-                  left: bubbleLeft,
-                  bottom: 14,
-                  child: IgnorePointer(
-                    child: Container(
-                      width: _bubbleWidth,
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        durationToString(preview),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}

@@ -1,6 +1,6 @@
 # ech_http (vendored)
 
-Vendored copy of pub.dev `ech_http 0.2.1` (https://github.com/ech-research/ech_http),
+Vendored copy of pub.dev `ech_http 0.2.3` (https://github.com/ech-research/ech_http),
 wired in via `dependency_overrides` in `pubspec.yaml` — same pattern as
 `third_party/libtorrent_flutter`.
 
@@ -15,6 +15,6 @@ on Windows builds using that toolchain (newer CI toolchains happen to accept it)
 
 `src/CMakeLists.txt` now splits the CA bundle into ~14 KB raw-string chunks
 joined by adjacent string concatenation. The generated `ca_bundle.h` is
-semantically identical to upstream's. Everything else matches upstream 0.2.1.
+semantically identical to upstream's. Everything else matches upstream 0.2.3, except the OpenHarmony support and loosened code_assets/hooks constraints are not carried.
 If a future ech_http release fixes the chunking upstream, the vendored copy can
 be dropped and the pub dependency restored.

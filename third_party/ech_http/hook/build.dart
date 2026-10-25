@@ -7,6 +7,7 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:ech_http/src/build_support/cmake.dart';
 import 'package:ech_http/src/build_support/prebuilt.dart';
 
 Future<void> main(List<String> args) async {
@@ -82,6 +83,7 @@ Future<void> main(List<String> args) async {
       output.dependencies.add(Uri.file(p.join(dartInclude, header)));
     }
     final nativeBuild = p.join(out, 'native');
+    await prepareCmakeDirectory(p.join(root, 'src'), nativeBuild);
     stderr.writeln(
       'ech_http: compiling C++ bridge with prebuilt $target dependencies',
     );

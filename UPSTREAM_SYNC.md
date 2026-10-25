@@ -5,8 +5,8 @@
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.10.15)**:批次 1~8 已全部完成并合入 `dev`,上游功能同步至 **2.3.9**(目标 commit `025dcb5c`,批次 8 完成于 2026.10.15)。
-> - 工程构建于 Flutter 3.47.2(批次 5/6/7 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(41 条既有 info),`flutter test` 452 项全部通过。
+> **当前状态(2026.10.25)**:批次 1~9 已全部完成并合入 `dev`,上游功能同步至 **2.4.2**(目标 commit `7c708fa3`,批次 9 完成于 2026.10.25)。
+> - 工程构建于 Flutter 3.47.2(批次 5/6/7 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(40 条既有 info),`flutter test` 507 项全部通过。
 > - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
 > - 批次 6 起 GitHub 直连恢复,辅助同步用 blobless clone(见批次 6 备注);fetch_upstream.py(api.github.com contents 接口)仍可用于单文件场景。
 > - 注意:本机代理会话内 flutter 工具时通时不通(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开);2026.10.5 批次 6 期间 flutter pub get / test / analyze 已可在会话内直跑,若再次挂死请退回 `dart analyze lib test` + 本机终端验证。
@@ -242,8 +242,42 @@
 - `settings_keys.dart`:在 fork 大型键表中按相同位置插入 `onboardingCompleted`。
 - `pubspec.yaml`:移除 `assets/plugins/` 资产项;media-kit ref 升至 6b188ae9;其余保持 fork 依赖。
 
-## 决定跳过(按项目平台约束)
+## 批次 9:上游 2.3.9 → 2.4.2(基线 025dcb5c → 目标 7c708fa3,共 18 个提交,完成于 2026.10.25)
 
+- 策略:沿用批次 6/8 的「fork 当前版 vs 基线 025dcb5c vs 上游 main 最终版」三方合并(净效果接收);11 个 fork 有改动的文件中 8 个零冲突自动合并,`player_item_panel.dart`(10 处)、`player_transport_bar.dart`(2 处)、`dio_factory.dart`(1 处)手工回植。
+- ghproxy.net 期间多次 502,全部命令走重试循环完成;ech_http 0.2.3 源码经 pub 镜像(flutter-io.cn)下载后与 vendor 逐文件比对同步。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ✅ | bc64c2a8 + 6a10efa6 | deps: bump media kit(6b188ae9 → 83b7ca63,合并接收) | 2026.10.25 |
+| ✅ | 61a7bc14 + a7cac91f | deps: bump ech http(^0.2.1 → ^0.2.3;vendor 同步:0.2.3 CA 根证书快照(emSign 移除,安全更新)+ 0.2.2 CMake 重定位修复 cmake.dart;OHOS 支持与 code_assets/hooks 放宽不携带,Dart API 层 0.2.1→0.2.3 无变化) | 2026.10.25 |
+| ✅ | 9a20a019 | feat(player): 编辑弹幕时暂停播放(pauseOnDanmakuEdit 键 + TextFieldTapRegion barrier + 睡眠定时 expiryTicks 恢复资格) | 2026.10.25 |
+| ❌ | 2e22dcf5 | docs(readme): KazumiWeb 平段——README 与 fork 无关 | - |
+| ✅ | 4effe14e | refactor: 统一桌面平台判断为 isDesktop()/Platform.*(上游向 fork 的 device.dart 靠拢;player_item_panel 的 `_desktop` getter 删除,含 fork 音量浮层等处全部替换) | 2026.10.25 |
+| ✅ | dfcf9629 | feat(player): 进度条悬停/拖动时间预览(内置 PlayerProgressBar 取代 audio_video_progress_bar 包;fork 自制 `_ProgressHoverPreview` 随之删除,`prevEpisode` 上一集按钮保留) | 2026.10.25 |
+| ✅ | 184f8db5 | refactor(player): AsyncSerialQueue 串行化 seek | 2026.10.25 |
+| ✅ | 6485e353 | feat: 番剧 deep links(app_links;kazumi://bangumi 与 kazumi://search;Android singleTask + intent-filter;Windows SendAppLink 转发;fork 的 inputTag→initialQuery 由上游重构吸收,磁力/媒体库初始化不受影响) | 2026.10.25 |
+| ❌ | 5d82d7b6 / db520261 / 7cb58d7d | version 2.4.0/2.4.1/2.4.2——本分支版本号独立,不接收 | - |
+| ❌ | b935bd44 | feat(linux): deeplink——仅 Linux(平台约束) | - |
+| ✅ | a2aeb1c4 + b2bd7ae0 | feat(network): 规则镜像可选 + 共享 ECH transport(净效果:ghProxy/ghfast/gitcode/direct 四档 rulesMirror 键 + ghProxyMirror 等常量重构;bangumi_transport → ech_adapter/ech_transport 拆分;删 bangumi_ech_image_service/bangumi_ech_resolver;fork 的私有镜像 latestApp/bgmapi.anibt.net 与 bangumi_client 签名逻辑完好) | 2026.10.25 |
+| ❌ | 1e3e1115 | ci: Linux debian 包依赖——CI + Linux,与本分支无关 | - |
+| ✅ | 7c708fa3 | docs: STRUCTURE.md 更新(fork 与基线逐字节一致,直接接收) | 2026.10.25 |
+
+### 批次 9 冲突文件与 fork 回植点
+
+- `player_item_panel.dart`:保留 fork 音量滑块浮层(hover 弹出/拖动保持)、画面右键菜单(PlayerPanelHoldMenuAnchor open(position:))、音轨/字幕/AB 循环等 `_buildMoreMenuChildren`、DanmakuOffsetMenu 弹幕轴偏移入口、`_volumeMuteButton` 静音按钮、`prevEpisode` 上一集按钮;接收上游弹幕编辑暂停(barrier/焦点监听)、isDesktop() 统一、PlayerProgressBar(删 `_ProgressHoverPreview` 与 audio_video_progress_bar 依赖)。
+- `player_transport_bar.dart`:`progressBuilder` 签名 `(TimeLabelLocation)` → `({required bool sideLabels})`,保留 fork `prevEpisode` 可选参数。
+- `dio_factory.dart`:接收上游 EchAdapter 装配(bangumiDio/rulesRepoDio ech: true),保留 fork 显式 BackgroundTransformer。
+- `api_endpoints.dart`:接收 ghProxyHost/ghProxyMirror/ghfastMirror/gitcodeMirror 常量重构与 bangumiPublicApiHosts;保留 fork sourceUrl/latestApp(Kazumi-Enhanced 仓库)与 bangumiAPIDomain(bgmapi.anibt.net 私有镜像)。
+- `settings_keys.dart`:接收 pauseOnDanmakuEdit(桌面默认关/移动默认开)与 rulesMirror 键;fork 键表(磁力/媒体库/弹幕轴偏移等约 50 项)完整保留。
+- `AndroidManifest.xml`:接收 singleTask + kazumi:// intent-filter + flutter_deeplinking_enabled=false;fork 的 MANAGE_EXTERNAL_STORAGE/PiP/自启动等权限与通道完整保留。
+- `main.dart` / `index_page.dart` / `search_module.dart` / `search_page.dart` / `video_page.dart`:AppDeepLinks().start()/markReady()/initialQuery 接线与 closeOnExternalNavigation 播放页关闭协议接收;fork 初始化链(媒体库/磁力/通知权限)与本地播放分支不受影响。
+- `third_party/ech_http`:0.2.3 cacert.pem + cmake.dart(build hook 接入 prepareCmakeDirectory);README/CHANGELOG 注明未携带 OHOS 与版本约束放宽;pubspec 版本号 0.2.3。
+
+
+
+
+## 决定跳过(按项目平台约束)
 | 状态 | 上游提交 | 原因 |
 |---|---|---|
 | ❌ | 52a18732 | fix(macos): 仅 macOS |

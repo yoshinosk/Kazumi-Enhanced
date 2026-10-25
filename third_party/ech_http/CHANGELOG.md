@@ -6,6 +6,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.3] - 2026-10-22
+
+### Security
+- Update the bundled Mozilla CA roots to the 2026-10-20 snapshot, which removes
+  emSign ECC Root CA - G3, emSign ECC Root CA - C3, and emSign Root CA - C1
+  after the eMudhra intermediate CA key compromise. The default trust store no
+  longer accepts chains through the compromised intermediates; clients that
+  supply `trustedRootsPem` must review their own roots.
+
+---
+
+## [0.2.2] - 2026-10-17
+
+### Added
+- OpenHarmony / HarmonyOS arm64 and x64 support through Flutter-OH Native Assets
+  and precompiled dependency SDKs.
+
+### Changed
+- Allow compatible `code_assets` and `hooks` versions for Flutter-OH's `meta` pin.
+
+### Fixed
+- Reset bridge CMake metadata when the package moves between checkouts or caches.
+
+> Vendored note: the OpenHarmony support and the loosened `code_assets`/`hooks`
+> constraints are not carried into this vendored copy (Android and Windows
+> only); the CMake metadata reset fix is carried via `cmake.dart`.
+
+---
+
 ## [0.2.1] - 2026-09-29
 
 ### Changed
