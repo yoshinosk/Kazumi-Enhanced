@@ -34,6 +34,13 @@
 - 推送前若发现需要修复**尚未推送**的已提交代码，不要新增单独的 fix 提交，而应撤回原提交（`git reset --soft`），将修复内容与原改动合并为一个提交后再提交；已推送到远端的提交不做此操作。
 - `local_dandan_credentials.env`（`local_*.env`）与 `tools/_flutter_sdk/` 已 git-ignored，不要提交，也不要把其中的凭据写入代码。
 
+## 发布流程
+
+- 发布新版本：`pubspec.yaml` 版本号 `X.Y.Z+1`（build number 固定 `+1` 不递增）→ 提交 `chore: 版本号升至 X.Y.Z`（可合并文档修正）→ 打 annotated tag `vX.Y.Z`（消息 `Kazumi Enhanced vX.Y.Z`，注意带 `v` 前缀，与本地遗留的上游无前缀旧 tag 区分）→ push `dev` 分支与 tag。
+- tag push 触发 `.github/workflows/release.yaml`（fork 自维护，**已按平台约束裁剪为仅 Android + Windows**，勿再从上游接收该文件）：test → analyze（非阻塞，失败时输出写入 run 的 Step Summary）→ Android APK（arm64-v8a，默认 debug 签名；仓库配置 `SIGNING_KEY_BASE64` / `KEY_ALIAS` / `KEY_STORE_PASSWORD` 三项 secrets 后自动切换正式签名）→ Windows zip / msix（未签名，无 SignPath）→ 自动创建 GitHub Release 并挂产物。
+- **发布前必查**：release.yaml 的 CI 历史 run 是否健康（此前 v1.0.1~v1.0.4 因沿用上游全平台配置 CI 从未成功，产物均为手动上传）；上游同步批次后若触及 `.github/`，先核对 workflow 未被回退成全平台版。
+- CI 排查提示：Actions 日志需登录查看（匿名只有 check-run annotations API）；tag 重打流程 = 删本地与远端 tag → 在新提交上重打 → 重推（CI 重跑使用触发时 commit 的 workflow 文件）。
+
 ## 修改日志（必须）
 
 - `CHANGELOG.md` **面向最终用户阅读**：只记录用户可感知的变化（新功能、体验优化、问题修复、上游同步）；纯开发侧改动（内部重构、文档、构建脚本、CI 等）**不写入**。
