@@ -1,5 +1,12 @@
 # Kazumi/
 
+> [!NOTE]
+> 本文档随上游仓库同步维护，描述的是**上游 Kazumi** 的项目结构。本分支（Kazumi-Enhanced）在此基础上主要有以下差异：
+> - 仅维护 **Android 与 Windows** 平台（ios / linux / macos / web 目录不参与构建），无 fastlane/ 子模块；
+> - `lib/pages/` 新增 `magnet/`（磁力搜索与任务管理）、`media/`（本地媒体库）等页面；
+> - `lib/services/` 新增 `magnet/`（libtorrent 下载引擎）、`media/`（媒体库扫描与管理）、`sync/`（局域网同步）、`storage/` 等服务；
+> - 根目录新增 `third_party/`（vendored 的 libtorrent_flutter 与 ech_http 本地补丁，经 dependency_overrides 引用）与 `tools/`（本地构建与辅助脚本）、`UPSTREAM_SYNC.md`（上游同步台账）。
+
 ```
 Kazumi/
 ├── lib/                        # Dart 源码

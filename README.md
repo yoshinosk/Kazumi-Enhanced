@@ -3,9 +3,9 @@
 ![Kazumi](static/logo_readme.png)
 
 > [!IMPORTANT]
-> **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.3.9](https://github.com/Predidit/Kazumi/releases/tag/2.3.9)。**
+> **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.4.2](https://github.com/Predidit/Kazumi/releases/tag/2.4.2)。**
 > 我们在上游项目的基础上进行**功能加强**，重点新增了**本地媒体库**与**磁力下载**能力，并增强了播放器、弹幕与追番统计体验。
-> 🎉 **v1.0.3 已发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
+> 🎉 **v1.0.5 已发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
 
 使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序——在上游 Kazumi 的基础上，重点增强本地媒体库、磁力下载（libtorrent）、播放器与追番统计能力。
 
@@ -24,7 +24,7 @@
 
 | 能力 | 上游 [Kazumi](https://github.com/Predidit/Kazumi) | 本分支 |
 | :--- | :---: | :--- |
-| 基于自定义规则的番剧在线观看 | ✅ | ✅ 已同步至上游 2.3.9 |
+| 基于自定义规则的番剧在线观看 | ✅ | ✅ 已同步至上游 2.4.2 |
 | 本地媒体库（扫描 / 搜刮 / 播放 / 补集） | — | ✅ 完整实现 |
 | 磁力搜索与下载（内置 libtorrent 引擎） | — | ✅ 完整实现 |
 | 播放器扩展（字幕样式 / 轨道 / A-B 循环 / 渲染器） | 基础播放能力 | ✅ 增强 |
@@ -37,7 +37,7 @@
 
 ### 继承自上游的功能
 
-以下能力来自上游 [Kazumi](https://github.com/Predidit/Kazumi)（基于自定义规则的番剧采集与在线观看程序），随上游同步持续更新（当前同步至 2.3.9），规则与用法以上游仓库为准：
+以下能力来自上游 [Kazumi](https://github.com/Predidit/Kazumi)（基于自定义规则的番剧采集与在线观看程序），随上游同步持续更新（当前同步至 2.4.2），规则与用法以上游仓库为准：
 
 - **规则与片源**：Xpath 自定义规则编辑器、规则仓库与规则导入 / 分享、批量导入规则、API 搜索规则的详情页地址模板、多视频源切换
 - **番剧浏览**：番剧目录、番剧 / 图片搜索、番剧时间表、番剧详情与评论、角色信息
@@ -137,9 +137,9 @@
 
 ## 开发状态
 
-本项目已发布 **v1.0.3**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
+本项目已发布 **v1.0.5**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
 
-**上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.3.9**，各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
+**上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.4.2**，各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
 
 ## 更新日志
 
