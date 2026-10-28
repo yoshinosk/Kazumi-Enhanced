@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/dialog/dialog_task.dart';
 import 'package:kazumi/modules/history/history_module.dart';
+import 'package:kazumi/pages/history/history_list_query.dart';
 import 'package:kazumi/pages/magnet/magnet_page.dart' show MagnetSearchRouteArgs;
 import 'package:kazumi/services/lan/lan_media_paths.dart';
 import 'package:kazumi/services/player/history_playback_service.dart';
@@ -24,12 +24,16 @@ String historyPositionLabel(History history) {
 
 /// 从历史记录恢复播放的统一入口，历史页卡片与首页「继续观看」共用。
 ///
+/// 同一番剧用多个来源观看过时，按最近观看顺序依次尝试：首选来源失效
+/// （插件被删、在线页面解析失败、缓存/本地文件缺失等）会自动改用其它
+/// 来源续播并提示切换结果；全部不可用才按首条记录的原因提示。
+///
 /// [dialogOwner] 是调用方的 State（需 mixin [KazumiDialogOwner]），
 /// 用于加载对话框的生命周期管理。
 Future<void> resumeHistoryPlayback(
   BuildContext context,
   KazumiDialogOwner dialogOwner,
-  History history,
+  HistoryGroup group,
 ) async {
   final playbackService = inject<HistoryPlaybackService>();
   String? unavailableReason;
@@ -39,22 +43,29 @@ Future<void> resumeHistoryPlayback(
       message: '获取中',
       barrierDismissible: isDesktop(),
       onCancel: cancelToken.cancel,
-      action: () => playbackService.open(history, cancelToken: cancelToken),
+      action: () =>
+          playbackService.openGroup(group.entries, cancelToken: cancelToken),
     );
-    switch (result) {
-      case HistoryPlaybackReady(:final args):
-        task.withContext(
-            (context) => context.pushNamed('/video/', arguments: args));
-      case HistoryPlaybackUnavailable(:final reason):
-        // 引导弹窗须等加载对话框关闭后再弹，因此延后到 dialogs.run 之外处理。
-        unavailableReason = reason;
+    final args = result.args;
+    if (args != null) {
+      final usedHistory = result.history;
+      if (result.usedFallback && usedHistory != null) {
+        KazumiDialog.showToast(
+          message:
+              '当前来源不可用，已切换到${historySourceLabel(usedHistory)}继续播放',
+        );
+      }
+      task.withContext(
+          (context) => context.pushNamed('/video/', arguments: args));
+    } else {
+      unavailableReason = result.unavailableReason;
     }
   }, errorMessage: '暂时无法继续播放，请稍后重试');
   final reason = unavailableReason;
   if (!context.mounted || reason == null) return;
-  if (isLocalMediaHistory(history) &&
-      !isLanMediaPath(history.episodePageUrl)) {
-    await showMissingLocalFileDialog(context, reason, history);
+  final primary = group.primary;
+  if (isLocalMediaHistory(primary) && !isLanMediaPath(primary.episodePageUrl)) {
+    await showMissingLocalFileDialog(context, reason, primary);
   } else {
     // 桌面端媒体库条目不可用通常是电脑离线 / 配对失效，不需要引导用户
     // 去本机找文件或重新下载。

@@ -15,7 +15,8 @@ class HistoryListView extends StatefulWidget {
 
   final List<History> entries;
   final bool editing;
-  final Widget Function(History history, BorderRadius borderRadius) itemBuilder;
+  final Widget Function(HistoryGroup group, BorderRadius borderRadius)
+      itemBuilder;
 
   @override
   State<HistoryListView> createState() => _HistoryListViewState();

@@ -28,6 +28,17 @@ bool isLocalMediaHistory(History history) =>
 bool isStreamHistory(History history) =>
     history.adapterName == kMagnetStreamAdapterName;
 
+/// 历史记录来源的可读名称，用于卡片展示与多来源提示。
+String historySourceLabel(History history) {
+  if (isLocalMediaHistory(history)) return '本地媒体库';
+  if (isStreamHistory(history)) return '边下边播';
+  final kind = HistoryEntryKind.normalize(history.entryKind) ==
+          HistoryEntryKind.offline
+      ? '缓存'
+      : '在线';
+  return history.adapterName.isEmpty ? kind : '$kind · ${history.adapterName}';
+}
+
 class PlaybackHistoryIdentity {
   const PlaybackHistoryIdentity({
     required this.bangumiItem,

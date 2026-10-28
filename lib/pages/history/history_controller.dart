@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/history/history_module.dart';
+import 'package:kazumi/pages/history/history_list_query.dart';
 import 'package:kazumi/repositories/history_repository.dart';
 import 'package:mobx/mobx.dart';
 
@@ -92,8 +93,13 @@ abstract class _HistoryController with Store {
     );
   }
 
-  Future<void> deleteHistory(History history) async {
-    await _historyRepository.deleteHistory(history);
+  /// 删除一个番剧聚合下的全部来源记录。
+  ///
+  /// 卡片按番剧合并展示，只删最近一条会让同番剧的其它来源记录重新冒出来。
+  Future<void> deleteGroup(HistoryGroup group) async {
+    for (final history in group.entries) {
+      await _historyRepository.deleteHistory(history);
+    }
     init();
   }
 

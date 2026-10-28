@@ -6,9 +6,9 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
+import 'package:kazumi/pages/history/history_list_query.dart';
 import 'package:kazumi/pages/history/history_list_view.dart';
 import 'package:kazumi/pages/history/history_record_tile.dart';
 import 'package:kazumi/pages/history/history_resume.dart';
@@ -39,11 +39,11 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
-  Future<void> _deleteHistory(History history) async {
-    if (_clearing || _deleting.contains(history.key)) return;
-    setState(() => _deleting.add(history.key));
+  Future<void> _deleteGroup(HistoryGroup group) async {
+    if (_clearing || _deleting.contains(group.key)) return;
+    setState(() => _deleting.add(group.key));
     try {
-      await widget.controller.deleteHistory(history);
+      await widget.controller.deleteGroup(group);
       if (mounted && widget.controller.histories.isEmpty) {
         setState(() => _editing = false);
       }
@@ -52,19 +52,21 @@ class _HistoryPageState extends State<HistoryPage> {
         KazumiDialog.showToast(context: context, message: '删除失败，请稍后重试');
       }
     } finally {
-      if (mounted) setState(() => _deleting.remove(history.key));
+      if (mounted) setState(() => _deleting.remove(group.key));
     }
   }
 
   Future<void> _clearHistory() async {
     if (_clearing || _deleting.isNotEmpty) return;
+    final groupCount =
+        groupHistoriesByBangumi(widget.controller.histories).length;
     final confirmed = await KazumiDialog.show<bool>(
       context: context,
       builder: (context) => AlertDialog(
         icon: const Icon(Icons.delete_sweep_outlined),
         title: const Text('清空历史记录？'),
         content: Text(
-            '将删除全部 ${widget.controller.histories.length} 条观看记录，包括在线和缓存记录。此操作无法撤销。'),
+            '将删除全部 $groupCount 个番剧的观看记录（含在线、缓存与多来源记录）。此操作无法撤销。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -146,12 +148,12 @@ class _HistoryPageState extends State<HistoryPage> {
             child: HistoryListView(
               entries: entries,
               editing: _editing,
-              itemBuilder: (history, borderRadius) => _HistoryCard(
-                history: history,
+              itemBuilder: (group, borderRadius) => _HistoryCard(
+                group: group,
                 borderRadius: borderRadius,
                 editing: _editing,
-                busy: _clearing || _deleting.contains(history.key),
-                onDelete: () => _deleteHistory(history),
+                busy: _clearing || _deleting.contains(group.key),
+                onDelete: () => _deleteGroup(group),
               ),
             ),
           ),
@@ -163,14 +165,14 @@ class _HistoryPageState extends State<HistoryPage> {
 
 class _HistoryCard extends StatefulWidget {
   const _HistoryCard({
-    required this.history,
+    required this.group,
     required this.onDelete,
     required this.editing,
     required this.busy,
     required this.borderRadius,
   });
 
-  final History history;
+  final HistoryGroup group;
   final bool editing;
   final bool busy;
   final Future<void> Function() onDelete;
@@ -186,14 +188,14 @@ class _HistoryCardState extends State<_HistoryCard> with KazumiDialogOwner {
 
   Future<void> _play() async {
     if (widget.editing || widget.busy || dialogs.isRunning) return;
-    await resumeHistoryPlayback(context, this, widget.history);
+    await resumeHistoryPlayback(context, this, widget.group);
   }
 
   Future<void> _changeCollect(CollectType type) async {
     if (_updatingCollect) return;
     setState(() => _updatingCollect = true);
     try {
-      await _collectController.addCollect(widget.history.bangumiItem,
+      await _collectController.addCollect(widget.group.primary.bangumiItem,
           type: type.value);
     } catch (_) {
       KazumiDialog.showToast(message: '修改收藏状态失败，请稍后重试');
@@ -207,17 +209,17 @@ class _HistoryCardState extends State<_HistoryCard> with KazumiDialogOwner {
     return Observer(builder: (context) {
       // getCollectType reads storage, so track the observable list explicitly.
       _collectController.collectibles.length;
+      final bangumiItem = widget.group.primary.bangumiItem;
       return HistoryRecordTile(
-        history: widget.history,
+        group: widget.group,
         borderRadius: widget.borderRadius,
         editing: widget.editing,
         busy: widget.busy,
         onPlay: _play,
         onDelete: widget.onDelete,
-        onDetails: () =>
-            context.pushNamed('/info/', arguments: widget.history.bangumiItem),
+        onDetails: () => context.pushNamed('/info/', arguments: bangumiItem),
         collectType: CollectType.fromValue(
-            _collectController.getCollectType(widget.history.bangumiItem)),
+            _collectController.getCollectType(bangumiItem)),
         onChangeCollect: _updatingCollect ? null : _changeCollect,
       );
     });

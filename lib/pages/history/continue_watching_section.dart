@@ -7,6 +7,7 @@ import 'package:kazumi/bean/card/network_img_layer.dart';
 import 'package:kazumi/bean/dialog/dialog_task.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
+import 'package:kazumi/pages/history/history_list_query.dart';
 import 'package:kazumi/pages/history/history_resume.dart';
 import 'package:kazumi/services/lan/lan_sync_service.dart';
 
@@ -40,15 +41,17 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
     }
   }
 
-  Future<void> _play(History history) async {
+  Future<void> _play(HistoryGroup group) async {
     if (dialogs.isRunning) return;
-    await resumeHistoryPlayback(context, this, history);
+    await resumeHistoryPlayback(context, this, group);
   }
 
   @override
   Widget build(BuildContext context) {
     return Observer(builder: (context) {
-      final recent = _historyController.histories.take(_recentLimit).toList();
+      final recent = groupHistoriesByBangumi(_historyController.histories)
+          .take(_recentLimit)
+          .toList();
       if (recent.isEmpty) return const SizedBox.shrink();
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,13 +70,13 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
             ],
           ),
           _ResumeCard(
-            history: recent.first,
+            group: recent.first,
             onPlay: () => _play(recent.first),
           ),
           if (recent.length > 1) ...[
             const SizedBox(height: 12),
             _RecentStrip(
-              entries: recent.sublist(1),
+              groups: recent.sublist(1),
               onPlay: _play,
             ),
           ],
@@ -84,10 +87,12 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
 }
 
 class _ResumeCard extends StatelessWidget {
-  const _ResumeCard({required this.history, required this.onPlay});
+  const _ResumeCard({required this.group, required this.onPlay});
 
-  final History history;
+  final HistoryGroup group;
   final VoidCallback onPlay;
+
+  History get history => group.primary;
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +109,9 @@ class _ResumeCard extends StatelessWidget {
             HistoryEntryKind.offline
         ? '缓存'
         : '在线';
+    final alternatives = group.hasAlternatives
+        ? '另有 ${group.entries.length - 1} 个来源：${group.alternativeLabels.join('、')}'
+        : '';
     final image = history.bangumiItem.images['large'] ?? '';
 
     return Material(
@@ -164,6 +172,14 @@ class _ResumeCard extends StatelessWidget {
                               color: colors.primary,
                               fontWeight: FontWeight.w600)),
                     ],
+                    if (alternatives.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(alternatives,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: colors.onSurfaceVariant)),
+                    ],
                     const SizedBox(height: 12),
                     FilledButton.icon(
                       onPressed: onPlay,
@@ -182,10 +198,10 @@ class _ResumeCard extends StatelessWidget {
 }
 
 class _RecentStrip extends StatelessWidget {
-  const _RecentStrip({required this.entries, required this.onPlay});
+  const _RecentStrip({required this.groups, required this.onPlay});
 
-  final List<History> entries;
-  final ValueChanged<History> onPlay;
+  final List<HistoryGroup> groups;
+  final ValueChanged<HistoryGroup> onPlay;
 
   static const double _coverWidth = 104;
   static const double _coverHeight = _coverWidth * 1.4;
@@ -199,10 +215,11 @@ class _RecentStrip extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
-        itemCount: entries.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemCount: groups.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
-          final history = entries[index];
+          final group = groups[index];
+          final history = group.primary;
           final title = history.bangumiItem.nameCn.isEmpty
               ? history.bangumiItem.name
               : history.bangumiItem.nameCn;
@@ -213,7 +230,7 @@ class _RecentStrip extends StatelessWidget {
           return SizedBox(
             width: _coverWidth,
             child: InkWell(
-              onTap: () => onPlay(history),
+              onTap: () => onPlay(group),
               borderRadius: BorderRadius.circular(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

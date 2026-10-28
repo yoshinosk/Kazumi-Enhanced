@@ -31,6 +31,14 @@ class HistoryPlaybackUnavailable extends HistoryPlaybackResult {
   final String reason;
 }
 
+/// 「按番剧续播」的结果：首选来源失效时会依次尝试同一番剧的其它来源。
+typedef HistoryGroupPlaybackResult = ({
+  VideoPlaybackArgs? args,
+  History? history,
+  bool usedFallback,
+  String? unavailableReason,
+});
+
 /// Restores a history entry into arguments the player route can take.
 ///
 /// The history page and the my page share this one resolution path; cards
@@ -78,6 +86,42 @@ class HistoryPlaybackService {
     return args == null
         ? const HistoryPlaybackUnavailable('在线源不可用，请重新选择播放源')
         : HistoryPlaybackReady(args);
+  }
+
+  /// 按最近观看顺序依次尝试同一番剧的各来源记录。
+  ///
+  /// [candidates] 首项是卡片展示的最近来源；它失效时自动回退到同番剧的
+  /// 其它来源（其它在线源、缓存、本地媒体库、边下边播），全部失败才返回
+  /// 不可用，并保留首条记录的失败原因供上层展示对应引导。
+  Future<HistoryGroupPlaybackResult> openGroup(
+    List<History> candidates, {
+    RuleCancelToken? cancelToken,
+  }) async {
+    String? primaryReason;
+    for (var index = 0; index < candidates.length; index++) {
+      // 用户取消后不再继续尝试，避免把取消的请求当成来源失效。
+      if (cancelToken?.isCancelled ?? false) break;
+      final history = candidates[index];
+      final result = await open(history, cancelToken: cancelToken);
+      switch (result) {
+        case HistoryPlaybackReady(:final args):
+          return (
+            args: args,
+            history: history,
+            usedFallback: index > 0,
+            unavailableReason: null,
+          );
+        case HistoryPlaybackUnavailable(:final reason):
+          primaryReason ??= reason;
+      }
+      if (cancelToken?.isCancelled ?? false) break;
+    }
+    return (
+      args: null,
+      history: null,
+      usedFallback: false,
+      unavailableReason: primaryReason,
+    );
   }
 
   /// 恢复磁力边下边播：对历史记录中的流 URL 做一次 HEAD 可达性检查

@@ -4,11 +4,12 @@ import 'package:kazumi/bean/widget/kazumi_menu.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/modules/history/history_module.dart';
+import 'package:kazumi/pages/history/history_list_query.dart';
 
 class HistoryRecordTile extends StatelessWidget {
   const HistoryRecordTile({
     super.key,
-    required this.history,
+    required this.group,
     required this.onPlay,
     required this.onDetails,
     required this.onDelete,
@@ -19,7 +20,7 @@ class HistoryRecordTile extends StatelessWidget {
     this.busy = false,
   });
 
-  final History history;
+  final HistoryGroup group;
   final VoidCallback onPlay;
   final VoidCallback onDetails;
   final Future<void> Function() onDelete;
@@ -28,6 +29,8 @@ class HistoryRecordTile extends StatelessWidget {
   final BorderRadius borderRadius;
   final bool editing;
   final bool busy;
+
+  History get history => group.primary;
 
   String get _position {
     final progress = history.progresses[history.lastWatchEpisode]?.progress;
@@ -50,17 +53,17 @@ class HistoryRecordTile extends StatelessWidget {
     final episode = history.lastWatchEpisodeName.isEmpty
         ? '第 ${history.lastWatchEpisode} 话'
         : history.lastWatchEpisodeName;
-    final source = HistoryEntryKind.normalize(history.entryKind) ==
-            HistoryEntryKind.offline
-        ? '缓存'
-        : '在线';
+    final source = historySourceLabel(history);
+    final alternatives = group.hasAlternatives
+        ? '另有 ${group.entries.length - 1} 个来源：${group.alternativeLabels.join('、')}'
+        : '';
     final time =
         TimeOfDay.fromDateTime(history.lastWatchTime.toLocal()).format(context);
     final image = history.bangumiItem.images['large'] ?? '';
     final position = _position;
 
     return Dismissible(
-      key: ValueKey(history.key),
+      key: ValueKey(group.key),
       direction:
           busy || editing ? DismissDirection.none : DismissDirection.endToStart,
       // The parent removes saved deletions; failed writes keep the row usable.
@@ -86,14 +89,9 @@ class HistoryRecordTile extends StatelessWidget {
             Positioned.fill(
               child: Semantics(
                 button: !editing && !busy,
-                label: [
-                  title,
-                  episode,
-                  position,
-                  source,
-                  history.adapterName,
-                  time
-                ].where((text) => text.isNotEmpty).join('，'),
+                label: [title, episode, position, source, alternatives, time]
+                    .where((text) => text.isNotEmpty)
+                    .join('，'),
                 child: InkWell(onTap: editing || busy ? null : onPlay),
               ),
             ),
@@ -128,16 +126,20 @@ class HistoryRecordTile extends StatelessWidget {
                     ],
                     const SizedBox(height: 8),
                     Text(
-                      [
-                        source,
-                        if (history.adapterName.isNotEmpty) history.adapterName,
-                        time
-                      ].join(' · '),
+                      [source, time].join(' · '),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: colors.onSurfaceVariant),
                     ),
+                    if (alternatives.isNotEmpty)
+                      Text(
+                        alternatives,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(color: colors.onSurfaceVariant),
+                      ),
                   ],
                 );
                 final actions = _actions(context, wide: wide || largeText);
