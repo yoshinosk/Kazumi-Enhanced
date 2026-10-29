@@ -7,6 +7,33 @@ String formatBytes(int bytes) {
   return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
 }
 
+/// 解析体积文案（`1.2 GB` / `800MB` / `1,234 MB` / `1.5 TiB`）为字节数。
+///
+/// 搜索结果里的体积是站点给出的自由文本，格式并不统一；无法识别或
+/// 数值非法时返回 null，由调用方决定跳过还是按未知处理。
+int? parseSizeToBytes(String label) {
+  if (label.trim().isEmpty) return null;
+  final match = RegExp(
+    r'([\d.,]+)\s*([KMGT]?i?B)',
+    caseSensitive: false,
+  ).firstMatch(label.trim());
+  if (match == null) return null;
+  final raw = match.group(1)!.replaceAll(',', '');
+  final value = double.tryParse(raw);
+  if (value == null || value < 0) return null;
+  final unit = match.group(2)!.toUpperCase().replaceAll('I', '');
+  const mult = {
+    'B': 1,
+    'KB': 1024,
+    'MB': 1048576,
+    'GB': 1073741824,
+    'TB': 1099511627776,
+  };
+  final m = mult[unit];
+  if (m == null) return null;
+  return (value * m).round();
+}
+
 String formatSpeed(double bytesPerSec) {
   if (bytesPerSec < 1024) return '${bytesPerSec.toStringAsFixed(0)} B/s';
   if (bytesPerSec < 1024 * 1024) {

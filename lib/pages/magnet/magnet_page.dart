@@ -32,8 +32,10 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/directory_picker.dart';
+import 'package:kazumi/utils/format.dart' show formatBytes, parseSizeToBytes;
 import 'package:kazumi/utils/local_episode_parser.dart';
-import 'package:libtorrent_flutter/libtorrent_flutter.dart';
+// libtorrent_flutter 也导出了同名 formatBytes，此处统一用项目内的实现。
+import 'package:libtorrent_flutter/libtorrent_flutter.dart' hide formatBytes;
 import 'package:path/path.dart' as p;
 
 /// 番剧详情页发起的磁力搜索路由参数：搜索关键词 + 关联的番剧信息。
@@ -429,6 +431,12 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
   MagnetController get controller => widget.controller;
   bool _autoLoading = false;
 
+  /// 批量下载多选模式：条目显示勾选框，工具栏出现批量操作栏。
+  bool _selectMode = false;
+
+  /// 多选模式下已选资源的键集合（见 [_itemKey]）。
+  final Set<String> _selectedKeys = {};
+
   @override
   void initState() {
     super.initState();
@@ -454,12 +462,202 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
 
   /// 统一的搜索提交：优先交给父页面（先校正关联番剧），否则直接搜。
   void _submit(String keyword) {
+    // 换了关键词，上一次勾选的资源不再对应同一批结果，退出多选。
+    _exitSelectMode();
     final onSearch = widget.onSearch;
     if (onSearch != null) {
       onSearch(keyword);
       return;
     }
     controller.search(keyword);
+  }
+
+  // ---------------- 批量下载多选 ----------------
+
+  /// 资源的稳定标识：优先用下载源链接（与下载服务的去重口径一致），
+  /// 没有链接时退回标题 + 体积 + 发布时间的组合。
+  static String _itemKey(MagnetSearchItem item) {
+    final uri = item.magnetLink.isNotEmpty ? item.magnetLink : item.torrentUrl;
+    if (uri.isNotEmpty) return uri;
+    return '${item.title}|${item.size}|'
+        '${item.publishDate.millisecondsSinceEpoch}';
+  }
+
+  void _enterSelectMode([MagnetSearchItem? item]) {
+    setState(() {
+      _selectMode = true;
+      if (item != null) _selectedKeys.add(_itemKey(item));
+    });
+  }
+
+  void _exitSelectMode() {
+    if (!_selectMode && _selectedKeys.isEmpty) return;
+    setState(() {
+      _selectMode = false;
+      _selectedKeys.clear();
+    });
+  }
+
+  void _toggleSelect(MagnetSearchItem item) {
+    final key = _itemKey(item);
+    setState(() {
+      if (!_selectedKeys.remove(key)) _selectedKeys.add(key);
+    });
+  }
+
+  /// 当前已选且仍在结果列表中的资源：重新搜索 / 切换字幕组后，
+  /// 已消失的条目会被自动剔除，计数与操作对象始终和界面一致。
+  List<MagnetSearchItem> get _selectedItems => controller.searchResults
+      .where((item) => _selectedKeys.contains(_itemKey(item)))
+      .toList();
+
+  /// 全选 / 取消全选当前已加载的搜索结果。
+  void _toggleSelectAll() {
+    final items = controller.searchResults;
+    final allSelected = items.isNotEmpty &&
+        items.every((item) => _selectedKeys.contains(_itemKey(item)));
+    setState(() {
+      if (allSelected) {
+        _selectedKeys.removeAll(items.map(_itemKey));
+      } else {
+        _selectedKeys.addAll(items.map(_itemKey));
+      }
+    });
+  }
+
+  /// 批量下载所选资源：已在队列中的直接跳过，其余统一确认目录与归属后
+  /// 提交（磁盘空间只检查一次），最后只弹一条汇总提示。
+  Future<void> _batchDownloadSelected() async {
+    final selected = _selectedItems;
+    if (selected.isEmpty) return;
+    if (!controller.engineEnabled) {
+      KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
+      return;
+    }
+    var preSkipped = 0;
+    final pending = <MagnetSearchItem>[];
+    for (final item in selected) {
+      if (controller.isDownloadQueued(item)) {
+        preSkipped++;
+      } else {
+        pending.add(item);
+      }
+    }
+    if (pending.isEmpty) {
+      KazumiDialog.showToast(message: '所选资源均已在下载队列中');
+      return;
+    }
+    final inheritedInfo = _animeScrapeInfo;
+    String? dir;
+    var planInfo = inheritedInfo;
+    var scrapeExplicit = false;
+    if (GStorage.getSetting(SettingsKeys.magnetAskDirOnAdd)) {
+      final plan = await showMagnetBatchAddDownloadDialog(
+        context,
+        items: pending,
+        controller: controller,
+        scrapeInfo: inheritedInfo,
+      );
+      if (plan == null || !mounted) return;
+      dir = plan.dir;
+      planInfo = plan.scrapeInfo;
+      scrapeExplicit = plan.scrapeExplicit;
+    }
+    // 归属解析与单条下载同口径：用户在确认框里改过的归属整批统一应用，
+    // 页面继承来的关联则逐个按标题校验，避免把别的番剧刮到这一部上。
+    final tasks = <MagnetBatchDownloadTask>[];
+    for (final item in pending) {
+      final resolved = scrapeExplicit
+          ? (info: planInfo, confidence: planInfo == null ? 0.0 : 1.0)
+          : MediaTitleMatcher.resolveScrapeInfo(
+              title: item.title,
+              info: planInfo,
+              anime: widget.anime,
+              queryHint: controller.query,
+            );
+      tasks.add(
+        MagnetBatchDownloadTask(
+          item: item,
+          scrapeInfo: resolved.info,
+          confidence: resolved.confidence,
+        ),
+      );
+    }
+    final result = await controller.addDownloads(tasks, dir: dir);
+    if (!mounted) return;
+    // 磁盘空间确认框里取消了整批提交：保持多选状态，方便用户换目录重试。
+    if (result.total == 0) return;
+    if (result.added > 0) _exitSelectMode();
+    KazumiDialog.showToast(
+      message: _batchResultMessage(result, preSkipped),
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  String _batchResultMessage(MagnetBatchAddResult result, int preSkipped) {
+    final skipped = preSkipped + result.skipped;
+    if (result.added == 0) {
+      final parts = <String>[];
+      if (result.failed > 0) {
+        parts.add('${result.failed} 个任务提交失败，请检查引擎状态');
+      }
+      if (skipped > 0) parts.add('$skipped 个已在队列中');
+      return parts.join('；');
+    }
+    final parts = ['已添加 ${result.added} 个下载任务'];
+    if (skipped > 0) parts.add('$skipped 个已在队列中，已跳过');
+    if (result.failed > 0) parts.add('${result.failed} 个提交失败');
+    return parts.join('；');
+  }
+
+  /// 多选模式下的批量操作栏（替换搜索条件工具栏）。
+  Widget _buildBatchBar(
+    BuildContext context,
+    List<MagnetSearchItem> results,
+  ) {
+    final theme = Theme.of(context);
+    final selected = _selectedItems;
+    final allSelected = results.isNotEmpty &&
+        results.every((item) => _selectedKeys.contains(_itemKey(item)));
+    var selectedBytes = 0;
+    for (final item in selected) {
+      selectedBytes += parseSizeToBytes(item.size) ?? 0;
+    }
+    final sizeLabel =
+        selectedBytes > 0 ? ' · 约 ${formatBytes(selectedBytes)}' : '';
+    return Row(
+      children: [
+        IconButton(
+          tooltip: '退出多选',
+          icon: const Icon(Icons.close_rounded),
+          visualDensity: VisualDensity.compact,
+          onPressed: _exitSelectMode,
+        ),
+        Expanded(
+          child: Text(
+            selected.isEmpty ? '点选要下载的资源' : '已选 ${selected.length} 项$sizeLabel',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+        IconButton(
+          tooltip: allSelected ? '取消全选' : '全选（已加载的结果）',
+          icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+          visualDensity: VisualDensity.compact,
+          onPressed: _toggleSelectAll,
+        ),
+        FilledButton.icon(
+          onPressed: selected.isEmpty ? null : _batchDownloadSelected,
+          icon: const Icon(Icons.download_rounded, size: 18),
+          label: const Text('下载'),
+          style: FilledButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+        ),
+      ],
+    );
   }
 
   bool _onScroll(ScrollNotification n) {
@@ -556,14 +754,22 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
             ),
             onSubmitted: (value) => _submit(value),
           ),
-          // 搜索条件工具栏：字幕组筛选 + 按当前条件创建订阅。
+          // 搜索条件工具栏：字幕组筛选 + 多选下载 + 按当前条件创建订阅。
           // 字幕组筛选始终展示：仅 Animes Garden 源支持，其它源置灰、
           // 点击提示切换源，避免默认 Mikan 源时整个入口凭空消失。
+          // 进入多选后整行替换为批量操作栏（已选 / 全选 / 下载）。
           Observer(
             builder: (_) {
               final isAg =
                   controller.defaultSource.kind == MagnetSourceKind.json;
               final hasQuery = controller.query.trim().isNotEmpty;
+              final results = controller.searchResults;
+              if (_selectMode && results.isNotEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _buildBatchBar(context, results),
+                );
+              }
               return Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(
@@ -609,6 +815,13 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                         ),
                       ),
                     ),
+                    if (results.isNotEmpty)
+                      IconButton(
+                        tooltip: '批量下载（多选）',
+                        icon: const Icon(Icons.checklist_rounded, size: 20),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _enterSelectMode(),
+                      ),
                     if (hasQuery) ...[
                       const SizedBox(width: 8),
                       TextButton.icon(
@@ -684,6 +897,10 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                       final item = controller.searchResults[index];
                       return _MagnetSearchTile(
                         item: item,
+                        selectMode: _selectMode,
+                        selected: _selectedKeys.contains(_itemKey(item)),
+                        onToggleSelect: () => _toggleSelect(item),
+                        onEnterSelectMode: () => _enterSelectMode(item),
                         onDownload: () => confirmAndAddMagnetDownload(
                           context,
                           controller: controller,
@@ -909,61 +1126,101 @@ class _FansubPickerSheetState extends State<_FansubPickerSheet> {
 }
 
 class _MagnetSearchTile extends StatelessWidget {
-  const _MagnetSearchTile({required this.item, required this.onDownload});
+  const _MagnetSearchTile({
+    required this.item,
+    required this.onDownload,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggleSelect,
+    this.onEnterSelectMode,
+  });
 
   final MagnetSearchItem item;
   final VoidCallback onDownload;
+
+  /// 批量下载多选模式：显示勾选框，点按 / 长按都是切换选中。
+  final bool selectMode;
+
+  /// 当前条目是否已勾选（仅 [selectMode] 有意义）。
+  final bool selected;
+
+  /// 切换本条选中状态。
+  final VoidCallback? onToggleSelect;
+
+  /// 长按进入多选模式并选中本条；为空时长按仍弹出快捷操作菜单。
+  final VoidCallback? onEnterSelectMode;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GestureDetector(
-      // 桌面端右键弹出快捷操作菜单。
-      onSecondaryTapUp: (_) => _showActionsSheet(context),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        title: Text(
-          item.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodyMedium,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (item.subtitle.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  item.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
+      // 桌面端右键弹出快捷操作菜单（多选时交给勾选框处理）。
+      onSecondaryTapUp: selectMode ? null : (_) => _showActionsSheet(context),
+      child: Material(
+        color: selected
+            ? theme.colorScheme.primary.withValues(alpha: 0.08)
+            : Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 4,
+          ),
+          leading: selectMode
+              ? Checkbox(
+                  value: selected,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: (_) => onToggleSelect?.call(),
+                )
+              : null,
+          title: Text(
+            item.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium,
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (item.subtitle.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
                 ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (item.size.isNotEmpty)
+                    _MetaChip(icon: Icons.sd_storage_rounded, label: item.size),
+                  if (item.publisher != null)
+                    _MetaChip(icon: Icons.person_outline, label: item.publisher!),
+                  _MetaChip(
+                    icon: Icons.schedule_rounded,
+                    label: _formatDate(item.publishDate),
+                  ),
+                ],
               ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              children: [
-                if (item.size.isNotEmpty)
-                  _MetaChip(icon: Icons.sd_storage_rounded, label: item.size),
-                if (item.publisher != null)
-                  _MetaChip(icon: Icons.person_outline, label: item.publisher!),
-                _MetaChip(
-                  icon: Icons.schedule_rounded,
-                  label: _formatDate(item.publishDate),
+            ],
+          ),
+          trailing: selectMode
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.download_for_offline_outlined),
+                  tooltip: '下载',
+                  onPressed: onDownload,
                 ),
-              ],
-            ),
-          ],
+          onTap: selectMode
+              ? () => onToggleSelect?.call()
+              : () => _showDetailSheet(context),
+          onLongPress: selectMode
+              ? null
+              : (onEnterSelectMode ?? () => _showActionsSheet(context)),
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.download_for_offline_outlined),
-          tooltip: '下载',
-          onPressed: onDownload,
-        ),
-        onTap: () => _showDetailSheet(context),
-        onLongPress: () => _showActionsSheet(context),
       ),
     );
   }

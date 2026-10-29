@@ -22,7 +22,7 @@ import 'package:kazumi/services/platform/android_storage_access.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
 import 'package:kazumi/utils/disk_space.dart';
-import 'package:kazumi/utils/format.dart' show formatSpeed;
+import 'package:kazumi/utils/format.dart' show formatSpeed, parseSizeToBytes;
 import 'package:kazumi/utils/local_episode_parser.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart' hide formatSpeed;
 import 'package:mobx/mobx.dart';
@@ -31,6 +31,44 @@ import 'package:path/path.dart' as p;
 part 'magnet_controller.g.dart';
 
 class MagnetController = _MagnetController with _$MagnetController;
+
+/// 批量下载中的一个待提交任务：资源 + 预先解析好的归属番剧。
+///
+/// [scrapeInfo] 为空表示该资源下载完成后按标题自动识别（与单条下载
+/// 「不关联番剧」等价），[confidence] 仅在 [scrapeInfo] 非空时有意义。
+class MagnetBatchDownloadTask {
+  const MagnetBatchDownloadTask({
+    required this.item,
+    this.scrapeInfo,
+    this.confidence = 0.0,
+  });
+
+  final MagnetSearchItem item;
+  final MediaScrapeInfo? scrapeInfo;
+  final double confidence;
+}
+
+/// 批量添加下载的结果统计：分别记录成功、因重复跳过与提交失败的条数。
+///
+/// 批量提交时逐条弹 toast 会刷屏，调用方据此汇总成一条提示。
+class MagnetBatchAddResult {
+  const MagnetBatchAddResult({
+    this.added = 0,
+    this.skipped = 0,
+    this.failed = 0,
+  });
+
+  /// 成功进入下载队列的条数。
+  final int added;
+
+  /// 已存在同源任务、被跳过的条数。
+  final int skipped;
+
+  /// 提交失败的条数（引擎未就绪 / 链接无效等）。
+  final int failed;
+
+  int get total => added + skipped + failed;
+}
 
 String? _cleanOptional(String? value) {
   final v = value?.trim();
@@ -693,6 +731,49 @@ abstract class _MagnetController with Store {
     KazumiDialog.showToast(message: '已添加到下载队列');
   }
 
+  /// 批量添加下载任务，返回成功 / 跳过 / 失败的条数（不弹提示，由调用方汇总）。
+  ///
+  /// 与逐条调用 [addDownload] 的区别：
+  /// - 磁盘空间只按所选资源的总体积检查一次，避免批量下载时连续弹出
+  ///   N 个空间不足确认框（用户点过一次「仍然添加」后还要再点 N-1 次）；
+  /// - 去重与失败分别计数而不是逐条 toast，避免刷屏。
+  @action
+  Future<MagnetBatchAddResult> addDownloads(
+    List<MagnetBatchDownloadTask> tasks, {
+    String? dir,
+  }) async {
+    if (tasks.isEmpty) return const MagnetBatchAddResult();
+    if (!engineEnabled) {
+      return MagnetBatchAddResult(failed: tasks.length);
+    }
+    if (GStorage.getSetting(SettingsKeys.magnetDiskSpaceCheck)) {
+      final proceed = await _checkDiskSpaceBeforeBatch(tasks, dir);
+      // 用户取消：整批不提交（已提交一半再停下更难解释）。
+      if (!proceed) return const MagnetBatchAddResult();
+    }
+    var added = 0;
+    var skipped = 0;
+    var failed = 0;
+    for (final task in tasks) {
+      if (_downloads.alreadyQueued(task.item)) {
+        skipped++;
+        continue;
+      }
+      final taskId = await _downloads.add(
+        task.item,
+        dir: dir,
+        scrapeInfo: task.scrapeInfo,
+        scrapeConfidence: task.confidence,
+      );
+      if (taskId.isEmpty) {
+        failed++;
+      } else {
+        added++;
+      }
+    }
+    return MagnetBatchAddResult(added: added, skipped: skipped, failed: failed);
+  }
+
   /// 从本地 .torrent 种子文件添加下载任务。
   ///
   /// [filePath] 为用户选择的种子文件路径，[title] 为可选显示名（留空
@@ -723,7 +804,7 @@ abstract class _MagnetController with Store {
     MagnetSearchItem item,
     String? dir,
   ) async {
-    final neededBytes = _parseSizeBytes(item.size);
+    final neededBytes = parseSizeToBytes(item.size);
     if (neededBytes == null || neededBytes <= 0) return true;
     final targetDir =
         (dir ?? GStorage.getSetting(SettingsKeys.magnetDownloadDir))
@@ -758,29 +839,54 @@ abstract class _MagnetController with Store {
     return confirm ?? false;
   }
 
-  /// 解析资源体积字符串（`1.2 GB` / `800MB` / `1.5 TiB` / `1,234 MB` 等），
-  /// 失败返回 null。
-  static int? _parseSizeBytes(String label) {
-    if (label.trim().isEmpty) return null;
-    final match = RegExp(
-      r'([\d.,]+)\s*([KMGT]?i?B)',
-      caseSensitive: false,
-    ).firstMatch(label.trim());
-    if (match == null) return null;
-    final raw = match.group(1)!.replaceAll(',', '');
-    final value = double.tryParse(raw);
-    if (value == null || value < 0) return null;
-    final unit = match.group(2)!.toUpperCase().replaceAll('I', '');
-    const mult = {
-      'B': 1,
-      'KB': 1024,
-      'MB': 1048576,
-      'GB': 1073741824,
-      'TB': 1099511627776,
-    };
-    final m = mult[unit];
-    if (m == null) return null;
-    return (value * m).round();
+  /// 批量提交前的磁盘空间检查：按所选资源**总体积**检查一次，避免逐条
+  /// 弹确认框。体积全部无法解析 / 拿不到分区信息时跳过检查。
+  Future<bool> _checkDiskSpaceBeforeBatch(
+    List<MagnetBatchDownloadTask> tasks,
+    String? dir,
+  ) async {
+    var totalBytes = 0;
+    var sizedCount = 0;
+    for (final task in tasks) {
+      final bytes = parseSizeToBytes(task.item.size);
+      if (bytes == null || bytes <= 0) continue;
+      totalBytes += bytes;
+      sizedCount++;
+    }
+    if (totalBytes <= 0) return true;
+    final targetDir =
+        (dir ?? GStorage.getSetting(SettingsKeys.magnetDownloadDir))
+            .toString()
+            .trim();
+    if (targetDir.isEmpty) return true;
+    final freeBytes = await DiskSpace.availableBytes(targetDir);
+    if (freeBytes == null) return true;
+    if (freeBytes >= totalBytes) return true;
+    final needLabel = _formatBytes(totalBytes);
+    final freeLabel = _formatBytes(freeBytes);
+    final scope = sizedCount == tasks.length
+        ? '所选 ${tasks.length} 个资源'
+        : '所选资源中可估算体积的 $sizedCount 个';
+    final confirm = await KazumiDialog.show<bool>(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('磁盘空间不足'),
+        content: Text(
+          '$scope合计约需 $needLabel，目标分区仅剩 $freeLabel。\n\n'
+          '继续添加可能因空间不足导致下载失败，是否仍要添加？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: true),
+            child: const Text('仍然添加'),
+          ),
+        ],
+      ),
+    );
+    return confirm ?? false;
   }
 
   static String _formatBytes(int bytes) {

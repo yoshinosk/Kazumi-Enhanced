@@ -10,6 +10,7 @@ import 'package:kazumi/services/media/media_scraper.dart';
 import 'package:kazumi/services/media/media_title_matcher.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/directory_picker.dart';
+import 'package:kazumi/utils/format.dart' show formatBytes, parseSizeToBytes;
 
 /// 会话级下载目录记忆。
 ///
@@ -270,79 +271,20 @@ class _MagnetAddDownloadDialogState extends State<_MagnetAddDownloadDialog> {
               ),
             ],
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Text('归属番剧', style: theme.textTheme.labelLarge),
-                const Spacer(),
-                if (_scrapeInfo != null)
-                  IconButton(
-                    tooltip: '不关联（下载完成后自动识别）',
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => setState(() {
-                      _scrapeInfo = null;
-                      _scrapeExplicit = true;
-                    }),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                TextButton(
-                  onPressed: _pickAnime,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  child: Text(_scrapeInfo == null ? '指定番剧' : '更换'),
-                ),
-              ],
-            ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _scrapeInfo == null
-                    ? '自动识别（下载完成后按资源标题匹配）'
-                    : '《${_scrapeInfo!.displayName.isEmpty ? '未命名番剧' : _scrapeInfo!.displayName}》',
-                style: theme.textTheme.bodySmall,
-              ),
+            _ScrapeTargetSection(
+              info: _scrapeInfo,
+              onPick: _pickAnime,
+              onClear: () => setState(() {
+                _scrapeInfo = null;
+                _scrapeExplicit = true;
+              }),
             ),
             const SizedBox(height: 16),
-            Text('下载目录', style: theme.textTheme.labelLarge),
-            const SizedBox(height: 6),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SelectableText(
-                _selectedDir.isEmpty ? '正在解析默认目录…' : _selectedDir,
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: _picking ? null : _pickDir,
-                  icon: _picking
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.folder_open_rounded, size: 18),
-                  label: const Text('更改目录'),
-                ),
-                if (_usingCustomDir)
-                  TextButton(
-                    onPressed: _resetToDefault,
-                    child: const Text('使用默认目录'),
-                  ),
-              ],
+            _DownloadDirSection(
+              dir: _selectedDir,
+              picking: _picking,
+              onPick: _pickDir,
+              onReset: _usingCustomDir ? _resetToDefault : null,
             ),
           ],
         ),
@@ -389,6 +331,366 @@ class _MetaText extends StatelessWidget {
           label,
           style: theme.textTheme.bodySmall
               ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+/// 弹出「批量添加下载任务」确认框：为一批资源统一指定下载目录与归属番剧。
+///
+/// 批量下载常常一次十几集，若逐条弹目录确认，用户得点十几次才能下完，
+/// 因此这里只问一次并统一应用。归属番剧留空时由调用方按每个资源的标题
+/// 分别识别，不会把整批资源硬刮到同一部番剧上。
+Future<MagnetAddDownloadPlan?> showMagnetBatchAddDownloadDialog(
+  BuildContext context, {
+  required List<MagnetSearchItem> items,
+  required MagnetController controller,
+  String? presetDir,
+  MediaScrapeInfo? scrapeInfo,
+}) {
+  return KazumiDialog.show<MagnetAddDownloadPlan>(
+    context: context,
+    builder: (dialogContext) => _MagnetBatchAddDownloadDialog(
+      items: items,
+      controller: controller,
+      presetDir: presetDir,
+      initialScrapeInfo: scrapeInfo,
+    ),
+  );
+}
+
+class _MagnetBatchAddDownloadDialog extends StatefulWidget {
+  const _MagnetBatchAddDownloadDialog({
+    required this.items,
+    required this.controller,
+    this.presetDir,
+    this.initialScrapeInfo,
+  });
+
+  /// 本次要提交的资源（调用方已剔除下载队列中已存在的条目）。
+  final List<MagnetSearchItem> items;
+  final MagnetController controller;
+
+  /// 预设目录（订阅自带下载目录等）；为空时用全局默认目录。
+  final String? presetDir;
+
+  /// 磁力页当前的关联番剧，作为整批资源的默认归属。
+  final MediaScrapeInfo? initialScrapeInfo;
+
+  @override
+  State<_MagnetBatchAddDownloadDialog> createState() =>
+      _MagnetBatchAddDownloadDialogState();
+}
+
+class _MagnetBatchAddDownloadDialogState
+    extends State<_MagnetBatchAddDownloadDialog> {
+  /// 预览列表最多展示的条目数，其余用「等共 N 项」概括。
+  static const int _previewLimit = 5;
+
+  /// 全局默认目录（异步解析，解析完成前为 null）。
+  String? _defaultDir;
+
+  /// 当前选中的目录，为空表示仍在解析默认值。
+  String _selectedDir = '';
+  bool _picking = false;
+
+  MediaScrapeInfo? _scrapeInfo;
+
+  /// 用户是否手动改过归属：改过则以用户选择为准，不再按标题覆盖。
+  bool _scrapeExplicit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrapeInfo = widget.initialScrapeInfo;
+    final preset = widget.presetDir?.trim() ?? '';
+    _selectedDir = preset.isNotEmpty
+        ? preset
+        : MagnetSessionDownloadDir.lastPicked?.trim() ?? '';
+    _resolveDefaultDir();
+  }
+
+  bool get _usingCustomDir =>
+      _defaultDir != null && _selectedDir != _defaultDir;
+
+  Future<void> _resolveDefaultDir() async {
+    final dir = await LibtorrentEngine.resolveDownloadDir();
+    if (!mounted) return;
+    setState(() {
+      _defaultDir = dir;
+      if (_selectedDir.isEmpty) _selectedDir = dir;
+    });
+  }
+
+  /// 整批资源共用的归属番剧：用当前搜索词作为初始关键词更准，
+  /// 拿第一条资源的完整标题去搜反而容易被字幕组 / 集数干扰。
+  Future<void> _pickAnime() async {
+    final query = widget.controller.query.trim();
+    final keyword = query.isNotEmpty
+        ? query
+        : MediaScraper().cleanName(widget.items.first.title);
+    final picked = await showBangumiMatchSheet(
+      context,
+      controller: widget.controller,
+      initialKeyword: keyword,
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _scrapeInfo = MediaScrapeInfo.fromBangumiItem(picked);
+      _scrapeExplicit = true;
+    });
+  }
+
+  Future<void> _pickDir() async {
+    setState(() => _picking = true);
+    try {
+      final picked = await pickWritableDirectory(
+        dialogTitle: '选择下载目录',
+        initialDirectory: _selectedDir.isEmpty ? null : _selectedDir,
+      );
+      if (!mounted || picked == null) return;
+      setState(() => _selectedDir = picked);
+      MagnetSessionDownloadDir.lastPicked = picked;
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _resetToDefault() {
+    final defaultDir = _defaultDir;
+    if (defaultDir == null) return;
+    setState(() => _selectedDir = defaultDir);
+    MagnetSessionDownloadDir.reset();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = widget.items;
+    var totalBytes = 0;
+    for (final item in items) {
+      totalBytes += parseSizeToBytes(item.size) ?? 0;
+    }
+    final sizeLabel = totalBytes > 0 ? ' · 共约 ${formatBytes(totalBytes)}' : '';
+    final preview = items.take(_previewLimit).toList();
+    return AlertDialog(
+      title: const Text('批量添加下载任务'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '已选 ${items.length} 个资源$sizeLabel',
+              style: theme.textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final item in preview)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.downloading_rounded,
+                            size: 14,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              item.title.isEmpty ? '未命名资源' : item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (items.length > preview.length)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '等共 ${items.length} 项',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _ScrapeTargetSection(
+              info: _scrapeInfo,
+              onPick: _pickAnime,
+              onClear: () => setState(() {
+                _scrapeInfo = null;
+                _scrapeExplicit = true;
+              }),
+              emptyHint: '自动识别（每个任务下载完成后按标题匹配）',
+            ),
+            const SizedBox(height: 16),
+            _DownloadDirSection(
+              dir: _selectedDir,
+              picking: _picking,
+              onPick: _pickDir,
+              onReset: _usingCustomDir ? _resetToDefault : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _selectedDir.isEmpty
+              ? null
+              : () => Navigator.pop(
+                    context,
+                    MagnetAddDownloadPlan(
+                      dir: _selectedDir,
+                      scrapeInfo: _scrapeInfo,
+                      scrapeExplicit: _scrapeExplicit,
+                    ),
+                  ),
+          icon: const Icon(Icons.download_rounded, size: 18),
+          label: Text('添加 ${items.length} 个'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 「归属番剧」选择块：展示当前归属，可更换或清除（两类下载弹窗共用）。
+class _ScrapeTargetSection extends StatelessWidget {
+  const _ScrapeTargetSection({
+    required this.info,
+    required this.onPick,
+    required this.onClear,
+    this.emptyHint = '自动识别（下载完成后按资源标题匹配）',
+  });
+
+  final MediaScrapeInfo? info;
+  final VoidCallback onPick;
+  final VoidCallback onClear;
+
+  /// 未指定归属时的说明文案（单条与批量的识别口径不同）。
+  final String emptyHint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('归属番剧', style: theme.textTheme.labelLarge),
+            const Spacer(),
+            if (info != null)
+              IconButton(
+                tooltip: '不关联（下载完成后自动识别）',
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                onPressed: onClear,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            TextButton(
+              onPressed: onPick,
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              child: Text(info == null ? '指定番剧' : '更换'),
+            ),
+          ],
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            info == null
+                ? emptyHint
+                : '《${info!.displayName.isEmpty ? '未命名番剧' : info!.displayName}》',
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 「下载目录」选择块：展示目标目录，可更改或恢复默认（两类下载弹窗共用）。
+class _DownloadDirSection extends StatelessWidget {
+  const _DownloadDirSection({
+    required this.dir,
+    required this.picking,
+    required this.onPick,
+    this.onReset,
+  });
+
+  final String dir;
+  final bool picking;
+  final VoidCallback onPick;
+
+  /// 恢复默认目录；为 null 时说明当前已是默认目录，不显示该入口。
+  final VoidCallback? onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('下载目录', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: SelectableText(
+            dir.isEmpty ? '正在解析默认目录…' : dir,
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: picking ? null : onPick,
+              icon: picking
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.folder_open_rounded, size: 18),
+              label: const Text('更改目录'),
+            ),
+            if (onReset != null)
+              TextButton(
+                onPressed: onReset,
+                child: const Text('使用默认目录'),
+              ),
+          ],
         ),
       ],
     );

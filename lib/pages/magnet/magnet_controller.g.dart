@@ -572,6 +572,21 @@ mixin _$MagnetController on _MagnetController, Store {
     );
   }
 
+  late final _$addDownloadsAsyncAction = AsyncAction(
+    '_MagnetController.addDownloads',
+    context: context,
+  );
+
+  @override
+  Future<MagnetBatchAddResult> addDownloads(
+    List<MagnetBatchDownloadTask> tasks, {
+    String? dir,
+  }) {
+    return _$addDownloadsAsyncAction.run(
+      () => super.addDownloads(tasks, dir: dir),
+    );
+  }
+
   late final _$addTorrentFileAsyncAction = AsyncAction(
     '_MagnetController.addTorrentFile',
     context: context,
