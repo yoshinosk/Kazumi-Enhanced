@@ -560,9 +560,15 @@ mixin _$MagnetController on _MagnetController, Store {
     MagnetSearchItem item, {
     String? dir,
     MediaScrapeInfo? scrapeInfo,
+    double scrapeConfidence = 1.0,
   }) {
     return _$addDownloadAsyncAction.run(
-      () => super.addDownload(item, dir: dir, scrapeInfo: scrapeInfo),
+      () => super.addDownload(
+        item,
+        dir: dir,
+        scrapeInfo: scrapeInfo,
+        scrapeConfidence: scrapeConfidence,
+      ),
     );
   }
 

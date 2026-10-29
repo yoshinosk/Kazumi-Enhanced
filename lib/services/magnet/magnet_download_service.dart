@@ -662,11 +662,14 @@ class MagnetDownloadService {
   /// [dir] 指定下载目录，留空则使用引擎默认目录。
   /// [scrapeInfo] 为已关联的番剧信息（如从番剧详情页发起搜索时携带），
   /// 此时任务默认为「已搜刮」的番剧，下载完成后会自动同步到媒体库。
+  /// [scrapeConfidence] 为归属可信度：详情页直连为 1.0，搜索词与资源标题
+  /// 只部分吻合时取实际评分，低于自动入库阈值时只同步结果、不移动文件。
   /// 返回 torrent 标识；若引擎不可用则返回空字符串。
   Future<String> add(
     MagnetSearchItem item, {
     String? dir,
     MediaScrapeInfo? scrapeInfo,
+    double scrapeConfidence = 1.0,
   }) async {
     // 引擎未运行则先尝试启动。
     if (LibtorrentEngine.enabledBySettings &&
@@ -707,9 +710,10 @@ class MagnetDownloadService {
       savePath: savePath,
       addedAt: DateTime.now(),
       scrapeInfo: scrapeInfo,
-      // 详情页携带的番剧信息是用户主动关联，置信度视为 1.0，
-      // 自动入库时无需额外校验阈值。
-      scrapeConfidence: scrapeInfo != null ? 1.0 : 0,
+      // 详情页携带的番剧信息是用户主动关联，置信度视为 1.0；搜索页传入
+      // 的归属可能只是部分吻合，按实际评分记录，供自动入库阈值判断。
+      scrapeConfidence:
+          scrapeInfo != null ? scrapeConfidence.clamp(0.0, 1.0) : 0,
     );
     _entries.insert(0, entry);
     _reconcileQueue();

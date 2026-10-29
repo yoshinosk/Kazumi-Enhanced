@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -8,6 +7,7 @@ import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/request/apis/trace_api.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
+import 'package:kazumi/services/media/media_title_matcher.dart';
 import 'package:kazumi/services/media/video_frame_extractor.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/chinese_convert.dart';
@@ -121,16 +121,6 @@ class MediaScraper {
 
   /// 中低置信度时要求的「最优 - 次优」差距。
   static const double _kSecondBestGap = 0.1;
-
-  /// 子串匹配时，条目名作为片段的最小长度。
-  static const int _kMinFragmentNameLength = 4;
-
-  /// 子串匹配时，条目名至少占关键词的比例。
-  static const double _kMinFragmentCoverage = 0.5;
-
-  /// LCS 兜底要求的最小公共子串长度与占比。
-  static const int _kMinLcsLength = 3;
-  static const double _kMinLcsRatio = 0.7;
 
   /// 搜索缓存：同一个关键词在批量 / 多分组 / 重跑时只请求一次。
   static const int _kSearchCacheMaxEntries = 128;
@@ -369,20 +359,6 @@ class MediaScraper {
       return 10 + map[v.substring(1)]!;
     }
     return map[v];
-  }
-
-  /// 归一化用于比较的字符串：转小写 + 去装饰符号 + **繁体转简体**。
-  ///
-  /// 繁简归一是关键：台配源（[ANi]/[Baha]）标题是繁体，而 Bangumi
-  /// 条目名基本是简体或日文原名，不归一就永远打不上分。
-  String _normalize(String s) {
-    return toSimplifiedChinese(s)
-        .toLowerCase()
-        // `×` 是乘号，`x` 是字母：统一成 `x`。既保留 `HUNTER×HUNTER` /
-        // `xxxHOLiC` 与普通短名的区分度，又让 `Hunter x Hunter` 仍能匹配。
-        .replaceAll('×', 'x')
-        .replaceAll(
-            RegExp(r'''[\s\-_·・.。:：（）()\[\]【】{}「」『』"'~～+*]'''), '');
   }
 
   /// 去掉标题里的「季数标记及其之后的一切」，得到主标题。
@@ -877,7 +853,7 @@ class MediaScraper {
     int? year,
   }) {
     if (items.isEmpty) return null;
-    final normalizedKeyword = _normalize(keyword);
+    final normalizedKeyword = MediaTitleMatcher.normalize(keyword);
 
     _Match? best;
     double second = 0;
@@ -917,15 +893,15 @@ class MediaScraper {
     int? year,
   }) {
     final names = <String>[
-      if (item.nameCn.isNotEmpty) _normalize(item.nameCn),
-      if (item.name.isNotEmpty) _normalize(item.name),
-      ...item.alias.map(_normalize),
+      if (item.nameCn.isNotEmpty) MediaTitleMatcher.normalize(item.nameCn),
+      if (item.name.isNotEmpty) MediaTitleMatcher.normalize(item.name),
+      ...item.alias.map(MediaTitleMatcher.normalize),
     ];
 
     double bestNameScore = 0;
     for (final name in names) {
       if (name.isEmpty) continue;
-      final score = _nameSimilarity(normalizedKeyword, name);
+      final score = MediaTitleMatcher.nameSimilarity(normalizedKeyword, name);
       if (score > bestNameScore) bestNameScore = score;
     }
     if (bestNameScore <= 0) return 0;
@@ -958,57 +934,6 @@ class MediaScraper {
     return score > 1 ? 1 : score;
   }
 
-  /// 关键词与条目名称的相似度（0~1）。
-  double _nameSimilarity(String keyword, String name) {
-    if (keyword.isEmpty || name.isEmpty) return 0;
-    if (keyword == name) return 1.0;
-    // 关键词是条目名的一部分：短关键词匹配更完整的长标题。
-    if (name.contains(keyword)) return 0.9;
-    // 条目名是关键词的一部分：只有片段足够长、占比足够高时才可信。
-    // 否则「关于我转生变成史莱姆这档事」会命中条目「史莱姆」。
-    if (keyword.contains(name)) {
-      if (name.length < _kMinFragmentNameLength) return 0;
-      final coverage = name.length / keyword.length;
-      if (coverage < _kMinFragmentCoverage) return 0;
-      return 0.75 * coverage;
-    }
-    // 最长公共子串占比兜底：分母取较长串，避免长关键词配短条目时虚高。
-    final lcs = _longestCommonSubstring(keyword, name);
-    if (lcs.length < _kMinLcsLength) return 0;
-    final ratio = lcs.length / math.max(keyword.length, name.length);
-    return ratio >= _kMinLcsRatio ? ratio * 0.8 : 0;
-  }
-
-  /// 最长公共子串：滚动数组实现，避免每个别名都分配 O(n·m) 二维表。
-  String _longestCommonSubstring(String a, String b) {
-    if (a.isEmpty || b.isEmpty) return '';
-    var prev = List<int>.filled(b.length + 1, 0);
-    var curr = List<int>.filled(b.length + 1, 0);
-    var maxLen = 0;
-    var endIndex = 0;
-    for (var i = 1; i <= a.length; i++) {
-      for (var j = 1; j <= b.length; j++) {
-        if (a[i - 1] == b[j - 1]) {
-          curr[j] = prev[j - 1] + 1;
-          if (curr[j] > maxLen) {
-            maxLen = curr[j];
-            endIndex = i;
-          }
-        } else {
-          curr[j] = 0;
-        }
-      }
-      final swap = prev;
-      prev = curr;
-      curr = swap;
-      // 复用行必须清零，否则上一轮的值会残留到下一次遍历。
-      for (var j = 0; j < curr.length; j++) {
-        curr[j] = 0;
-      }
-    }
-    return maxLen == 0 ? '' : a.substring(endIndex - maxLen, endIndex);
-  }
-
   /// 测试用：直接验证打分逻辑，不依赖网络。
   @visibleForTesting
   ({double confidence, MediaScrapeInfo info})? bestMatchForTest(
@@ -1025,7 +950,10 @@ class MediaScraper {
   /// 测试用：验证归一化后的名称相似度。
   @visibleForTesting
   double nameSimilarityForTest(String keyword, String name) =>
-      _nameSimilarity(_normalize(keyword), _normalize(name));
+      MediaTitleMatcher.nameSimilarity(
+        MediaTitleMatcher.normalize(keyword),
+        MediaTitleMatcher.normalize(name),
+      );
 
   /// 测试用：清空进程内搜索 / 图片识别缓存。
   @visibleForTesting

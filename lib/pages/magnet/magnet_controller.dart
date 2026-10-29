@@ -666,6 +666,7 @@ abstract class _MagnetController with Store {
     MagnetSearchItem item, {
     String? dir,
     MediaScrapeInfo? scrapeInfo,
+    double scrapeConfidence = 1.0,
   }) async {
     if (!engineEnabled) {
       KazumiDialog.showToast(message: '请先在设置中开启磁力下载引擎');
@@ -679,7 +680,12 @@ abstract class _MagnetController with Store {
       final proceed = await _checkDiskSpaceBeforeAdd(item, dir);
       if (!proceed) return;
     }
-    final taskId = await _downloads.add(item, dir: dir, scrapeInfo: scrapeInfo);
+    final taskId = await _downloads.add(
+      item,
+      dir: dir,
+      scrapeInfo: scrapeInfo,
+      scrapeConfidence: scrapeConfidence,
+    );
     if (taskId.isEmpty) {
       KazumiDialog.showToast(message: '提交下载失败，请检查引擎状态');
       return;

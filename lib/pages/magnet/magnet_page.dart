@@ -14,6 +14,7 @@ import 'package:kazumi/bean/widget/tab_pill_bar.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/history/history_module.dart'
     show kLocalMediaAdapterName;
+import 'package:kazumi/pages/magnet/bangumi_match_sheet.dart';
 import 'package:kazumi/pages/magnet/magnet_controller.dart';
 import 'package:kazumi/pages/magnet/magnet_download_dialog.dart';
 import 'package:kazumi/pages/media/media_controller.dart';
@@ -26,6 +27,7 @@ import 'package:kazumi/services/magnet/magnet_search_sources.dart';
 import 'package:kazumi/services/magnet/torrent_file_meta.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
 import 'package:kazumi/services/media/media_scraper.dart';
+import 'package:kazumi/services/media/media_title_matcher.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/device.dart';
@@ -36,8 +38,9 @@ import 'package:path/path.dart' as p;
 
 /// 番剧详情页发起的磁力搜索路由参数：搜索关键词 + 关联的番剧信息。
 ///
-/// 携带 [anime] 时，本次会话中下载的任务默认为「已搜刮」的番剧，
-/// 任务会同步番剧信息，下载完成后自动同步到媒体库。
+/// 携带 [anime] 时，它是搜索结果的**默认归属**：下载的任务会同步番剧信息，
+/// 完成后自动同步到媒体库。用户在本页改搜其他番剧时关联会自动解除，
+/// 且每次下载前都会按资源标题复核，避免把别的番剧刮到这一部上。
 class MagnetSearchRouteArgs {
   const MagnetSearchRouteArgs({required this.query, this.anime});
 
@@ -58,8 +61,8 @@ class MagnetPage extends StatefulWidget {
   /// 可选的初始搜索关键词，由番剧详情页「搜索资源」传入。
   final String? initialQuery;
 
-  /// 可选的关联番剧（由番剧详情页传入），携带后本次会话下载的任务
-  /// 默认为「已搜刮」的番剧。
+  /// 可选的关联番剧（由番剧详情页传入），作为搜索结果的默认下载归属；
+  /// 用户改搜其他番剧后该关联会自动解除。
   final BangumiItem? initialAnime;
 
   @override
@@ -72,10 +75,21 @@ class _MagnetPageState extends State<MagnetPage>
   late final TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
 
+  /// 当前会话的关联番剧：由详情页带入，用户可在本页更换或解除。
+  ///
+  /// 关联只影响「下载后的搜刮归属」，因此必须随搜索意图变化：用户换了
+  /// 关键词去搜别的番剧时，继续沿用旧番剧会把资源刮到错误的条目上。
+  BangumiItem? _linkedAnime;
+
+  /// 进入本页时的搜索关键词：用于识别「只是换个说法搜同一部番」。
+  late final String _linkAnchorQuery;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _linkedAnime = widget.initialAnime;
+    _linkAnchorQuery = widget.initialQuery?.trim() ?? '';
     final initialKeyword = widget.initialQuery?.trim() ?? '';
     _searchController.text = initialKeyword.isNotEmpty
         ? initialKeyword
@@ -90,6 +104,63 @@ class _MagnetPageState extends State<MagnetPage>
       }
     });
     _checkClipboardForMagnetLink();
+  }
+
+  String _bangumiLabel(BangumiItem item) {
+    if (item.nameCn.isNotEmpty) return item.nameCn;
+    if (item.name.isNotEmpty) return item.name;
+    return '未知番剧';
+  }
+
+  /// 统一的搜索提交入口：先按新关键词校正关联番剧，再发起搜索。
+  ///
+  /// 搜索框回车、搜索按钮、历史词条三条路径都必须走这里，否则会出现
+  /// 「界面已经搜别的番剧，下载却仍挂旧番剧」的错位。
+  void _submitSearch(String keyword) {
+    if (_searchController.text != keyword) {
+      _searchController.text = keyword;
+    }
+    _detachAnimeIfSearchChanged(keyword.trim());
+    controller.search(keyword);
+  }
+
+  /// 新关键词不再指向关联番剧时解除关联，避免资源被刮到别的番剧上。
+  void _detachAnimeIfSearchChanged(String keyword) {
+    final linked = _linkedAnime;
+    if (linked == null || keyword.isEmpty) return;
+    if (MediaTitleMatcher.queryMatchesBangumi(keyword, linked)) return;
+    if (_looksLikeSameSearch(keyword)) return;
+    setState(() => _linkedAnime = null);
+    KazumiDialog.showToast(
+      message: '已解除与《${_bangumiLabel(linked)}》的关联，'
+          '本次下载将按资源标题自动识别番剧',
+    );
+  }
+
+  /// 关键词与进入时的关键词互为包含关系（加减集数、字幕组等修饰词），
+  /// 视为仍在搜同一部番，保留关联。
+  bool _looksLikeSameSearch(String keyword) {
+    final anchor = MediaTitleMatcher.normalize(_linkAnchorQuery);
+    final current = MediaTitleMatcher.normalize(keyword);
+    if (anchor.isEmpty || current.isEmpty) return false;
+    return current.contains(anchor) || anchor.contains(current);
+  }
+
+  /// 关联 / 更换本次下载归属的番剧。
+  Future<void> _pickLinkedAnime() async {
+    final keyword = _searchController.text.trim().isNotEmpty
+        ? _searchController.text.trim()
+        : controller.query.trim();
+    final item = await showBangumiMatchSheet(
+      context,
+      controller: controller,
+      initialKeyword: keyword,
+    );
+    if (item == null || !mounted) return;
+    setState(() => _linkedAnime = item);
+    KazumiDialog.showToast(
+      message: '本次下载将归属《${_bangumiLabel(item)}》',
+    );
   }
 
   /// 检测剪贴板中的磁力 / 种子链接，弹窗一键添加下载。
@@ -180,6 +251,17 @@ class _MagnetPageState extends State<MagnetPage>
         icon: const Icon(Icons.arrow_back),
       ),
       actions: [
+        IconButton(
+          tooltip: _linkedAnime == null
+              ? '关联番剧（下载完成后自动匹配）'
+              : '关联番剧：${_bangumiLabel(_linkedAnime!)}（点击更换）',
+          onPressed: _pickLinkedAnime,
+          icon: Icon(
+            _linkedAnime == null
+                ? Icons.link_off_rounded
+                : Icons.link_rounded,
+          ),
+        ),
         Observer(
           builder: (_) {
             return PopupMenuButton<String>(
@@ -225,22 +307,98 @@ class _MagnetPageState extends State<MagnetPage>
         MagnetSearchTab(
           controller: controller,
           searchController: _searchController,
-          anime: widget.initialAnime,
+          anime: _linkedAnime,
+          onSearch: _submitSearch,
         ),
-        MagnetSubscriptionsTab(
-          controller: controller,
-          anime: widget.initialAnime,
-        ),
+        MagnetSubscriptionsTab(controller: controller),
         MagnetDownloadsTab(controller: controller),
       ],
     );
     // 宽窄切换只影响标题栏内的组件，body 始终是同一个 TabBarView，
     // 各 tab 的滚动位置、展开状态等 State 不会因子树重建而丢失。
-    return Scaffold(appBar: appBar, body: tabBarView);
+    return Scaffold(
+      appBar: appBar,
+      body: Column(
+        children: [
+          if (_linkedAnime != null)
+            // 关联只作用于搜索结果的下载：订阅下载不继承它，因此仅在
+            // 搜索 Tab 展示横幅，避免切到订阅 Tab 后产生误导。
+            AnimatedBuilder(
+              animation: _tabController,
+              builder: (_, _) => _tabController.index == 0
+                  ? _LinkedAnimeBanner(
+                      label: _bangumiLabel(_linkedAnime!),
+                      onReplace: _pickLinkedAnime,
+                      onDetach: () => setState(() => _linkedAnime = null),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          Expanded(child: tabBarView),
+        ],
+      ),
+    );
   }
 
   /// 宽屏（≥ 700px）时切换到顶部胶囊标签栏的断点。
   static const double _pillBarBreakpoint = 700;
+}
+
+/// 磁力页顶部的关联番剧横幅：让「本次下载会被刮到哪部番剧」始终可见。
+///
+/// 关联只应在确认当前搜索仍是这部番时保留；用户换关键词后由页面自动
+/// 解除，避免资源被刮到详情页那一部上。
+class _LinkedAnimeBanner extends StatelessWidget {
+  const _LinkedAnimeBanner({
+    required this.label,
+    required this.onReplace,
+    required this.onDetach,
+  });
+
+  final String label;
+  final VoidCallback onReplace;
+  final VoidCallback onDetach;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final foreground = theme.colorScheme.onSecondaryContainer;
+    return Material(
+      color: theme.colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
+        child: Row(
+          children: [
+            Icon(Icons.link_rounded, size: 18, color: foreground),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '本次下载归属《$label》',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: foreground),
+              ),
+            ),
+            TextButton(
+              onPressed: onReplace,
+              style: TextButton.styleFrom(
+                foregroundColor: foreground,
+                visualDensity: VisualDensity.compact,
+              ),
+              child: const Text('更换'),
+            ),
+            IconButton(
+              onPressed: onDetach,
+              tooltip: '解除关联',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              color: foreground,
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class MagnetSearchTab extends StatefulWidget {
@@ -249,13 +407,19 @@ class MagnetSearchTab extends StatefulWidget {
     required this.controller,
     required this.searchController,
     this.anime,
+    this.onSearch,
   });
 
   final MagnetController controller;
   final TextEditingController searchController;
 
-  /// 关联番剧（由番剧详情页传入），非空时下载的任务默认为「已搜刮」。
+  /// 当前关联的番剧：非空时下载的任务默认为「已搜刮」，并作为下载前的
+  /// 归属校验依据。父页面会随搜索关键词变化更新它。
   final BangumiItem? anime;
+
+  /// 搜索提交回调。由磁力页注入以统一做「关联番剧校正」；未注入时
+  /// （如下载中心内嵌的搜索页）直接调用控制器。
+  final ValueChanged<String>? onSearch;
 
   @override
   State<MagnetSearchTab> createState() => _MagnetSearchTabState();
@@ -286,6 +450,16 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
   MediaScrapeInfo? get _animeScrapeInfo {
     final anime = widget.anime;
     return anime == null ? null : MediaScrapeInfo.fromBangumiItem(anime);
+  }
+
+  /// 统一的搜索提交：优先交给父页面（先校正关联番剧），否则直接搜。
+  void _submit(String keyword) {
+    final onSearch = widget.onSearch;
+    if (onSearch != null) {
+      onSearch(keyword);
+      return;
+    }
+    controller.search(keyword);
   }
 
   bool _onScroll(ScrollNotification n) {
@@ -366,21 +540,21 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                           icon: const Icon(Icons.clear_rounded),
                           onPressed: () {
                             widget.searchController.clear();
-                            controller.search('');
+                            _submit('');
                           },
                         ),
                       IconButton(
                         tooltip: '搜索',
                         icon: const Icon(Icons.search_rounded),
                         onPressed: () =>
-                            controller.search(widget.searchController.text),
+                            _submit(widget.searchController.text),
                       ),
                     ],
                   );
                 },
               ),
             ),
-            onSubmitted: (value) => controller.search(value),
+            onSubmitted: (value) => _submit(value),
           ),
           // 搜索条件工具栏：字幕组筛选 + 按当前条件创建订阅。
           // 字幕组筛选始终展示：仅 Animes Garden 源支持，其它源置灰、
@@ -471,7 +645,7 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                         // 同步输入框，避免输入框仍为空时按“搜索”触发
                         // search('') 把刚发起的搜索清空。
                         widget.searchController.text = keyword;
-                        controller.search(keyword);
+                        _submit(keyword);
                       },
                     );
                   }
@@ -515,6 +689,8 @@ class _MagnetSearchTabState extends State<MagnetSearchTab> {
                           controller: controller,
                           item: item,
                           scrapeInfo: _animeScrapeInfo,
+                          linkedAnime: widget.anime,
+                          queryHint: controller.query,
                         ),
                       );
                     },
@@ -1013,13 +1189,9 @@ class MagnetSubscriptionsTab extends StatefulWidget {
   const MagnetSubscriptionsTab({
     super.key,
     required this.controller,
-    this.anime,
   });
 
   final MagnetController controller;
-
-  /// 关联番剧（由番剧详情页传入），非空时下载的任务默认为「已搜刮」。
-  final BangumiItem? anime;
 
   @override
   State<MagnetSubscriptionsTab> createState() => _MagnetSubscriptionsTabState();
@@ -1027,13 +1199,6 @@ class MagnetSubscriptionsTab extends StatefulWidget {
 
 class _MagnetSubscriptionsTabState extends State<MagnetSubscriptionsTab> {
   MagnetController get controller => widget.controller;
-
-  /// 详情页传入的番剧转换出的搜刮信息，非空时本次会话下载的任务
-  /// 默认为「已搜刮」的番剧。
-  MediaScrapeInfo? get _animeScrapeInfo {
-    final anime = widget.anime;
-    return anime == null ? null : MediaScrapeInfo.fromBangumiItem(anime);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1083,7 +1248,6 @@ class _MagnetSubscriptionsTabState extends State<MagnetSubscriptionsTab> {
                         return _SubscriptionTile(
                           subscription: sub,
                           controller: controller,
-                          scrapeInfo: _animeScrapeInfo,
                         );
                       },
                     ),
@@ -1108,14 +1272,10 @@ class _SubscriptionTile extends StatefulWidget {
   const _SubscriptionTile({
     required this.subscription,
     required this.controller,
-    this.scrapeInfo,
   });
 
   final MagnetSubscription subscription;
   final MagnetController controller;
-
-  /// 关联番剧的搜刮信息，非空时下载的任务默认为「已搜刮」。
-  final MediaScrapeInfo? scrapeInfo;
 
   @override
   State<_SubscriptionTile> createState() => _SubscriptionTileState();
@@ -1328,7 +1488,9 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
                           controller: widget.controller,
                           item: item,
                           presetDir: widget.subscription.downloadPath,
-                          scrapeInfo: widget.scrapeInfo,
+                          // 订阅不继承磁力页的关联番剧：一条订阅可能对应别的
+                          // 番剧，沿用详情页那一部会把资源刮到错误条目上。
+                          // 留空后由下载完成时的自动搜刮按标题识别。
                         ),
                       ),
                     if (feed.length > 20)
@@ -2186,14 +2348,10 @@ class _MagnetDownloadsTabState extends State<MagnetDownloadsTab> {
     final initial = scraper.cleanName(
       task.fileName.isNotEmpty ? task.fileName : task.title,
     );
-    final item = await showModalBottomSheet<BangumiItem>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _MatchAnimeSheet(
-        controller: widget.controller,
-        initialKeyword: initial,
-      ),
+    final item = await showBangumiMatchSheet(
+      context,
+      controller: widget.controller,
+      initialKeyword: initial,
     );
     if (item == null || !mounted) return;
     await widget.controller.matchDownloadToBangumi(task.taskId, item);
@@ -2931,149 +3089,6 @@ class _DownloadGroupSectionState extends State<_DownloadGroupSection> {
           ),
         const Divider(height: 1),
       ],
-    );
-  }
-}
-
-/// 「待确认」下载任务的手动匹配面板：搜索 Bangumi 番剧并返回选中条目。
-class _MatchAnimeSheet extends StatefulWidget {
-  const _MatchAnimeSheet({
-    required this.controller,
-    required this.initialKeyword,
-  });
-
-  final MagnetController controller;
-  final String initialKeyword;
-
-  @override
-  State<_MatchAnimeSheet> createState() => _MatchAnimeSheetState();
-}
-
-class _MatchAnimeSheetState extends State<_MatchAnimeSheet> {
-  late final TextEditingController _keywordCtrl;
-  List<BangumiItem> _results = const [];
-  bool _searching = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _keywordCtrl = TextEditingController(text: widget.initialKeyword);
-    _search();
-  }
-
-  @override
-  void dispose() {
-    _keywordCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _search() async {
-    final keyword = _keywordCtrl.text.trim();
-    if (keyword.isEmpty) return;
-    setState(() {
-      _searching = true;
-      _error = null;
-    });
-    final items = await widget.controller.searchBangumi(keyword);
-    if (!mounted) return;
-    setState(() {
-      _searching = false;
-      _results = items;
-      if (items.isEmpty) {
-        _error = '没有找到相关番剧，试试更换关键词';
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.7,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('匹配番剧', style: theme.textTheme.titleMedium),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _keywordCtrl,
-                      decoration: const InputDecoration(
-                        hintText: '搜索番剧关键词',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) => _search(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filledTonal(
-                    onPressed: _searching ? null : _search,
-                    icon: const Icon(Icons.search_rounded),
-                    tooltip: '搜索',
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: _searching
-                  ? const Center(child: CircularProgressIndicator())
-                  : _results.isEmpty
-                  ? Center(
-                      child: Text(
-                        _error ?? '输入关键词搜索 Bangumi',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: _results.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = _results[index];
-                        final cover =
-                            item.images['large'] ?? item.images['common'];
-                        return ListTile(
-                          onTap: () => Navigator.pop(context, item),
-                          leading: (cover != null && cover.isNotEmpty)
-                              ? SizedBox(
-                                  width: 36,
-                                  height: 48,
-                                  child: NetworkImgLayer(
-                                    src: cover,
-                                    width: 36,
-                                    height: 48,
-                                  ),
-                                )
-                              : null,
-                          title: Text(
-                            item.nameCn.isNotEmpty ? item.nameCn : item.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: item.airDate.isNotEmpty
-                              ? Text(item.airDate)
-                              : null,
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
