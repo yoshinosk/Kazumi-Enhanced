@@ -10,10 +10,13 @@ MagnetSearchItem _item(String id) => MagnetSearchItem(
       publishDate: DateTime(2026, 1, 1),
     );
 
-MagnetSubscription _subscription({String? lastGuid}) => MagnetSubscription(
+MagnetSubscription _subscription({
+  String? lastGuid,
+  String feedUrl = 'https://example.test/feed.xml',
+}) => MagnetSubscription(
       id: 'sub-1',
       name: 'Feed',
-      feedUrl: 'https://example.test/feed.xml',
+      feedUrl: feedUrl,
       createdAt: DateTime(2026, 1, 1),
       lastGuid: lastGuid,
     );
@@ -145,5 +148,94 @@ void main() {
     expect(onNewItemsCalled, isFalse);
     expect(sub!.lastGuid, isNull);
     expect(saved.single.single.lastGuid, isNull);
+  });
+
+  test('removeMany 批量删除指定订阅并合并为一次保存', () async {
+    final saved = <List<MagnetSubscription>>[];
+    final service = MagnetSubscriptionService(
+      fetchFeed: (_) async => const [],
+      saveSubscriptions: (value) async => saved.add(value),
+    );
+    final a = await service.add(_subscription(feedUrl: 'https://a'));
+    final b = await service.add(_subscription(feedUrl: 'https://b'));
+    final c = await service.add(_subscription(feedUrl: 'https://c'));
+
+    saved.clear();
+    await service.removeMany([a!.id, c!.id]);
+
+    expect(service.subscriptions.map((s) => s.id), [b!.id]);
+    expect(saved.length, 1);
+  });
+
+  test('setAutoDownloadMany 批量切换自动下载且不影响游标', () async {
+    final latest = _item('latest');
+    final service = MagnetSubscriptionService(
+      fetchFeed: (_) async => [latest],
+      saveSubscriptions: (_) async {},
+    );
+    service.onNewItems = (_, _) async => true;
+    final a = await service.add(_subscription(feedUrl: 'https://a'));
+    final b = await service.add(_subscription(feedUrl: 'https://b'));
+
+    await service.setAutoDownloadMany([a!.id, b!.id], false);
+
+    expect(
+      service.subscriptions.every(
+        (s) => !s.autoDownload && s.lastGuid == latest.magnetLink,
+      ),
+      isTrue,
+    );
+  });
+
+  test('setDownloadPathMany 批量设置下载目录，null 表示清除', () async {
+    final service = MagnetSubscriptionService(
+      fetchFeed: (_) async => const [],
+      saveSubscriptions: (_) async {},
+    );
+    final a = await service.add(_subscription(feedUrl: 'https://a'));
+    final b = await service.add(_subscription(feedUrl: 'https://b'));
+
+    await service.setDownloadPathMany([a!.id], 'D:/Anime');
+
+    expect(
+      service.subscriptions.firstWhere((s) => s.id == a.id).downloadPath,
+      'D:/Anime',
+    );
+    expect(
+      service.subscriptions.firstWhere((s) => s.id == b!.id).downloadPath,
+      isNull,
+    );
+
+    await service.setDownloadPathMany([a.id], null);
+
+    expect(
+      service.subscriptions.firstWhere((s) => s.id == a.id).downloadPath,
+      isNull,
+    );
+  });
+
+  test('checkAll 指定 onlyIds 时只检查选中的订阅', () async {
+    final feeds = <String, List<MagnetSearchItem>>{};
+    final reported = <String>[];
+    final service = MagnetSubscriptionService(
+      fetchFeed: (sub) async => feeds[sub.feedUrl] ?? const [],
+      saveSubscriptions: (_) async {},
+    );
+    service.onNewItems = (sub, _) async {
+      reported.add(sub.feedUrl);
+      return true;
+    };
+    final a = await service.add(_subscription(feedUrl: 'https://a'));
+    await service.add(_subscription(feedUrl: 'https://b'));
+
+    feeds['https://a'] = [_item('a1')];
+    await service.checkAll(onlyIds: [a!.id]);
+    expect(reported, ['https://a']);
+
+    // 已检查的 a 游标已推进，全量检查时只剩 b 被上报。
+    feeds['https://b'] = [_item('b1')];
+    reported.clear();
+    await service.checkAll();
+    expect(reported, ['https://b']);
   });
 }

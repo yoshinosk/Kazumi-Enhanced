@@ -665,6 +665,19 @@ abstract class _MagnetController with Store {
     subscriptionFeedErrors.remove(id);
   }
 
+  /// 批量删除订阅。
+  @action
+  Future<void> removeSubscriptions(Iterable<String> ids) async {
+    final idList = ids.toList();
+    if (idList.isEmpty) return;
+    await _subscriptions.removeMany(idList);
+    for (final id in idList) {
+      subscriptionFeeds.remove(id);
+      subscriptionFeedErrors.remove(id);
+    }
+    KazumiDialog.showToast(message: '已删除 ${idList.length} 个订阅');
+  }
+
   @action
   Future<void> loadSubscriptionFeed(MagnetSubscription sub) async {
     try {
@@ -682,15 +695,45 @@ abstract class _MagnetController with Store {
   }
 
   @action
-  Future<void> checkSubscriptions() async {
-    await _subscriptions.checkAll();
-    KazumiDialog.showToast(message: '已检查所有订阅');
+  Future<void> checkSubscriptions({Iterable<String>? onlyIds}) async {
+    await _subscriptions.checkAll(onlyIds: onlyIds);
+    KazumiDialog.showToast(
+      message: onlyIds == null ? '已检查所有订阅' : '已检查所选订阅',
+    );
   }
 
   /// 切换订阅的自动下载开关。
   @action
   Future<void> setSubscriptionAutoDownload(String id, bool value) async {
     await _subscriptions.setAutoDownload(id, value);
+  }
+
+  /// 批量切换订阅的自动下载开关。
+  @action
+  Future<void> setSubscriptionsAutoDownload(
+    Iterable<String> ids,
+    bool value,
+  ) async {
+    await _subscriptions.setAutoDownloadMany(ids, value);
+    KazumiDialog.showToast(
+      message: value ? '已开启所选订阅的自动下载' : '已关闭所选订阅的自动下载',
+    );
+  }
+
+  /// 批量设置订阅的下载目录（path 为空表示清除，恢复默认目录）。
+  @action
+  Future<void> setSubscriptionsDownloadPath(
+    Iterable<String> ids,
+    String? path,
+  ) async {
+    final normalized = path?.trim();
+    final value = (normalized == null || normalized.isEmpty)
+        ? null
+        : normalized;
+    await _subscriptions.setDownloadPathMany(ids, value);
+    KazumiDialog.showToast(
+      message: value == null ? '已清除所选订阅的下载目录' : '下载目录已更新',
+    );
   }
 
   /// 是否已存在与 [item] 同源资源的下载任务（按 info-hash 规范化比较，

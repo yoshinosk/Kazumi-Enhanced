@@ -74,10 +74,23 @@ class MagnetSubscriptionService {
     _startPolling();
   }
 
+  /// 生成订阅 id：时间戳；同一时钟粒度内连续添加会撞车（Windows 时钟
+  /// 粒度粗），此时追加自增后缀。批量管理按 id 操作，重复 id 会互相误伤。
+  String _nextId() {
+    final base = DateTime.now().microsecondsSinceEpoch.toString();
+    var id = base;
+    var counter = 0;
+    while (_subscriptions.any((s) => s.id == id)) {
+      counter++;
+      id = '${base}_$counter';
+    }
+    return id;
+  }
+
   /// 添加订阅，立即拉取并上报当前 feed 条目（视为新内容）触发自动下载，
   /// 成功后游标推进到最新条目；失败（引擎未启用等）不推进游标，下次检查重试。
   Future<MagnetSubscription?> add(MagnetSubscription subscription) async {
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final id = _nextId();
     final base = MagnetSubscription(
       id: id,
       name: subscription.name.trim().isEmpty
@@ -164,15 +177,82 @@ class MagnetSubscriptionService {
     onSubscriptionsChanged?.call(_subscriptions);
   }
 
-  /// 检查所有订阅。出错时跳过该订阅，不影响其他订阅。
+  /// 批量删除订阅：合并为一次持久化与一次变更通知。
+  Future<void> removeMany(Iterable<String> ids) async {
+    final idSet = ids.toSet();
+    if (idSet.isEmpty) return;
+    final remaining = _subscriptions.where((s) => !idSet.contains(s.id)).toList();
+    if (remaining.length == _subscriptions.length) return;
+    _subscriptions = remaining;
+    await _saveSubscriptions(_subscriptions);
+    onSubscriptionsChanged?.call(_subscriptions);
+  }
+
+  /// 批量切换自动下载开关（保留 lastGuid / lastCheckedAt）。
+  Future<void> setAutoDownloadMany(Iterable<String> ids, bool value) async {
+    final idSet = ids.toSet();
+    if (idSet.isEmpty) return;
+    var found = false;
+    _subscriptions = _subscriptions.map((s) {
+      if (!idSet.contains(s.id)) return s;
+      found = true;
+      return s.copyWith(autoDownload: value);
+    }).toList();
+    if (!found) return;
+    await _saveSubscriptions(_subscriptions);
+    onSubscriptionsChanged?.call(_subscriptions);
+  }
+
+  /// 批量设置下载目录（传 null 表示清除，恢复使用默认目录）。
+  ///
+  /// [copyWith] 不支持覆盖 downloadPath，这里按 [update] 的方式整条重建，
+  /// 其余字段与游标保持原值。
+  Future<void> setDownloadPathMany(Iterable<String> ids, String? path) async {
+    final idSet = ids.toSet();
+    if (idSet.isEmpty) return;
+    var found = false;
+    _subscriptions = _subscriptions.map((s) {
+      if (!idSet.contains(s.id)) return s;
+      found = true;
+      return MagnetSubscription(
+        id: s.id,
+        name: s.name,
+        feedUrl: s.feedUrl,
+        createdAt: s.createdAt,
+        lastGuid: s.lastGuid,
+        lastCheckedAt: s.lastCheckedAt,
+        kind: s.kind,
+        fansub: s.fansub,
+        keywords: s.keywords,
+        since: s.since,
+        minSizeMb: s.minSizeMb,
+        maxSizeMb: s.maxSizeMb,
+        downloadPath: path,
+        autoDownload: s.autoDownload,
+        coverUrl: s.coverUrl,
+      );
+    }).toList();
+    if (!found) return;
+    await _saveSubscriptions(_subscriptions);
+    onSubscriptionsChanged?.call(_subscriptions);
+  }
+
+  /// 检查订阅。出错时跳过该订阅，不影响其他订阅。
+  ///
+  /// 传入 [onlyIds] 时只检查指定订阅（批量管理里的「检查所选」）。
   ///
   /// 通过 [_checking] 互斥：定时轮询与手动「检查更新」可能重叠执行，
   /// 重叠会导致同一批新条目被重复上报、重复创建下载任务。
-  Future<void> checkAll() async {
+  Future<void> checkAll({Iterable<String>? onlyIds}) async {
     if (_checking || _subscriptions.isEmpty) return;
+    final idSet = onlyIds?.toSet();
+    final targets = idSet == null
+        ? _subscriptions
+        : _subscriptions.where((s) => idSet.contains(s.id)).toList();
+    if (targets.isEmpty) return;
     _checking = true;
     try {
-      for (final sub in _subscriptions) {
+      for (final sub in targets) {
         try {
           await _checkOne(sub);
         } catch (e) {

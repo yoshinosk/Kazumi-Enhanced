@@ -514,6 +514,18 @@ mixin _$MagnetController on _MagnetController, Store {
     );
   }
 
+  late final _$removeSubscriptionsAsyncAction = AsyncAction(
+    '_MagnetController.removeSubscriptions',
+    context: context,
+  );
+
+  @override
+  Future<void> removeSubscriptions(Iterable<String> ids) {
+    return _$removeSubscriptionsAsyncAction.run(
+      () => super.removeSubscriptions(ids),
+    );
+  }
+
   late final _$loadSubscriptionFeedAsyncAction = AsyncAction(
     '_MagnetController.loadSubscriptionFeed',
     context: context,
@@ -532,9 +544,9 @@ mixin _$MagnetController on _MagnetController, Store {
   );
 
   @override
-  Future<void> checkSubscriptions() {
+  Future<void> checkSubscriptions({Iterable<String>? onlyIds}) {
     return _$checkSubscriptionsAsyncAction.run(
-      () => super.checkSubscriptions(),
+      () => super.checkSubscriptions(onlyIds: onlyIds),
     );
   }
 
@@ -547,6 +559,33 @@ mixin _$MagnetController on _MagnetController, Store {
   Future<void> setSubscriptionAutoDownload(String id, bool value) {
     return _$setSubscriptionAutoDownloadAsyncAction.run(
       () => super.setSubscriptionAutoDownload(id, value),
+    );
+  }
+
+  late final _$setSubscriptionsAutoDownloadAsyncAction = AsyncAction(
+    '_MagnetController.setSubscriptionsAutoDownload',
+    context: context,
+  );
+
+  @override
+  Future<void> setSubscriptionsAutoDownload(Iterable<String> ids, bool value) {
+    return _$setSubscriptionsAutoDownloadAsyncAction.run(
+      () => super.setSubscriptionsAutoDownload(ids, value),
+    );
+  }
+
+  late final _$setSubscriptionsDownloadPathAsyncAction = AsyncAction(
+    '_MagnetController.setSubscriptionsDownloadPath',
+    context: context,
+  );
+
+  @override
+  Future<void> setSubscriptionsDownloadPath(
+    Iterable<String> ids,
+    String? path,
+  ) {
+    return _$setSubscriptionsDownloadPathAsyncAction.run(
+      () => super.setSubscriptionsDownloadPath(ids, path),
     );
   }
 

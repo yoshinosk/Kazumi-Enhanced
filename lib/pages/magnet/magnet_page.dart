@@ -1457,36 +1457,219 @@ class MagnetSubscriptionsTab extends StatefulWidget {
 class _MagnetSubscriptionsTabState extends State<MagnetSubscriptionsTab> {
   MagnetController get controller => widget.controller;
 
+  /// 批量管理多选模式：条目显示勾选框，工具栏替换为批量操作栏。
+  bool _selectMode = false;
+
+  /// 多选模式下已勾选的订阅 id 集合。
+  final Set<String> _selectedIds = {};
+
+  // ---------------- 批量管理多选 ----------------
+
+  void _enterSelectMode([MagnetSubscription? sub]) {
+    setState(() {
+      _selectMode = true;
+      if (sub != null) _selectedIds.add(sub.id);
+    });
+  }
+
+  void _exitSelectMode() {
+    if (!_selectMode && _selectedIds.isEmpty) return;
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(MagnetSubscription sub) {
+    setState(() {
+      if (!_selectedIds.remove(sub.id)) _selectedIds.add(sub.id);
+    });
+  }
+
+  /// 全选 / 取消全选当前订阅列表。
+  void _toggleSelectAll(List<MagnetSubscription> subs) {
+    setState(() {
+      final allSelected =
+          subs.isNotEmpty && subs.every((s) => _selectedIds.contains(s.id));
+      if (allSelected) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds.addAll(subs.map((s) => s.id));
+      }
+    });
+  }
+
+  /// 当前勾选且仍存在的订阅（自动剔除已被删除的订阅）。
+  List<MagnetSubscription> get _selectedSubs => controller.subscriptions
+      .where((s) => _selectedIds.contains(s.id))
+      .toList();
+
+  /// 检查所选订阅的更新（仅拉取勾选的订阅，不检查未勾选的）。
+  Future<void> _checkSelected() async {
+    final selected = _selectedSubs;
+    if (selected.isEmpty) return;
+    await controller.checkSubscriptions(onlyIds: selected.map((s) => s.id));
+  }
+
+  /// 批量切换所选订阅的自动下载开关：全部开启时切换为关闭，否则统一开启。
+  Future<void> _toggleAutoDownloadSelected() async {
+    final selected = _selectedSubs;
+    if (selected.isEmpty) return;
+    await controller.setSubscriptionsAutoDownload(
+      selected.map((s) => s.id),
+      !selected.every((s) => s.autoDownload),
+    );
+  }
+
+  /// 批量设置所选订阅的下载目录，落盘后新条目将下载到该目录。
+  Future<void> _pickDownloadDirForSelected() async {
+    final selected = _selectedSubs;
+    if (selected.isEmpty) return;
+    final path = await pickWritableDirectory(dialogTitle: '选择订阅下载目录');
+    if (path == null || !mounted) return;
+    await controller.setSubscriptionsDownloadPath(
+      selected.map((s) => s.id),
+      path,
+    );
+  }
+
+  /// 批量删除所选订阅：删除只移除订阅本身，已创建的下载任务与文件不受影响。
+  Future<void> _deleteSelected() async {
+    final selected = _selectedSubs;
+    if (selected.isEmpty) return;
+    final label = selected.length == 1
+        ? '「${selected.first.name}」'
+        : '${selected.length} 个订阅';
+    final ok = await KazumiDialog.show<bool>(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除订阅'),
+        content: Text('确定删除$label吗？已创建的下载任务与文件不受影响。'),
+        actions: [
+          TextButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => KazumiDialog.dismiss(popWith: true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await controller.removeSubscriptions(selected.map((s) => s.id));
+    if (!mounted) return;
+    _exitSelectMode();
+  }
+
+  /// 多选模式下的批量操作栏（替换「添加订阅 / 检查更新」工具栏）。
+  Widget _buildBatchBar(BuildContext context, List<MagnetSubscription> subs) {
+    final theme = Theme.of(context);
+    final selected = _selectedSubs;
+    final allSelected =
+        subs.isNotEmpty && subs.every((s) => _selectedIds.contains(s.id));
+    // 全部勾选的订阅都开了自动下载时，按钮切换为「批量关闭」，否则统一开启。
+    final allAutoOn =
+        selected.isNotEmpty && selected.every((s) => s.autoDownload);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: '退出多选',
+            icon: const Icon(Icons.close_rounded),
+            visualDensity: VisualDensity.compact,
+            onPressed: _exitSelectMode,
+          ),
+          Expanded(
+            child: Text(
+              selected.isEmpty ? '点选要批量管理的订阅' : '已选 ${selected.length} 项',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          IconButton(
+            tooltip: allSelected ? '取消全选' : '全选',
+            icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _toggleSelectAll(subs),
+          ),
+          IconButton(
+            tooltip: '检查所选订阅更新',
+            icon: const Icon(Icons.refresh_rounded),
+            visualDensity: VisualDensity.compact,
+            onPressed: selected.isEmpty ? null : _checkSelected,
+          ),
+          IconButton(
+            tooltip: allAutoOn ? '关闭所选订阅自动下载' : '开启所选订阅自动下载',
+            icon: Icon(
+              allAutoOn
+                  ? Icons.notifications_off_rounded
+                  : Icons.notifications_active_rounded,
+            ),
+            visualDensity: VisualDensity.compact,
+            onPressed: selected.isEmpty ? null : _toggleAutoDownloadSelected,
+          ),
+          IconButton(
+            tooltip: '设置所选订阅下载目录',
+            icon: const Icon(Icons.folder_open_rounded),
+            visualDensity: VisualDensity.compact,
+            onPressed: selected.isEmpty ? null : _pickDownloadDirForSelected,
+          ),
+          IconButton(
+            tooltip: '删除所选订阅',
+            icon: const Icon(Icons.delete_outline),
+            visualDensity: VisualDensity.compact,
+            onPressed: selected.isEmpty ? null : _deleteSelected,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Observer(
       builder: (_) {
+        final subs = controller.subscriptions;
         return Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _showAddDialog(context),
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('添加订阅'),
+            if (_selectMode)
+              _buildBatchBar(context, subs)
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showAddDialog(context),
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('添加订阅'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: controller.subscriptions.isEmpty
-                        ? null
-                        : () => controller.checkSubscriptions(),
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('检查更新'),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: subs.isEmpty
+                          ? null
+                          : () => controller.checkSubscriptions(),
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('检查更新'),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: '批量管理（多选）',
+                      icon: const Icon(Icons.checklist_rounded),
+                      visualDensity: VisualDensity.compact,
+                      onPressed:
+                          subs.isEmpty ? null : () => _enterSelectMode(),
+                    ),
+                  ],
+                ),
               ),
-            ),
             Expanded(
-              child: controller.subscriptions.isEmpty
+              child: subs.isEmpty
                   ? const Center(
                       child: GeneralEmptyState(
                         icon: Icons.rss_feed_rounded,
@@ -1498,13 +1681,17 @@ class _MagnetSubscriptionsTabState extends State<MagnetSubscriptionsTab> {
                         horizontal: 12,
                         vertical: 8,
                       ),
-                      itemCount: controller.subscriptions.length,
+                      itemCount: subs.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
-                        final sub = controller.subscriptions[index];
+                        final sub = subs[index];
                         return _SubscriptionTile(
                           subscription: sub,
                           controller: controller,
+                          selectMode: _selectMode,
+                          selected: _selectedIds.contains(sub.id),
+                          onToggleSelect: () => _toggleSelect(sub),
+                          onEnterSelectMode: () => _enterSelectMode(sub),
                         );
                       },
                     ),
@@ -1529,10 +1716,26 @@ class _SubscriptionTile extends StatefulWidget {
   const _SubscriptionTile({
     required this.subscription,
     required this.controller,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggleSelect,
+    this.onEnterSelectMode,
   });
 
   final MagnetSubscription subscription;
   final MagnetController controller;
+
+  /// 批量管理多选模式：显示勾选框，点按切换选中，隐藏操作按钮与展开区。
+  final bool selectMode;
+
+  /// 当前条目是否已勾选（仅 [selectMode] 有意义）。
+  final bool selected;
+
+  /// 切换本条选中状态。
+  final VoidCallback? onToggleSelect;
+
+  /// 长按进入多选模式并选中本条。
+  final VoidCallback? onEnterSelectMode;
 
   @override
   State<_SubscriptionTile> createState() => _SubscriptionTileState();
@@ -1576,24 +1779,31 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
   Widget build(BuildContext context) {
     final sub = widget.subscription;
     final theme = Theme.of(context);
+    final selectMode = widget.selectMode;
     return Column(
       children: [
         ListTile(
-          leading: sub.coverUrl.isNotEmpty
-              ? SizedBox(
-                  width: 44,
-                  height: 60,
-                  child: NetworkImgLayer(
-                    src: sub.coverUrl,
-                    width: 44,
-                    height: 60,
-                  ),
+          leading: selectMode
+              ? Checkbox(
+                  value: widget.selected,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: (_) => widget.onToggleSelect?.call(),
                 )
-              : Icon(
-                  sub.kind == SubscriptionKind.animesGarden
-                      ? Icons.cloud_circle_rounded
-                      : Icons.rss_feed_rounded,
-                ),
+              : sub.coverUrl.isNotEmpty
+                  ? SizedBox(
+                      width: 44,
+                      height: 60,
+                      child: NetworkImgLayer(
+                        src: sub.coverUrl,
+                        width: 44,
+                        height: 60,
+                      ),
+                    )
+                  : Icon(
+                      sub.kind == SubscriptionKind.animesGarden
+                          ? Icons.cloud_circle_rounded
+                          : Icons.rss_feed_rounded,
+                    ),
           title: Text(sub.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             _subscriptionSummary(sub),
@@ -1601,42 +1811,51 @@ class _SubscriptionTileState extends State<_SubscriptionTile> {
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall,
           ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded, size: 20),
-                tooltip: '加载条目',
-                onPressed: () => widget.controller.loadSubscriptionFeed(sub),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 20),
-                tooltip: '编辑订阅',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => _AddSubscriptionPage(
-                      controller: widget.controller,
-                      existing: sub,
+          trailing: selectMode
+              ? null
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      tooltip: '加载条目',
+                      onPressed: () =>
+                          widget.controller.loadSubscriptionFeed(sub),
                     ),
-                    fullscreenDialog: true,
-                  ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 20),
+                      tooltip: '编辑订阅',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => _AddSubscriptionPage(
+                            controller: widget.controller,
+                            existing: sub,
+                          ),
+                          fullscreenDialog: true,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: '删除订阅',
+                      onPressed: () =>
+                          widget.controller.removeSubscription(sub.id),
+                    ),
+                  ],
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 20),
-                tooltip: '删除订阅',
-                onPressed: () => widget.controller.removeSubscription(sub.id),
-              ),
-            ],
-          ),
-          onTap: () {
-            setState(() => _expanded = !_expanded);
-            if (_expanded) {
-              widget.controller.loadSubscriptionFeed(sub);
-            }
-          },
+          onTap: selectMode
+              ? () => widget.onToggleSelect?.call()
+              : () {
+                  setState(() => _expanded = !_expanded);
+                  if (_expanded) {
+                    widget.controller.loadSubscriptionFeed(sub);
+                  }
+                },
+          onLongPress: widget.onEnterSelectMode,
         ),
-        if (_expanded)
+        // 多选模式下收起展开区，避免与勾选操作混淆（保留 _expanded 状态，
+        // 退出多选后恢复原样）。
+        if (_expanded && !selectMode)
           Observer(
             builder: (_) {
               final sub = widget.subscription;
