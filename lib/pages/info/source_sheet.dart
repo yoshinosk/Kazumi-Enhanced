@@ -34,9 +34,18 @@ part 'source_captcha_flow.dart';
 part 'source_sheet_view.dart';
 
 class SourceSheet extends StatefulWidget {
-  const SourceSheet({super.key, required this.infoController});
+  const SourceSheet({
+    super.key,
+    required this.infoController,
+    this.onPlaySelected,
+  });
 
   final InfoController infoController;
+
+  /// 由播放页的「来源与详情」面板复用时会传入：选中某个结果后不再自己
+  /// 跳转播放页，而是把参数交回调用方（播放页需要替换自身路由，不能在
+  /// 播放页之上再叠一层播放页）。
+  final ValueChanged<OnlineVideoPlaybackArgs>? onPlaySelected;
 
   @override
   State<SourceSheet> createState() => _SourceSheetState();
@@ -132,15 +141,21 @@ class _SourceSheetState extends State<SourceSheet> with KazumiDialogOwner {
             plugin.queryChapterRoads(searchItem.src, cancelToken: cancelToken),
       );
       if (roads.isEmpty) throw ChapterErrorException(plugin.name);
+      final args = OnlineVideoPlaybackArgs(
+        bangumiItem: widget.infoController.bangumiItem,
+        plugin: plugin,
+        title: searchItem.name,
+        src: searchItem.src,
+        roads: roads,
+      );
+      final onPlaySelected = widget.onPlaySelected;
+      if (onPlaySelected != null) {
+        task.withContext((_) => onPlaySelected(args));
+        return;
+      }
       task.withContext((context) => context.pushNamed(
             '/video/',
-            arguments: OnlineVideoPlaybackArgs(
-              bangumiItem: widget.infoController.bangumiItem,
-              plugin: plugin,
-              title: searchItem.name,
-              src: searchItem.src,
-              roads: roads,
-            ),
+            arguments: args,
           ));
     }, onError: (error, stackTrace) {
       KazumiLogger().w('SourceSheet: failed to query playlist', error: error);

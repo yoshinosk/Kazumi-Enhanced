@@ -7,11 +7,15 @@ class MediaErrorWidget extends StatelessWidget {
     required this.title,
     required this.errMsg,
     required this.icon,
+    this.actions = const [],
   });
 
   final String title;
   final String errMsg;
   final IconData icon;
+
+  /// 错误状态下的补充操作（换线路、换来源、去详情页等）。
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +33,7 @@ class MediaErrorWidget extends StatelessWidget {
         errMsg: errMsg,
         icon: icon,
         compact: true,
+        actions: actions,
       ),
     );
   }

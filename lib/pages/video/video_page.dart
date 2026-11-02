@@ -10,10 +10,12 @@ import 'package:window_manager/window_manager.dart';
 
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/widget/app_background_layer.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
 import 'package:kazumi/bean/widget/media_error_widget.dart';
+import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/navigation.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
@@ -25,6 +27,7 @@ import 'package:kazumi/pages/player/episode_danmaku_sheet.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/player/player_item.dart';
 import 'package:kazumi/pages/video/episode_selection_panel.dart';
+import 'package:kazumi/pages/video/playback_source_sheet.dart';
 import 'package:kazumi/pages/video/player_content_tabs.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
@@ -65,6 +68,7 @@ class _VideoPageState extends State<VideoPage>
   VideoPageController get videoPageController => widget.videoPageController;
   bool _didInitializePlayback = false;
   bool _isExiting = false;
+  bool _sourceSheetOpen = false;
   HistoryController get historyController => widget.historyController;
   DownloadController get downloadController => widget.downloadController;
   late bool playResume;
@@ -263,6 +267,69 @@ class _VideoPageState extends State<VideoPage>
     });
   }
 
+  /// 播放页的「来源与详情」入口。
+  ///
+  /// 从历史记录等入口直接进入播放页时，此前没有回到番剧详情或更换播放源
+  /// 的入口，来源失效只能退回列表重新找到该番剧。面板只收集选择，跳转在
+  /// 这里完成：换源必须替换当前播放页，不能叠一层新的播放页。
+  Future<void> _openPlaybackSourceSheet() async {
+    if (_isExiting || _sourceSheetOpen) return;
+    _sourceSheetOpen = true;
+    try {
+      final action = await showPlaybackSourceSheet(
+        context,
+        videoPageController: videoPageController,
+      );
+      if (!mounted || action == null) return;
+      switch (action) {
+        case PlaybackSourceSwitch(:final args):
+          playerController.beginShutdown();
+          context.popAndPushNamed('/video/', arguments: args);
+        case PlaybackSourceOpenInfo():
+          _openBangumiInfo();
+      }
+    } finally {
+      _sourceSheetOpen = false;
+    }
+  }
+
+  void _openBangumiInfo() {
+    // 本地媒体库的 AniList / legacy 条目没有 Bangumi subject ID，详情页
+    // 查不到任何数据。
+    if (videoPageController.bangumiItem.id <= 0) {
+      KazumiDialog.showToast(message: '该条目没有关联 Bangumi 详情');
+      return;
+    }
+    // 详情页会挡住播放器，让视频在背后继续出声不合适。
+    if (playerController.playback.playing) {
+      playerController.pause();
+    }
+    context.pushNamed('/info/', arguments: videoPageController.bangumiItem);
+  }
+
+  /// 除当前线路外，下一条有剧集的线路；在线播放且存在其它非空线路时才可换。
+  int? _nextAlternativeRoad() {
+    if (!videoPageController.isOnlinePlaybackMode) return null;
+    final roads = videoPageController.roadList;
+    if (roads.length < 2) return null;
+    final current = videoPageController.selectedEpisode.road;
+    for (var step = 1; step < roads.length; step++) {
+      final index = (current + step) % roads.length;
+      if (roads[index].data.isNotEmpty) return index;
+    }
+    return null;
+  }
+
+  /// 换到下一条线路重试当前集：单条线路失效时这是最快的补救。
+  void _switchToNextRoad() {
+    final road = _nextAlternativeRoad();
+    if (road == null) return;
+    final episodes = videoPageController.roadList[road].data;
+    final episode =
+        videoPageController.selectedEpisode.episode.clamp(1, episodes.length);
+    changeEpisode(episode, currentRoad: road);
+  }
+
   Future<void> changeEpisode(int episode,
       {int currentRoad = 0, int offset = 0}) async {
     if (!mounted || _isExiting) {
@@ -384,10 +451,29 @@ class _VideoPageState extends State<VideoPage>
                   child: Observer(builder: (context) {
                     final errorMessage = videoPageController.errorMessage;
                     if (errorMessage != null) {
+                      final nextRoad = _nextAlternativeRoad();
                       return MediaErrorWidget(
                         title: '暂时无法播放',
                         errMsg: errorMessage,
                         icon: Icons.videocam_off_outlined,
+                        actions: [
+                          if (nextRoad != null)
+                            StateActionButton.tonal(
+                              onPressed: _switchToNextRoad,
+                              text: '换线路',
+                              icon: Icons.switch_video_rounded,
+                            ),
+                          StateActionButton.tonal(
+                            onPressed: _openPlaybackSourceSheet,
+                            text: '切换来源',
+                            icon: Icons.swap_horiz_rounded,
+                          ),
+                          StateActionButton(
+                            onPressed: _openBangumiInfo,
+                            text: '番剧详情',
+                            icon: Icons.info_outline_rounded,
+                          ),
+                        ],
                       );
                     }
                     return Center(
@@ -451,6 +537,12 @@ class _VideoPageState extends State<VideoPage>
                           const Expanded(
                               child: dtb.DragToMoveArea(
                                   child: SizedBox(height: 40))),
+                          IconButton(
+                            icon: const Icon(Icons.swap_horiz_rounded,
+                                color: Colors.white),
+                            tooltip: '换源 / 番剧详情',
+                            onPressed: _openPlaybackSourceSheet,
+                          ),
                           IconButton(
                             icon: const Icon(Icons.refresh_outlined,
                                 color: Colors.white),

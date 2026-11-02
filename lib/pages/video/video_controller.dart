@@ -170,6 +170,23 @@ abstract class _VideoPageController with Store implements Disposable {
   bool get isOnlinePlaybackMode =>
       !isOfflineMode && !isLocalMediaMode && !isStreamMode;
 
+  /// 当前播放来源的可读名称，供播放页「来源与详情」面板展示。
+  ///
+  /// 在线模式取插件名；缓存模式带上下载时的插件名，用户据此判断该换成
+  /// 哪个来源；本地媒体库和边下边播没有插件概念，用固定名称。
+  String get playbackSourceLabel {
+    if (isOnlinePlaybackMode) {
+      return currentPlugin.name;
+    }
+    if (isStreamMode) {
+      return '边下边播';
+    }
+    if (isLocalMediaMode) {
+      return '本地媒体库';
+    }
+    return _offlinePluginName.isEmpty ? '缓存播放' : '缓存 · $_offlinePluginName';
+  }
+
   int? _localMediaBangumiSyncId;
 
   /// 本地媒体模式下的 Bangumi subject ID，仅搜刮来源为 bangumi 时非空；
@@ -1213,6 +1230,9 @@ abstract class _VideoPageController with Store implements Disposable {
         unawaited(_loadPlaybackDanmaku(playerController, params, session));
       } else if (session.isActive) {
         _playbackSessions.cancel();
+        // 播放器初始化失败时页面会停在黑屏：给出错误状态，播放页的错误页
+        // 才有换线路 / 换来源 / 回详情页这几个出口。
+        _failLoading('播放器加载失败，可以换条线路或换个来源再试');
       }
     } on VideoSourceTimeoutException {
       if (session.isStale) {
