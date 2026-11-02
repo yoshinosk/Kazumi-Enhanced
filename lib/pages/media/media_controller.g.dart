@@ -539,6 +539,21 @@ mixin _$MediaController on _MediaController, Store {
     );
   }
 
+  late final _$deleteLocalFoldersAsyncAction = AsyncAction(
+    '_MediaController.deleteLocalFolders',
+    context: context,
+  );
+
+  @override
+  Future<void> deleteLocalFolders(
+    List<LocalMediaFolder> targets, {
+    String? label,
+  }) {
+    return _$deleteLocalFoldersAsyncAction.run(
+      () => super.deleteLocalFolders(targets, label: label),
+    );
+  }
+
   late final _$deleteFileAsyncAction = AsyncAction(
     '_MediaController.deleteFile',
     context: context,

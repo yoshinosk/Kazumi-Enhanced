@@ -68,6 +68,38 @@ class MediaGridItem {
   ];
 }
 
+/// 「清理已看完」面板的一个条目。
+///
+/// 已匹配番剧按番剧聚合（该番剧的全部本地目录一并纳入）；未匹配文件夹
+/// 各自单独成项。
+class MediaCleanupEntry {
+  const MediaCleanupEntry({
+    this.info,
+    required this.folders,
+    required this.finishedAt,
+  });
+
+  /// 番剧元数据，为 null 表示未匹配文件夹。
+  final MediaScrapeInfo? info;
+
+  /// 该项要删除的本地文件夹（已匹配时为该番剧的全部本地目录）。
+  final List<LocalMediaFolder> folders;
+
+  /// 最近一次看完的时间（用于排序与展示）。
+  final DateTime finishedAt;
+
+  String get title => info?.displayName ?? folders.first.name;
+
+  int get fileCount =>
+      folders.fold<int>(0, (sum, folder) => sum + folder.count);
+
+  int get totalSize => folders.fold<int>(
+    0,
+    (sum, folder) =>
+        sum + folder.files.fold<int>(0, (acc, file) => acc + file.size),
+  );
+}
+
 /// 播放位置的可读展示（如 `12:34` / `1:02:03`），无效位置返回空串。
 String localMediaPositionLabel(Duration position) {
   final total = position.inSeconds;
@@ -756,6 +788,54 @@ abstract class _MediaController with Store {
   /// 文件夹的分集观看位置（解析集数 → 最后观看位置，无历史则 null）。
   Map<int, Duration>? watchPositionsFor(LocalMediaFolder folder) =>
       watchProgresses[localMediaPathKey(folder.path)]?.positions;
+
+  /// 可清理的「已看完」本地文件夹（按番剧 / 未匹配文件夹聚合）。
+  ///
+  /// 「已看完」沿用在库中展示的口径：该文件夹最近观看的一集播放完毕
+  /// （进度落库时归零），且它已经是文件夹里的最后一个文件——即续播点
+  /// 显示「已看完」、没有下一集可续播。桌面端媒体库的文件不参与清理。
+  ///
+  /// 同一番剧的多季目录共用一条本地历史，续播点只记录最近观看的那一季；
+  /// 它显示已看完即代表整部番剧追完，因此该番剧的全部本地目录都会进入
+  /// 同一清理项（与番剧组删除的范围一致）。
+  List<MediaCleanupEntry> get cleanupEntries {
+    final foldersByIdentity = <String, List<LocalMediaFolder>>{};
+    for (final folder in _localLibrary) {
+      final info = scrapeResults[folder.path];
+      if (info == null || folder.files.isEmpty) continue;
+      (foldersByIdentity[info.identityKey] ??= []).add(folder);
+    }
+    final entries = <String, MediaCleanupEntry>{};
+    for (final folder in _localLibrary) {
+      if (folder.files.isEmpty) continue;
+      final resume = resumePointFor(folder);
+      if (resume == null || !resume.finished || resume.nextFile != null) {
+        continue;
+      }
+      final info = scrapeResults[folder.path];
+      final key =
+          info?.identityKey ?? 'folder:${localMediaPathKey(folder.path)}';
+      final folders = info == null
+          ? <LocalMediaFolder>[folder]
+          : [...?foldersByIdentity[info.identityKey]];
+      final existing = entries[key];
+      if (existing == null) {
+        entries[key] = MediaCleanupEntry(
+          info: info,
+          folders: folders,
+          finishedAt: resume.updatedAt,
+        );
+      } else if (resume.updatedAt.isAfter(existing.finishedAt)) {
+        entries[key] = MediaCleanupEntry(
+          info: info,
+          folders: existing.folders,
+          finishedAt: resume.updatedAt,
+        );
+      }
+    }
+    return entries.values.toList()
+      ..sort((a, b) => b.finishedAt.compareTo(a.finishedAt));
+  }
 
   /// Android：确保已授予媒体视频读取权限（无权限时请求一次）。
   Future<void> _ensureAndroidReadAccess() async {
@@ -1487,7 +1567,18 @@ abstract class _MediaController with Store {
 
   /// 删除番剧组的全部本地关联文件和目录（番剧视图右键「删除」入口）。
   ///
-  /// 对组内每个文件夹：
+  /// 实现在 [deleteLocalFolders]，这里仅把组内文件夹交给它处理。
+  @action
+  Future<void> deleteAnimeGroup(AnimeGroup group) async {
+    await deleteLocalFolders(
+      group.folders,
+      label: group.info?.displayName ?? '未匹配',
+    );
+  }
+
+  /// 批量删除本地文件夹及其视频（番剧组删除 / 「清理已看完」共用）。
+  ///
+  /// 对每个文件夹：
   /// - 磁盘上真实存在、不是用户添加的媒体库根目录、且子树内没有其他
   ///   番剧的库内文件时，整目录递归删除（视频、外挂字幕、弹幕侧车等
   ///   一并清除），随后向上清理因此变空的祖先目录；
@@ -1495,16 +1586,21 @@ abstract class _MediaController with Store {
   ///   的逻辑路径）逐个删除本组视频文件；受影响目录在已无视频残留时
   ///   清掉弹幕侧车并自底向上删除空目录（不越过媒体库根目录）。
   ///
-  /// 同时移除按路径持久化的搜刮结果（组自身路径精确匹配 + 被整树删除
-  /// 目录的前缀清理），最后重扫使内存库与磁盘同步。
+  /// 同时移除按路径持久化的搜刮结果（目标路径精确匹配 + 被整树删除
+  /// 目录的前缀清理），最后重扫使内存库与磁盘同步。[label] 用于删除
+  /// 完成后的提示文案（如番剧名），为 null 时提示清理的目录数量。
   @action
-  Future<void> deleteAnimeGroup(AnimeGroup group) async {
-    if (group.folders.any((folder) => folder.isRemote)) {
+  Future<void> deleteLocalFolders(
+    List<LocalMediaFolder> targets, {
+    String? label,
+  }) async {
+    if (targets.isEmpty) return;
+    if (targets.any((folder) => folder.isRemote)) {
       KazumiDialog.showToast(message: '桌面端媒体库的文件请在桌面端管理');
       return;
     }
     final groupFileKeys = <String>{
-      for (final folder in group.folders)
+      for (final folder in targets)
         for (final file in folder.files) localMediaPathKey(file.path),
     };
     // 其他番剧在库内的文件：用于判断某个目录能否安全整树删除。
@@ -1535,13 +1631,13 @@ abstract class _MediaController with Store {
       } catch (e) {
         errors.add(e);
         KazumiLogger().w(
-          'MediaController: deleteAnimeGroup file failed',
+          'MediaController: deleteLocalFolders file failed',
           error: e,
         );
       }
     }
 
-    for (final folder in group.folders) {
+    for (final folder in targets) {
       final dirKey = localMediaPathKey(folder.path);
       final dir = Directory(folder.path);
       final canDeleteTree =
@@ -1557,7 +1653,7 @@ abstract class _MediaController with Store {
         } catch (e) {
           errors.add(e);
           KazumiLogger().w(
-            'MediaController: deleteAnimeGroup tree failed',
+            'MediaController: deleteLocalFolders tree failed',
             error: e,
           );
           // 整树删除失败回退为逐文件删除，尽量清掉能删的部分。
@@ -1590,7 +1686,7 @@ abstract class _MediaController with Store {
           await current.delete();
         } catch (e) {
           KazumiLogger().w(
-            'MediaController: deleteAnimeGroup prune ${current.path}',
+            'MediaController: deleteLocalFolders prune ${current.path}',
             error: e,
           );
           break;
@@ -1602,20 +1698,18 @@ abstract class _MediaController with Store {
       }
     }
 
-    // 清理持久化搜刮结果：组自身路径精确匹配 + 整树删除目录的前缀清理。
-    final groupPaths = <String>[
-      for (final folder in group.folders) folder.path,
-    ];
+    // 清理持久化搜刮结果：目标路径精确匹配 + 整树删除目录的前缀清理。
+    final targetPaths = <String>[for (final folder in targets) folder.path];
     final scrapeCountBefore = scrapeResults.length;
     final fileScrapeCountBefore = fileScrapeResults.length;
     scrapeResults.removeWhere(
       (key, _) =>
-          groupPaths.any((path) => localMediaPathsEqual(path, key)) ||
+          targetPaths.any((path) => localMediaPathsEqual(path, key)) ||
           deletedTreeKeys.any((dirKey) => isLocalMediaPathWithin(dirKey, key)),
     );
     fileScrapeResults.removeWhere(
       (key, _) =>
-          groupPaths.any((path) => localMediaPathsEqual(path, key)) ||
+          targetPaths.any((path) => localMediaPathsEqual(path, key)) ||
           deletedTreeKeys.any((dirKey) => isLocalMediaPathWithin(dirKey, key)),
     );
     if (scrapeResults.length != scrapeCountBefore) {
@@ -1632,15 +1726,19 @@ abstract class _MediaController with Store {
     // 未匹配文件夹的缩略图缓存条目（文件夹路径 → 缓存键）一并移除；
     // 缓存键含修改时间无法反查对应 JPEG，残留图片由缓存目录自行承载。
     thumbnails.removeWhere(
-      (path, _) => groupPaths.any((path2) => localMediaPathsEqual(path2, path)),
+      (path, _) =>
+          targetPaths.any((path2) => localMediaPathsEqual(path2, path)),
     );
 
     // 内存库即时移除，保证界面立刻刷新；随后的扫描与磁盘最终同步。
     _removeFilesFromLibrary(groupFileKeys);
 
-    final label = group.info?.displayName ?? '未匹配';
     if (errors.isEmpty) {
-      KazumiDialog.showToast(message: '已删除「$label」的本地文件');
+      KazumiDialog.showToast(
+        message: label != null
+            ? '已删除「$label」的本地文件'
+            : '已清理 ${targets.length} 个目录的本地文件',
+      );
     } else {
       KazumiDialog.showToast(message: '部分内容删除失败（${errors.length} 个），其余已完成');
     }

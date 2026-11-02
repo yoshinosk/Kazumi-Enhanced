@@ -873,17 +873,35 @@ class _StatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cleanupCount = controller.cleanupEntries.length;
+    final stats = controller.isGridMode
+        ? '共 ${controller.gridItems.length} 项 · ${controller.totalFiles} 个视频 · ${_formatBytes(controller.totalSize)}'
+        : '共 ${controller.library.length} 个文件夹，${controller.totalFiles} 个视频 · ${_formatBytes(controller.totalSize)}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
       child: Row(
         children: [
-          Text(
-            controller.isGridMode
-                ? '共 ${controller.gridItems.length} 项 · ${controller.totalFiles} 个视频 · ${_formatBytes(controller.totalSize)}'
-                : '共 ${controller.library.length} 个文件夹，${controller.totalFiles} 个视频 · ${_formatBytes(controller.totalSize)}',
-            style: Theme.of(context).textTheme.bodySmall,
+          Expanded(
+            child: Text(
+              stats,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
-          const Spacer(),
+          Tooltip(
+            message: '清理已看完的番剧',
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              onPressed: () => _showCleanupSheet(context, controller),
+              icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+              label: Text(cleanupCount > 0 ? '清理 $cleanupCount' : '清理'),
+            ),
+          ),
           if (controller.isScanning)
             const SizedBox(
               width: 16,
@@ -2759,6 +2777,286 @@ void _confirmDeleteGroup(
       ],
     ),
   );
+}
+
+// ============ 清理已看完 ============
+
+/// 打开「清理已看完」面板：列出已看完的番剧 / 文件夹，勾选后批量删除。
+///
+/// 条目在打开面板时取一次快照；删除完成后由控制器的重扫刷新媒体库。
+Future<void> _showCleanupSheet(
+  BuildContext context,
+  MediaController controller,
+) {
+  final entries = controller.cleanupEntries;
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      minChildSize: 0.3,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (context, scrollController) => _CleanupSheet(
+        controller: controller,
+        entries: entries,
+        scrollController: scrollController,
+      ),
+    ),
+  );
+}
+
+class _CleanupSheet extends StatefulWidget {
+  const _CleanupSheet({
+    required this.controller,
+    required this.entries,
+    required this.scrollController,
+  });
+
+  final MediaController controller;
+  final List<MediaCleanupEntry> entries;
+  final ScrollController scrollController;
+
+  @override
+  State<_CleanupSheet> createState() => _CleanupSheetState();
+}
+
+class _CleanupSheetState extends State<_CleanupSheet> {
+  /// 默认全选：看完的番剧通常就是要清理的目标，取消勾选即可保留。
+  late final Set<int> _selected = {
+    for (var i = 0; i < widget.entries.length; i++) i,
+  };
+
+  int get _selectedFiles => _selected.fold<int>(
+    0,
+    (sum, index) => sum + widget.entries[index].fileCount,
+  );
+
+  int get _selectedSize => _selected.fold<int>(
+    0,
+    (sum, index) => sum + widget.entries[index].totalSize,
+  );
+
+  List<MediaCleanupEntry> get _selectedEntries => [
+    for (final index in _selected.toList()..sort()) widget.entries[index],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final entries = widget.entries;
+    final allSelected = _selected.length == entries.length;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('清理已看完', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(
+                      entries.isEmpty
+                          ? '在一个文件夹里看完最后一集后，这里会出现可清理的条目'
+                          : '勾选要删除的番剧，视频、所在目录与弹幕等关联文件会一并清除',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (entries.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() {
+                    if (allSelected) {
+                      _selected.clear();
+                    } else {
+                      _selected.addAll([
+                        for (var i = 0; i < entries.length; i++) i,
+                      ]);
+                    }
+                  }),
+                  child: Text(allSelected ? '全不选' : '全选'),
+                ),
+            ],
+          ),
+        ),
+        if (entries.isEmpty)
+          const Expanded(
+            child: Center(
+              child: GeneralEmptyState(
+                icon: Icons.cleaning_services_outlined,
+                title: '暂无已看完的番剧\n继续观看后回来，就能一键清理整季文件',
+                compact: true,
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              controller: widget.scrollController,
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return CheckboxListTile(
+                  value: _selected.contains(index),
+                  onChanged: (value) => setState(() {
+                    if (value ?? false) {
+                      _selected.add(index);
+                    } else {
+                      _selected.remove(index);
+                    }
+                  }),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text(
+                    entry.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  subtitle: Text(
+                    _subtitleFor(entry),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                );
+              },
+            ),
+          ),
+        const Divider(height: 1),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 16, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _selected.isEmpty
+                        ? '未选择条目'
+                        : '已选 ${_selected.length} 项 · $_selectedFiles 个视频 · '
+                              '${formatBytes(_selectedSize)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
+                  ),
+                  onPressed: entries.isEmpty || _selected.isEmpty
+                      ? null
+                      : _confirmCleanup,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('删除所选'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _subtitleFor(MediaCleanupEntry entry) {
+    final parts = <String>[];
+    // 已匹配时标题是番剧名，附带目录名便于区分同番剧的多个季。
+    if (entry.info != null) {
+      parts.add(entry.folders.map((folder) => folder.name).join('、'));
+    }
+    parts
+      ..add('${entry.fileCount} 个视频')
+      ..add(formatBytes(entry.totalSize))
+      ..add('${formatTimeAgo(entry.finishedAt)}看完');
+    return parts.join(' · ');
+  }
+
+  Future<void> _confirmCleanup() async {
+    final selected = _selectedEntries;
+    if (selected.isEmpty) return;
+    final folders = [for (final entry in selected) ...entry.folders];
+    final files = selected.fold<int>(0, (sum, entry) => sum + entry.fileCount);
+    final size = selected.fold<int>(0, (sum, entry) => sum + entry.totalSize);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        return AlertDialog(
+          title: const Text('清理已看完的番剧'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('确定要删除以下 ${selected.length} 项吗？'),
+                const SizedBox(height: 8),
+                Text(
+                  '${folders.length} 个文件夹 · $files 个视频 · '
+                  '${formatBytes(size)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 4),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 140),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final entry in selected)
+                          Text(
+                            '· ${entry.title}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '视频及其所在目录（含弹幕等关联数据）将被一并删除，此操作不可恢复。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(
+                '取消',
+                style: TextStyle(color: theme.colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                '删除',
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    final controller = widget.controller;
+    Navigator.pop(context);
+    controller.deleteLocalFolders(folders);
+  }
 }
 
 // ============ 手动匹配对话框 ============
