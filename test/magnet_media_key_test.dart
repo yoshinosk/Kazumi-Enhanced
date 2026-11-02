@@ -1,9 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce/hive.dart';
+import 'package:kazumi/pages/magnet/magnet_controller.dart';
+import 'package:kazumi/services/magnet/magnet_download_service.dart';
 import 'package:kazumi/services/media/local_media_scanner.dart';
 import 'package:kazumi/services/media/local_media_models.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 /// 复现用户真实场景：单文件种子直接落在下载根目录（混多部番剧），
 /// 验证 scanFoldersForDir 产出的键与媒体库扫描一致，磁力同步可用它
@@ -11,14 +16,19 @@ import 'package:path/path.dart' as p;
 void main() {
   late Directory temp;
 
-  setUp(() {
-    temp = Directory.systemTemp.createTempSync('kazumi_scrape_key_test');
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    temp = await Directory.systemTemp.createTemp('kazumi_scrape_key_test');
+    PathProviderPlatform.instance = _FakePathProvider(temp);
+    Hive.init('${temp.path}/hive');
+    await GStorage.init();
   });
 
-  tearDown(() async {
-    try {
+  tearDownAll(() async {
+    await Hive.close();
+    if (await temp.exists()) {
       await temp.delete(recursive: true);
-    } catch (_) {}
+    }
   });
 
   test('混部根目录拆出的逻辑分组键与磁力任务文件可匹配', () async {
@@ -85,4 +95,65 @@ void main() {
         localMediaPathKey(kusuriya.path));
     expect(libraryKeys, contains(localMediaPathKey(kusuriya.path)));
   });
+
+  test('任务文件未落盘时搜刮键不回退目录本身', () {
+    final root = Directory(p.join(temp.path, 'mix'));
+    root.createSync(recursive: true);
+    // 混部目录里的其他番剧文件
+    File(p.join(root.path, '[ANi] Kaze Tachibana - 01 [1080P][Baha].mp4'))
+        .createSync();
+    const fileName =
+        '[LoliHouse] Tempal - Item no Chikara - 06 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv';
+    MagnetDownloadEntry buildEntry() => MagnetDownloadEntry(
+          title: '[LoliHouse] Tempal - Item no Chikara - 06',
+          sourceUri: 'magnet:?xt=urn:btih:test',
+          addedAt: DateTime.now(),
+          savePath: root.path,
+          fileName: fileName,
+          files: [
+            MagnetDownloadFile(
+              index: 0,
+              name: fileName,
+              path: fileName,
+              size: 1,
+              isStreamable: true,
+            ),
+          ],
+        );
+
+    final controller = MagnetController();
+
+    // 文件尚未落盘（引擎校验前的瞬时完成态）：不能解析出键就返回空串，
+    // 绝不能回退目录本身——否则任务被误标为已同步、媒体库永远未匹配。
+    expect(controller.scrapeKeyForEntryForTest(buildEntry()), isEmpty);
+
+    // 文件落盘后：键为标题分组逻辑路径（在目录内，但不是目录本身）。
+    File(p.join(root.path, fileName)).createSync();
+    final key = controller.scrapeKeyForEntryForTest(buildEntry());
+    expect(key, isNotEmpty);
+    expect(localMediaPathKey(key), isNot(localMediaPathKey(root.path)));
+    expect(p.isWithin(root.path, key), isTrue);
+
+    // 旧数据无文件清单：沿用旧行为回退真实落盘目录。
+    final legacy = MagnetDownloadEntry(
+      title: 'legacy',
+      sourceUri: 'magnet:?xt=urn:btih:legacy',
+      addedAt: DateTime.now(),
+      savePath: root.path,
+    );
+    expect(
+      localMediaPathKey(controller.scrapeKeyForEntryForTest(legacy)),
+      localMediaPathKey(root.path),
+    );
+  });
+}
+
+class _FakePathProvider extends PathProviderPlatform {
+  _FakePathProvider(this._root);
+
+  final Directory _root;
+
+  @override
+  Future<String?> getApplicationSupportPath() async =>
+      '${_root.path}/app_support';
 }

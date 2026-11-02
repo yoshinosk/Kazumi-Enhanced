@@ -997,6 +997,10 @@ abstract class _MagnetController with Store {
   /// 命中。仅处理本会话内新完成的任务 + 已落盘的历史任务，
   /// 且不覆盖媒体库已有的匹配结果。
   ///
+  /// 引擎可能在校验完成前先报一次 complete（文件尚未落盘）：此时解析不
+  /// 出正确的分组键，跳过本轮等待文件真正出现，避免把结果写进错误键后
+  /// 将任务误标为已同步（表现为磁力页已分组、媒体库永远未匹配）。
+  ///
   /// 未携带番剧信息的任务（订阅自动下载 / 手动添加）在完成后按设置
   /// 自动搜刮：命中且置信度达标时走自动入库，未命中标记「待确认」。
   void _syncCompletedToLibrary(List<MagnetDownloadEntry> entries) {
@@ -1032,8 +1036,18 @@ abstract class _MagnetController with Store {
         _syncScrapeInfo(entry, entry.importedPath);
         continue;
       }
+      // 文件尚未落盘时不定键：引擎偶发在校验完成前先报一次 complete
+      // （此时文件还是 0 字节 / 未创建），按目录扫描解析出的键会是错的；
+      // 跳过本轮，待文件真正落盘后由后续轮次补同步。
+      if (!_hasDownloadedFiles(entry)) continue;
       final folderPath = _scrapeKeyForEntry(entry);
-      if (folderPath.isEmpty) continue;
+      if (folderPath.isEmpty) {
+        // 文件在盘上却定位不到分组（目录暂时不可读等）：计入失败避免
+        // 每 2s 一轮的重复目录扫描，连续超限后本会话不再重试。
+        _scrapeSyncFailures[entry.taskId] =
+            (_scrapeSyncFailures[entry.taskId] ?? 0) + 1;
+        continue;
+      }
       // 自动入库需要同时满足：任务真正停止做种、用户开启开关、
       // 且搜刮置信度不低于阈值（详情页发起的任务置信度恒为 1.0）。
       // 边下边播在播的任务跳过入库：移动 / 重命名正被引擎流服务器
@@ -1179,6 +1193,9 @@ abstract class _MagnetController with Store {
   void _syncScrapeInfo(MagnetDownloadEntry entry, String folderPath) {
     final media = _mediaController;
     if (media == null) return;
+    // 空键 = 本轮未能定位媒体库分组（文件未落盘 / 目录不可读）：
+    // 直接跳过，绝不能把结果写到空路径上。
+    if (folderPath.isEmpty) return;
     if (media.getScrapeInfo(folderPath) != null) {
       _scrapeSyncedTaskIds.add(entry.taskId);
       _scrapeSyncFailures.remove(entry.taskId);
@@ -1191,6 +1208,8 @@ abstract class _MagnetController with Store {
 
   /// 带缓存的 [_scrapeKeyForEntry]：按文件清单指纹命中直接复用，
   /// 避免每 2s 一轮的 onChanged 对未同步任务重复执行目录分组扫描。
+  /// 空键（本轮未能定位分组）不缓存：目录暂时不可读等瞬态场景下，
+  /// 后续轮次重算才有机会恢复。
   String _scrapeKeyCachedFor(MagnetDownloadEntry entry) {
     final fingerprint = Object.hash(
       entry.savePath,
@@ -1201,7 +1220,7 @@ abstract class _MagnetController with Store {
     final cached = _scrapeKeyCache[entry.taskId];
     if (cached != null && cached.$1 == fingerprint) return cached.$2;
     final key = _scrapeKeyForEntry(entry);
-    _scrapeKeyCache[entry.taskId] = (fingerprint, key);
+    if (key.isNotEmpty) _scrapeKeyCache[entry.taskId] = (fingerprint, key);
     return key;
   }
 
@@ -1276,7 +1295,11 @@ abstract class _MagnetController with Store {
   /// 键即真实目录。用扫描器同款逻辑（`scanFoldersForDir`）求当前目录
   /// 会呈现的文件夹，再按文件路径归属匹配出本任务所在分组。
   ///
-  /// 拿不到任务文件清单 / 目录不可读时回退真实落盘目录（与旧行为一致）。
+  /// 拿不到任务文件清单（旧数据）时回退真实落盘目录。文件在清单里却
+  /// 定位不到分组（尚未落盘 / 目录不可读 / 已被移动）时返回空串，让
+  /// 调用方跳过本轮——绝不能回退目录本身：混合目录的真实路径不是任何
+  /// 媒体库分组键，写上去要么落进死键、要么命中其他番剧的旧结果，
+  /// 任务还会被误标为已同步，媒体库从此显示未匹配。
   String _scrapeKeyForEntry(MagnetDownloadEntry entry) {
     final dir = _actualDownloadDir(entry);
     if (dir.isEmpty) return '';
@@ -1294,8 +1317,13 @@ abstract class _MagnetController with Store {
         if (entryKeys.contains(localMediaPathKey(f.path))) return folder.path;
       }
     }
-    return dir;
+    return '';
   }
+
+  /// 仅供测试：暴露搜刮键解析，验证文件未落盘时不回退目录本身。
+  @visibleForTesting
+  String scrapeKeyForEntryForTest(MagnetDownloadEntry entry) =>
+      _scrapeKeyForEntry(entry);
 
   /// 任务是否有文件已实际落盘（供历史任务同步搜刮结果时判定）。
   ///
