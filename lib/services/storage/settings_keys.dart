@@ -74,6 +74,23 @@ class SettingsKeys {
     true,
     group: SettingGroup.update,
   );
+
+  /// 最近一次自动提示过的更新版本号。同一版本只自动提醒一次，避免用户
+  /// 暂时不更新时每次启动都被同一个弹窗打断；手动检查更新不受影响。
+  /// 归属 [SettingGroup.none]：这是运行时状态，不参与「恢复默认设置」。
+  static const lastPromptedUpdateVersion = SettingKey<String>(
+    'lastPromptedUpdateVersion',
+    '',
+    group: SettingGroup.none,
+  );
+
+  /// 最近一次自动检查更新的时间（毫秒时间戳，0 表示尚未检查）。
+  /// 用于限制启动时自动检查的频率，归属 [SettingGroup.none]。
+  static const lastUpdateCheckAt = SettingKey<int>(
+    'lastUpdateCheckAt',
+    0,
+    group: SettingGroup.none,
+  );
   static const alwaysOntop = SettingKey<bool>(
     _SettingBoxKey.alwaysOntop,
     false,
@@ -1239,6 +1256,8 @@ class SettingsKeys {
     searchEnhanceEnable,
     autoUpdate,
     checkPluginUpdateOnStartup,
+    lastPromptedUpdateVersion,
+    lastUpdateCheckAt,
     alwaysOntop,
     defaultPlaySpeed,
     defaultShortcutForwardPlaySpeed,

@@ -291,7 +291,9 @@ abstract class _PluginsController with Store {
     try {
       return needUpdate(localVersion, remoteVersion);
     } catch (_) {
-      return localVersion != remoteVersion;
+      // 版本号无法解析时按「不更新」处理：回退成字符串不等比较会把
+      // 格式差异误判为可更新，导致启动时反复提示规则更新。
+      return false;
     }
   }
 

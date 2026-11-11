@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
@@ -114,7 +115,14 @@ class AutoUpdater {
 
   List<InstallationType> _detectAvailableInstallationTypes() {
     if (Platform.isWindows) {
-      return [InstallationType.windowsMsix, InstallationType.windowsPortable];
+      // 默认类型跟随当前安装形态：MSIX 安装在 WindowsApps 目录下，便携版
+      // （zip）位于任意解压目录。否则 zip 用户会被默认推荐 MSIX，装成
+      // 另一份并存的副本，而不是替换原来的目录。
+      final isMsixInstall =
+          Platform.resolvedExecutable.toLowerCase().contains(r'\windowsapps\');
+      return isMsixInstall
+          ? [InstallationType.windowsMsix, InstallationType.windowsPortable]
+          : [InstallationType.windowsPortable, InstallationType.windowsMsix];
     }
     if (Platform.isLinux) {
       return [InstallationType.linuxDeb, InstallationType.linuxTar];
@@ -175,23 +183,63 @@ class AutoUpdater {
     return Map<String, dynamic>.from(data);
   }
 
+  /// 自动检查更新的最小间隔。启动即检查、且每次启动都检查会让用户在
+  /// 没有任何变化时反复看到同一个提示，这里限制为一天一次（手动检查
+  /// 不受限制）。
+  static const autoCheckInterval = Duration(hours: 24);
+
+  bool _autoCheckInFlight = false;
+
   Future<void> autoCheckForUpdates() async {
     final autoUpdate = GStorage.getSetting(SettingsKeys.autoUpdate);
     if (!autoUpdate) return;
+    if (_autoCheckInFlight) return;
+    if (!_shouldAutoCheckNow()) return;
 
+    _autoCheckInFlight = true;
     try {
       final updateInfo = await checkForUpdates();
-      if (updateInfo != null) {
-        _showUpdateDialog(updateInfo, isAutoCheck: true);
-      }
+      // 只有检查成功才记录时间；失败时保留旧值，下次启动仍可重试。
+      await GStorage.putSetting(
+        SettingsKeys.lastUpdateCheckAt,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+      if (updateInfo == null) return;
+
+      // 同一版本只自动提醒一次：用户点「稍后」后，不会每次启动都被
+      // 同一个弹窗打断；需要时仍可从「关于」页手动检查。
+      final promptedVersion =
+          GStorage.getSetting(SettingsKeys.lastPromptedUpdateVersion);
+      if (promptedVersion == updateInfo.version) return;
+      await GStorage.putSetting(
+        SettingsKeys.lastPromptedUpdateVersion,
+        updateInfo.version,
+      );
+
+      await _showUpdateDialog(updateInfo, isAutoCheck: true);
     } catch (e) {
       KazumiLogger().w('Update: auto check for updates failed', error: e);
+    } finally {
+      _autoCheckInFlight = false;
     }
+  }
+
+  bool _shouldAutoCheckNow() {
+    final lastCheckAt = GStorage.getSetting(SettingsKeys.lastUpdateCheckAt);
+    if (lastCheckAt <= 0) return true;
+    final elapsed = DateTime.now().millisecondsSinceEpoch - lastCheckAt;
+    // 时钟回拨（elapsed 为负）时也重新检查，避免长期不再自动检查。
+    return elapsed < 0 || elapsed >= autoCheckInterval.inMilliseconds;
   }
 
   Future<void> manualCheckForUpdates() async {
     try {
       final updateInfo = await checkForUpdates();
+      // 手动检查也刷新计时，避免紧接着的启动又自动查一次。
+      await GStorage.putSetting(
+        SettingsKeys.lastUpdateCheckAt,
+        DateTime.now().millisecondsSinceEpoch,
+      );
       if (updateInfo != null) {
         _showUpdateDialog(updateInfo, isAutoCheck: false);
       } else {
@@ -304,6 +352,12 @@ class AutoUpdater {
     }, onError: (e, stackTrace) {
       final errorMessage = getUpdateDownloadErrorMessage(e);
 
+      // 下载失败时清掉「已提示」记录，让下次启动仍能提醒用户重试。
+      unawaited(GStorage.putSetting(
+        SettingsKeys.lastPromptedUpdateVersion,
+        '',
+      ));
+
       KazumiDialog.show(
         builder: (context) {
           return AlertDialog(
@@ -330,6 +384,9 @@ class AutoUpdater {
   final _downloadDialogs = KazumiDialogController();
 
   void _showDownloadCompleteDialog(String filePath, UpdateInfo updateInfo) {
+    final isPortableZip = Platform.isWindows &&
+        updateInfo.recommendedInstallationType ==
+            InstallationType.windowsPortable;
     KazumiDialog.show(
       builder: (context) {
         return AlertDialog(
@@ -353,7 +410,9 @@ class AutoUpdater {
               ),
               const SizedBox(height: 12),
               Text(
-                '安装过程中应用将会退出',
+                isPortableZip
+                    ? '便携版需要解压后覆盖当前安装目录，应用不会自动退出'
+                    : '安装过程中应用将会退出',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.error,
                   fontSize: 12,
@@ -407,7 +466,7 @@ class AutoUpdater {
                 _installUpdate(
                     filePath, updateInfo.recommendedInstallationType);
               },
-              child: const Text('立即安装'),
+              child: Text(isPortableZip ? '解压更新包' : '立即安装'),
             ),
           ],
         );
@@ -432,27 +491,22 @@ class AutoUpdater {
   void _installUpdate(
       String filePath, InstallationType installationType) async {
     try {
+      if (Platform.isWindows &&
+          installationType != InstallationType.windowsMsix) {
+        await _extractPortableUpdate(filePath);
+        return;
+      }
+
       KazumiDialog.showToast(message: '准备安装更新，应用即将退出...');
 
       await Future.delayed(const Duration(seconds: 2));
 
       if (Platform.isWindows) {
-        if (installationType == InstallationType.windowsMsix) {
-          final Uri fileUri = Uri.file(filePath);
-          if (await canLaunchUrl(fileUri)) {
-            await launchUrl(fileUri);
-          } else {
-            throw 'Could not launch $fileUri';
-          }
+        final Uri fileUri = Uri.file(filePath);
+        if (await canLaunchUrl(fileUri)) {
+          await launchUrl(fileUri);
         } else {
-          // /select, 与路径必须作为两个独立参数、且不经 shell 传递：
-          // 合并参数或 runInShell 会把含空格的路径破坏，explorer 解析
-          // 失败后回退打开默认目录（「我的文档」）。
-          await Process.start(
-            'explorer.exe',
-            [filePath.replaceAll('/', r'\')],
-            runInShell: false,
-          );
+          throw 'Could not launch $fileUri';
         }
         await Future.delayed(const Duration(seconds: 1));
         exit(0);
@@ -472,6 +526,121 @@ class AutoUpdater {
       KazumiDialog.showToast(message: '启动安装程序失败: ${e.toString()}');
       KazumiLogger().e('Update: launch installer failed', error: e);
     }
+  }
+
+  /// 便携版（zip）无法在运行中替换自身：把更新包解压到临时目录，再引导
+  /// 用户关闭应用后覆盖当前安装目录。
+  ///
+  /// 此前只调用资源管理器打开 zip 就退出应用，用户容易以为更新已经完成，
+  /// 实际 `data/app.so` 仍是旧版，于是每次启动都会继续提示更新。
+  Future<void> _extractPortableUpdate(String zipPath) async {
+    final zipFile = File(zipPath);
+    if (!await zipFile.exists()) {
+      KazumiDialog.showToast(message: '更新文件不存在，请重新下载');
+      return;
+    }
+
+    KazumiDialog.showToast(message: '正在解压更新文件...');
+    final target = Directory(
+      '${zipFile.parent.path}${Platform.pathSeparator}'
+      'kazumi_update_${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    try {
+      if (!await target.exists()) {
+        await target.create(recursive: true);
+      }
+      // 路径通过环境变量传入 PowerShell，避免含空格或中文的路径在命令
+      // 字符串里被拆开。
+      final result = await Process.run(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          r'Expand-Archive -LiteralPath $env:KAZUMI_UPDATE_ZIP '
+              r'-DestinationPath $env:KAZUMI_UPDATE_DIR -Force',
+        ],
+        environment: {
+          'KAZUMI_UPDATE_ZIP': zipPath,
+          'KAZUMI_UPDATE_DIR': target.path,
+        },
+      );
+      if (result.exitCode != 0) {
+        final stderr = '${result.stderr}'.trim();
+        throw Exception(stderr.isEmpty ? '解压失败' : stderr);
+      }
+    } catch (e) {
+      KazumiLogger().e('Update: extract portable update failed', error: e);
+      KazumiDialog.show(
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('解压失败'),
+            content: Text('无法解压更新包：${e.toString()}'),
+            actions: [
+              TextButton(
+                onPressed: () => KazumiDialog.dismiss(context: context),
+                child: const Text('确定'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    KazumiDialog.show(
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('更新包已解压'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('请关闭本应用，然后把解压目录中的文件覆盖到当前安装目录，'
+                  '覆盖后重新启动即可完成更新。'),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '解压位置:',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      target.path,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(context: context),
+              child: const Text('知道了'),
+            ),
+            TextButton(
+              onPressed: () {
+                KazumiDialog.dismiss(context: context);
+                _revealInFileManager(target.path);
+              },
+              child: const Text('打开文件夹'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _revealInFileManager(String filePath) async {
