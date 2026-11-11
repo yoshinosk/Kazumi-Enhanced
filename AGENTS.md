@@ -19,6 +19,15 @@
 - `tools/`：本地构建与辅助脚本；`tools/_flutter_sdk/` 是 git-ignored 的本地 Flutter SDK（已加入 analyzer exclude，其中的报错无需关心）。
 - `UPSTREAM_SYNC.md`：上游同步进度台账（按批次、逐上游提交登记状态），同步上游前先阅读。
 
+## 文档产出约束（重要）
+
+- **禁止在仓库根目录新建分析 / 排查 / 审查 / 验证 / 方案类文档**（如 `*_ANALYSIS.md`、`*_VERIFY.md`、`*_REVIEW.md`、`*_REPORT.md`、临时方案稿等）。根目录只保留项目级文件：`README.md`、`CHANGELOG.md`、`AGENTS.md`、`UPSTREAM_SYNC.md`、`LICENSE`、`docs/`。
+- 需要落盘的分析结论按用途二选一：
+  - 需随仓库长期维护的正式文档 → `docs/`，文件名用小写短横线（如 `docs/lan-sync.md`）；
+  - 一次性分析、审查、验证记录 → `.docs/`（已 git-ignored，仅本地留档，如 `.docs/CODE_REVIEW_2026.8.14.md`），不要提交。
+- 根目录**不留** `.log` / `.txt` 等临时输出；构建、调试日志写到 `build_logs/`（已 git-ignored），用完即删。
+- 提交前自查根目录，发现此类残留文件应迁入上述目录或直接删除，不要提交到仓库。
+
 ## 常用命令
 
 - `flutter analyze`：提交前必须无新增 error / warning。
