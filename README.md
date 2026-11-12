@@ -5,7 +5,7 @@
 > [!IMPORTANT]
 > **本项目是 [Kazumi](https://github.com/Predidit/Kazumi) 的一个分支版本（fork），基于上游 [2.2.6](https://github.com/Predidit/Kazumi/releases/tag/2.2.6) 版本开发，上游功能已同步至 [2.4.4](https://github.com/Predidit/Kazumi/releases/tag/2.4.4)。**
 > 我们在上游项目的基础上进行**功能加强**，重点新增了**本地媒体库**与**磁力下载**能力，并增强了播放器、弹幕与追番统计体验。
-> 🎉 **v1.0.5 已发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
+> 🎉 **v1.0.6 已发布**，核心功能已基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 下载体验；项目仍在积极开发中，功能与规则请以[上游仓库](https://github.com/Predidit/Kazumi)为准。
 
 使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序——在上游 Kazumi 的基础上，重点增强本地媒体库、磁力下载（libtorrent）、播放器与追番统计能力。
 
@@ -137,7 +137,7 @@
 
 ## 开发状态
 
-本项目已发布 **v1.0.5**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
+本项目已发布 **v1.0.6**，核心功能基本可用，可前往 [Releases](https://github.com/yoshinosk/Kazumi-Enhanced/releases) 获取最新版本；项目仍在积极开发中，接口与行为仍可能在后续提交中发生变化。如需稳定可用的基础功能，请使用上游仓库 [Kazumi](https://github.com/Predidit/Kazumi) 的 Release。
 
 **上游同步进度**：fork 基线为上游 2.2.6，上游功能已按提交逐个内容移植同步至 **2.4.4**，各批次明细与跳过项见 [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md)。
 
