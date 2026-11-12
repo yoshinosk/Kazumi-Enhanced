@@ -5,10 +5,10 @@
 - 状态标记:⬜ 未开始 / 🔄 进行中 / ✅ 已完成 / ❌ 决定跳过(附原因)
 - 每完成一项,在对应条目标记 ✅ 并注明日期
 
-> **当前状态(2026.10.25)**:批次 1~9 已全部完成并合入 `dev`,上游功能同步至 **2.4.2**(目标 commit `7c708fa3`,批次 9 完成于 2026.10.25)。
-> - 工程构建于 Flutter 3.47.2(批次 5/6/7 连续跳过上游 3.47.3/3.47.5/3.47.6 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`dart analyze lib test` 为 0 error / 0 warning(40 条既有 info),`flutter test` 507 项全部通过。
+> **当前状态(2026.11.12)**:批次 1~10 已全部完成并合入 `dev`,上游功能同步至 **2.4.4**(目标 commit `4ca04009`,批次 10 完成于 2026.11.12)。
+> - 工程构建于 Flutter 3.47.2(批次 5/6/7/10 连续跳过上游 3.47.3/3.47.5/3.47.6/3.47.8/3.47.9/3.50.0 SDK 升级,pubspec 保持 flutter pin 3.47.2、Dart 下限 ≥3.10.0);`flutter analyze` 为 0 error / 0 warning(37 条既有 info),`flutter test` 553 项全部通过(2 项跳过)。
 > - 历史过程(批次 4 WIP 树 506 个编译错误修复、Flutter 3.47.2 升级、mobx 产物重生成、批次 5 冲突回植)见 CHANGELOG 2026.9.10 / 2026.9.13。
-> - 批次 6 起 GitHub 直连恢复,辅助同步用 blobless clone(见批次 6 备注);fetch_upstream.py(api.github.com contents 接口)仍可用于单文件场景。
+> - 批次 6 起使用 blobless clone 辅助同步;批次 10 期间 github.com 直连不可用,改用 `api.github.com` 拉取提交与逐文件 patch(拼接为 unified diff 后 `git apply` 试打)。
 > - 注意:本机代理会话内 flutter 工具时通时不通(安全层拦截 flutter/dart 对 SDK 缓存文件的写打开);2026.10.5 批次 6 期间 flutter pub get / test / analyze 已可在会话内直跑,若再次挂死请退回 `dart analyze lib test` + 本机终端验证。
 
 ## 批次 1:低冲突功能
@@ -276,6 +276,38 @@
 
 
 
+
+## 批次 10:上游 2.4.2 → 2.4.4(基线 7c708fa3 → 目标 4ca04009,共 22 个提交,完成于 2026.11.12)
+
+- 策略:沿用批次 6/8/9 的逐提交内容移植;上游提交经 `api.github.com` 取逐文件 patch 拼成 unified diff,先用 `git apply --check` 分类「零冲突 / 需回植」,再逐项应用。
+- ech_http vendor 由 0.2.3 同步至 0.2.4:接收原生错误改为返回值(ech_http.cpp/gzip_decoder.h)与 archive 4.6 短路径提取修复(prebuilt.dart);保留本地 CMake 分块方案;OHOS 相关的 hook/build.dart、dependencies.json 增量不携带;CA 快照与 0.2.3 一致(2026-10-20),补正 THIRD_PARTY_NOTICES 的日期与哈希。
+
+| 状态 | 上游提交 | 内容 | 完成日期 |
+|---|---|---|---|
+| ✅ | 7bd2c1a5 | feat(player): 定时关机自定义时间改用 M3 Expressive 滚动选择器(新增 `bean/widget/scroll_field.dart`,重写 `_CustomTimerDialog`) | 2026.11.12 |
+| ✅ | 4d04b470 + 5f9b3137 | perf/fix(collect): 分类切换不再整库重建与逐帧字体变化、去掉 Tab splash、滑动过程同步选中分类 | 2026.11.12 |
+| ✅ | 16735534 | fix(download): 排队/暂停恢复的剧集改为下载完成时缓存弹幕(移除 3 秒轮询等目录;保留 fork 的 `danDanEpisodeId` 侧车) | 2026.11.12 |
+| ✅ | 85c5106f | feat(plugin): 自定义规则仓库(新 `rules_repository_config.dart` + `ruleRepositoryUrl` 键 + 仓库地址弹窗 + `PluginCatalogLoader`/`PluginLoader` 携带 repository + 144 行测试) | 2026.11.12 |
+| ✅ | 443de476 + 9ca1b119 + 60288c33 | fix(dlna): `dlna_dart` 0.1.1、设备流单次订阅、过滤无 AVTransport 设备、投屏携带「番剧 · 集数」标题 | 2026.11.12 |
+| ✅ | 87543b51 | fix(tray): 退出前销毁托盘图标(新 `services/platform/tray_service.dart`、`app_exit.dart`;退出入口统一走 `AppExit.quit()`) | 2026.11.12 |
+| ✅ | 7d114fef | deps: bump media kit(83b7ca63 → cd75bcfe) | 2026.11.12 |
+| ✅ | 760f9fa0 | deps: ech http 0.2.3 → 0.2.4(vendor 同步,见上) | 2026.11.12 |
+| ❌ | 36198d6e / 1f79f2d1 / db988a40 | deps: bump flutter 3.47.8 / 3.47.9 / 3.50.0——本机保持 3.47.2(沿用批次 5 决定);3.50 附带的 android gradle / AndroidManifest 改动不单独接收 | - |
+| ❌ | 1d97e11c | fix(linux): libgcc_s 加载顺序——仅 Linux(平台约束) | - |
+| ❌ | 69ba855e / ce112ef8 | CI(iOS xcode 27 runner / jdk 21 + flutter_inappwebview lock 回退)——与本分支无关 | - |
+| ❌ | 7265274f / 4ca04009 | version 2.4.3 / 2.4.4——本分支版本号独立 | - |
+| ❌ | 57d13399 / 55e317e5 / 9ed884b1 | docs(PR 模板链接 / README 赞助署名)——与 fork 无关 | - |
+
+### 批次 10 冲突文件与 fork 回植点
+
+- `app_widget.dart`:保留 fork `_flushMagnetThenExit()`(退出前 `MagnetController.dispose()` 冲刷任务索引),其末尾 `exit(0)` 改为 `AppExit.quit()`;托盘初始化改调 `TrayService.initialize()`,删除本地 `_handleTray`。
+- `auto_updater.dart`:保留 fork 的 `launchUrl`/explorer.exe 选择与便携版解压链路;安装启动后的 `exit(0)` 改 `await AppExit.quit()`。
+- `player_item_panel.dart`:保留 fork「仅在线模式显示远程投屏」守卫(离线 / 本地媒体 / 边下边播不可达),接收上游 `castVideo(url, title:)`,并保留「规则带 Referer 时提示暂不支持」。
+- `download_controller.dart`:缓存调用移到 `_onDownloadProgress` 的 completed 分支、直接使用 episode 的下载目录;`_writeDanmakuToFile` 的 `danDanEpisodeId` 参数保留。
+- `collect_library_view.dart` / `collect_library_controls.dart`:仅 import 顺序差异(补 `foundation`);fork 的本地/缓存角标在 `collect_library_card.dart`,不受影响。
+- `plugins_controller.dart` / `rule_dialogs.dart` / `plugin_catalog_api.dart`:fork 的批量规则导入与更新逻辑保留,加载器签名改为携带 repository;失败页在自定义仓库下隐藏「切换加速」。
+- `init_page.dart` / `storage_error_page.dart` / `onboarding_page.dart`:退出按钮改 `AppExit.quit()`。
+- `third_party/ech_http`:0.2.4 的 `src/ech_http.cpp`、`src/gzip_decoder.h`、`lib/src/build_support/prebuilt.dart` 整文件接收;`hook/build.dart` 与 `dependencies.json` 仅含 OHOS 增量,不接收;`src/CMakeLists.txt` 保留本地分块实现(上游 0.2.4 仅新增 OHOS 链接选项与 smoke 目标)。
 
 ## 决定跳过(按项目平台约束)
 | 状态 | 上游提交 | 原因 |

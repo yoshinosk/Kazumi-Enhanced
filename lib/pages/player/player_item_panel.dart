@@ -1474,17 +1474,22 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       SubmenuButton(menuChildren: _abLoopItems, child: _menuLabel('AB 循环')),
       SubmenuButton(menuChildren: _finishModeItems, child: _menuLabel('播完动作')),
       SubmenuButton(menuChildren: _videoRotateItems, child: _menuLabel('画面旋转')),
-      // 远程投屏依赖 currentPlugin.referer（在线模式专属），
-      // 且本地路径 / 边下边播流地址对投屏目标不可达，非在线模式隐藏。
+      // 远程投屏需要可被投屏目标访问的在线地址；离线 / 本地媒体 / 边下边播
+      // 模式的线路对投屏目标不可达，非在线模式隐藏。
       if (videoPageController.isOnlinePlaybackMode)
         MenuItemButton(
           onPressed: () {
+            // 投屏目标自行拉流，无法携带规则 Referer。
+            if (playerController.referer.isNotEmpty) {
+              KazumiDialog.showToast(message: '暂不支持该规则');
+              return;
+            }
             final needRestart = playerController.playback.playing;
             playerController.pause();
             RemotePlay()
                 .castVideo(
                   playerController.videoUrl,
-                  videoPageController.currentPlugin.referer,
+                  title: playerController.mediaTitle,
                 )
                 .whenComplete(() {
                   if (mounted && needRestart) {

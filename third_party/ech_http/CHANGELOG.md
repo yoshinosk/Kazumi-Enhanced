@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.4] - 2026-11-12
+
+### Changed
+- Report expected native failures (invalid URLs, rejected curl options, and
+  invalid or truncated gzip bodies) through return values instead of C++
+  exceptions. Native error codes are unchanged.
+
+### Fixed
+- Extract the dependency SDK correctly with `archive` 4.6 when the cache path
+  contains a Windows 8.3 short name.
+
+---
+
 ## [0.2.3] - 2026-10-22
 
 ### Security
@@ -31,7 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > Vendored note: the OpenHarmony support and the loosened `code_assets`/`hooks`
 > constraints are not carried into this vendored copy (Android and Windows
-> only); the CMake metadata reset fix is carried via `cmake.dart`.
+> only); the CMake metadata reset fix is carried via `cmake.dart`. In 0.2.4 the
+> OHOS-specific hook/build.dart and dependencies.json changes are likewise not
+> carried; the native error-reporting changes and the short-name extraction fix
+> are.
 
 ---
 

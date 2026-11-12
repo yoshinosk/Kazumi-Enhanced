@@ -16,10 +16,10 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -31,11 +31,6 @@ constexpr size_t kHeaderLimit = 128 * 1024;
 std::once_flag curl_init_flag;
 CURLcode curl_init_result = CURLE_FAILED_INIT;
 std::string text(const char *s) { return s ? s : ""; }
-
-template <typename T> void set_option(CURL *easy, CURLoption option, T value) {
-  const auto result = curl_easy_setopt(easy, option, value);
-  if (result != CURLE_OK) throw std::runtime_error(curl_easy_strerror(result));
-}
 
 // BoringSSL deliberately ignores valid but unsupported ECHConfigs. A required
 // ECH client must reject those before it can emit a plaintext ClientHello.
@@ -213,7 +208,7 @@ struct RequestState {
   std::string header_block, failure;
   bool in_header_block = false, sent_headers = false;
   const bool auto_uncompress;
-  bool decode_gzip = false, decode_error = false;
+  bool decode_gzip = false;
   GzipDecoder decoder;
   int retries = 0, ech_accepted = 0;
   CURL *easy = nullptr;
@@ -266,6 +261,7 @@ struct RequestState {
     return true;
   }
   void run() noexcept;
+  CURLcode transfer() noexcept;
   bool deliver(const char *data, size_t length) {
     if (cancelled.load()) return false;
     if (Clock::now() >= deadline) { failure = "Response consumer exceeded request timeout"; return false; }
@@ -326,8 +322,6 @@ size_t receive_body(char *data, size_t size, size_t count, void *userdata) noexc
       }) ? length : 0;
     }
     return r->deliver(data, length) ? length : 0;
-  } catch (const std::runtime_error &e) {
-    r->decode_error = true; r->failure = e.what(); return 0;
   } catch (...) { return 0; }
 }
 int progress(void *userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept {
@@ -336,39 +330,47 @@ int progress(void *userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noe
 struct List {
   curl_slist *value = nullptr;
   ~List() { curl_slist_free_all(value); }
-  void append(const std::string &s) {
+  bool append(const std::string &s) {
     auto *next = curl_slist_append(value, s.c_str());
-    if (!next) throw std::bad_alloc();
-    value = next;
+    if (next) value = next;
+    return next != nullptr;
   }
 };
 
-void RequestState::run() noexcept {
+CURLcode RequestState::transfer() noexcept {
+  const auto fail = [this](const char *message) { failure = message; return CURLE_FAILED_INIT; };
   CURLcode result = CURLE_FAILED_INIT;
   std::string key;
   try {
     deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
     CURLU *u = curl_url();
-    if (!u) throw std::bad_alloc();
+    if (!u) return fail("Out of memory");
     struct UrlGuard { CURLU *p; ~UrlGuard() { curl_url_cleanup(p); } } guard{u};
-    if (curl_url_set(u, CURLUPART_URL, url.c_str(), 0) != CURLUE_OK) throw std::runtime_error("Invalid URL");
+    if (curl_url_set(u, CURLUPART_URL, url.c_str(), 0) != CURLUE_OK) return fail("Invalid URL");
     char *h = nullptr, *p = nullptr;
-    if (curl_url_get(u, CURLUPART_HOST, &h, 0) != CURLUE_OK) throw std::runtime_error("URL has no hostname");
+    if (curl_url_get(u, CURLUPART_HOST, &h, 0) != CURLUE_OK) return fail("URL has no hostname");
     hostname = h; curl_free(h);
     if (hostname.size() > 2 && hostname.front() == '[') hostname = hostname.substr(1, hostname.size() - 2);
-    if (curl_url_get(u, CURLUPART_PORT, &p, CURLU_DEFAULT_PORT) != CURLUE_OK) throw std::runtime_error("URL has no port");
+    if (curl_url_get(u, CURLUPART_PORT, &p, CURLU_DEFAULT_PORT) != CURLUE_OK) return fail("URL has no port");
     port = p; curl_free(p);
     key = hostname + ":" + port + "\n" + proxy + "\n" + config + "\n" + ip + "\n" + ca;
     easy = pool->take(key);
-    if (!easy) throw std::bad_alloc();
+    if (!easy) return fail("Out of memory");
     List request_headers, destinations;
-    for (const auto &line : lines(headers)) request_headers.append(line);
-    request_headers.append("Expect:");
+    bool appended = true;
+    for (const auto &line : lines(headers)) appended &= request_headers.append(line);
+    appended &= request_headers.append("Expect:");
     if (!ip.empty()) {
       const auto source = hostname.find(':') != std::string::npos ? "[" + hostname + "]" : hostname;
       const auto dest = ip.find(':') != std::string::npos ? "[" + ip + "]" : ip;
-      destinations.append(source + ":" + port + ":" + dest + ":" + port);
+      appended &= destinations.append(source + ":" + port + ":" + dest + ":" + port);
     }
+    if (!appended) return fail("Out of memory");
+    // Keeps the first failure; checked before each perform.
+    CURLcode option_error = CURLE_OK;
+    const auto set_option = [&option_error](CURL *handle, CURLoption option, auto value) {
+      if (option_error == CURLE_OK) option_error = curl_easy_setopt(handle, option, value);
+    };
     const std::string &roots = ca.empty() ? eh_ca_bundle() : ca;
     curl_blob root_blob{const_cast<char *>(roots.data()), roots.size(), CURL_BLOB_COPY};
     set_option(easy, CURLOPT_URL, url.c_str());
@@ -420,13 +422,11 @@ void RequestState::run() noexcept {
       std::string ech_option = config.empty() ? "false" : "ecl:" + config;
       set_option(easy, CURLOPT_ECH, ech_option.c_str());
       if (!config.empty()) set_option(easy, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
+      if (option_error != CURLE_OK) return fail(curl_easy_strerror(option_error));
       error[0] = 0;
       result = curl_easy_perform(easy);
-      if (decode_error) result = CURLE_BAD_CONTENT_ENCODING;
-      if (result == CURLE_OK && decode_gzip) {
-        try { decoder.finish(); }
-        catch (const std::runtime_error &e) { result = CURLE_BAD_CONTENT_ENCODING; failure = e.what(); }
-      }
+      if (result == CURLE_OK && decode_gzip) decoder.finish();
+      if (decoder.error()) { result = CURLE_BAD_CONTENT_ENCODING; failure = decoder.error(); }
       if (result == CURLE_ECH_REQUIRED && !sent_headers && tls->hostname_verified && !tls->retry_config.empty() && retries < 2) {
         config = tls->retry_config;
         set_option(easy, CURLOPT_FRESH_CONNECT, 1L);
@@ -438,6 +438,11 @@ void RequestState::run() noexcept {
     if (result == CURLE_OK) { pool->put(key, easy); easy = nullptr; }
   } catch (const std::exception &e) { result = CURLE_FAILED_INIT; failure = e.what(); }
     catch (...) { result = CURLE_FAILED_INIT; failure = "Unknown native exception"; }
+  return result;
+}
+
+void RequestState::run() noexcept {
+  const CURLcode result = transfer();
   if (easy) { curl_easy_cleanup(easy); easy = nullptr; }
   if (cancelled.load()) return;
   if (result != CURLE_OK && failure.empty()) failure = curl_easy_strerror(result);

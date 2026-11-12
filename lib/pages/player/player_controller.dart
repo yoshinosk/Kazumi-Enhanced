@@ -86,6 +86,8 @@ class PlayerController implements Disposable {
   late String referer;
   String? coverUrl;
   String videoUrl = '';
+  String _bangumiName = '';
+  String _episodeTitle = '';
   bool isLocalPlayback = false;
   bool isLanPlayback = false;
   Timer? hideVolumeUITimer;
@@ -167,6 +169,13 @@ class PlayerController implements Disposable {
     unawaited(GStorage.putSetting<double>(SettingsKeys.defaultVolume, clamped));
   }
 
+  /// Describes [videoUrl], not the episode the page may still be resolving.
+  String get mediaTitle {
+    final episode =
+        _episodeTitle.isNotEmpty ? _episodeTitle : '第 $currentEpisode 集';
+    return _bangumiName.isEmpty ? episode : '$_bangumiName · $episode';
+  }
+
   Future<bool> init(PlaybackInitParams params) async {
     if (_initializations.isClosed) {
       return false;
@@ -174,6 +183,8 @@ class PlayerController implements Disposable {
     final initialization = _initializations.begin();
 
     videoUrl = params.videoUrl;
+    _bangumiName = params.bangumiName ?? '';
+    _episodeTitle = params.episodeTitle.trim();
     isLocalPlayback = params.isLocalPlayback;
     isLanPlayback = params.isLanPlayback;
     bangumiId = params.bangumiId;

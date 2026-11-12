@@ -186,7 +186,11 @@ Future<String> preparePrebuilt(
     if (!await _matches(directory, hashes, metadataBytes)) {
       final staging = await Directory(cache).createTemp('.$key-');
       try {
-        await extractArchiveToDisk(archive, staging.path);
+        // archive 4.6 drops every entry when the output path is not canonical.
+        await extractArchiveToDisk(
+          archive,
+          await staging.resolveSymbolicLinks(),
+        );
         if (!await _matches(staging.path, hashes, metadataBytes)) {
           throw StateError('Dependency SDK file verification failed');
         }
